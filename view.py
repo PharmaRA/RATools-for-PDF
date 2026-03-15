@@ -1,9 +1,45 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QCheckBox, QStackedWidget, QScrollArea, QButtonGroup
+    QHeaderView, QCheckBox, QStackedWidget, QScrollArea, QButtonGroup,
+    QDialog, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal
+
+
+# ==========================================
+# 自定义组件：查看日志弹窗
+# ==========================================
+class LogDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("处理日志记录")
+        self.resize(650, 450)
+
+        layout = QVBoxLayout(self)
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
+
+        btn_layout = QHBoxLayout()
+        self.btn_export = QPushButton("⬇️ 导出为 CSV")
+        self.btn_export.setStyleSheet(
+            "background-color: #2563EB; color: white; border-radius: 6px; padding: 8px 16px; font-weight: bold; border: none;")
+        self.btn_close = QPushButton("关闭")
+        self.btn_close.setStyleSheet(
+            "background-color: #E5E7EB; color: #374151; border-radius: 6px; padding: 8px 16px; font-weight: bold; border: none;")
+        self.btn_close.clicked.connect(self.accept)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_export)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+
+        self.setStyleSheet("""
+            QDialog { background-color: #F9FAFB; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+            QTextEdit { background-color: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; color: #374151; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+        """)
 
 
 # ==========================================
@@ -311,11 +347,11 @@ class MainWindow(QMainWindow):
 
         self.btn_clear = QPushButton("🗑️ 清空列表")
         self.btn_clear.setObjectName("actionBtn")
-        btn_export = QPushButton("⬇️ 导出处理日志")
-        btn_export.setObjectName("actionBtn")
+        self.btn_log = QPushButton("📋 查看/导出日志")
+        self.btn_log.setObjectName("actionBtn")
 
         footer_layout.addWidget(self.btn_clear)
-        footer_layout.addWidget(btn_export)
+        footer_layout.addWidget(self.btn_log)
         footer_layout.addStretch()
 
         self.info_label = QLabel("共计 <b>0</b> 个文件")
