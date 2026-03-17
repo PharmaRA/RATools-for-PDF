@@ -10,76 +10,63 @@ class PDFProcessor:
     """
     专门负责 PDF 底层操作的处理引擎。
     结合了 PyMuPDF 和 Ghostscript 双擎驱动。
+    包含 6 大核心电子申报合规处理模块的完整实现。
     """
 
     @staticmethod
     def _get_gs_path():
-        """
-        核心机制：智能解析 Ghostscript 引擎的绝对路径。
-        兼容本地开发环境与 PyInstaller 打包后的临时解压环境 (_MEIPASS)。
-        """
+        """获取 Ghostscript 引擎路径 (兼容打包与本地环境)"""
         if getattr(sys, 'frozen', False):
-            # 如果是被 PyInstaller 打包后的运行环境
             base_path = sys._MEIPASS
         else:
-            # 如果是本地 Python 脚本开发环境
             base_path = os.path.abspath(".")
 
-        # 预设的引擎存放路径 (项目根目录/plugins/ghostscript/bin/gswin64c.exe)
         if sys.platform == "win32":
             gs_exe = os.path.join(base_path, "plugins", "ghostscript", "bin", "gswin64c.exe")
         elif sys.platform == "darwin":
-            gs_exe = os.path.join(base_path, "plugins", "ghostscript", "bin", "gs")  # macOS
+            gs_exe = os.path.join(base_path, "plugins", "ghostscript", "bin", "gs")
         else:
-            gs_exe = "gs"  # Linux 默认调取系统环境变量
+            gs_exe = "gs"
 
         return gs_exe
 
     @staticmethod
     def _embed_fonts_with_gs(input_pdf, output_pdf):
-        """
-        调用本地 Ghostscript 引擎，执行 PDF 深度重构与字体强制嵌入
-        """
+        """静默调用本地 GS 引擎，进行深度重构、版本降级与字体嵌入"""
         gs_exe = PDFProcessor._get_gs_path()
 
-        # 严格校验引擎文件是否存在 (Windows/Mac下)
         if sys.platform in ["win32", "darwin"] and not os.path.exists(gs_exe):
             raise FileNotFoundError(
                 f"未找到 Ghostscript 引擎！\n"
                 f"请确保已将引擎文件放置在: {gs_exe}"
             )
 
-        # 工业级的 GS 字体嵌入静默执行命令
+        # -dCompatibilityLevel=1.4 完成模块六中的 "PDF版本转换"
         cmd = [
             gs_exe,
-            "-sDEVICE=pdfwrite",  # 输出为 PDF 设备
-            "-dCompatibilityLevel=1.4",  # 兼容性设置
-            "-dPDFSETTINGS=/prepress",  # 使用高质量的“预印”预设，默认会强制嵌入所有字体
-            "-dNOPAUSE",  # 不暂停等待用户输入
-            "-dQUIET",  # 静默模式，不输出冗余日志
-            "-dBATCH",  # 处理完后自动退出
-            "-dSubsetFonts=true",  # 允许字体子集化（减小体积）
-            "-dEmbedAllFonts=true",  # 【核心】强制嵌入所有非标准字体
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-dPDFSETTINGS=/prepress",
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            "-dSubsetFonts=true",
+            "-dEmbedAllFonts=true",
             f"-sOutputFile={output_pdf}",
             input_pdf
         ]
 
-        # 隐藏 Windows 弹出的黑色 CMD 命令行窗口，实现完美的后台静默处理
         startupinfo = None
         if sys.platform == "win32":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        # 阻塞执行并捕获报错
         result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"Ghostscript 执行失败: {result.stderr}")
 
     @staticmethod
     def process_document(input_path, output_path, options):
-        """
-        处理：统一的文档处理入口（双擎流转）
-        """
         try:
             doc = fitz.open(input_path)
 
@@ -89,8 +76,12 @@ class PDFProcessor:
             changed = False
             catalog_xref = doc.pdf_catalog()
 
-            # 判断用户是否勾选了需要调用 GS 引擎的重构项
-            needs_gs_embed = "一键批量嵌入所有非标准字体（中文）" in options or "一键批量嵌入所有非标准字体（英文）" in options
+            # 【统一变量声明】：判断是否需要调用 GS 引擎
+            needs_gs_engine = any(opt in options for opt in [
+                "一键批量嵌入所有非标准字体（中文）",
+                "一键批量嵌入所有非标准字体（英文）",
+                "PDF版本转换"
+            ])
 
             # ====================================================
             # 模块一：初始视图与文档属性
@@ -106,10 +97,7 @@ class PDFProcessor:
             if "修改打开页面为第一页" in options or "修改放大率为默认" in options:
                 if doc.page_count > 0:
                     page0_xref = doc[0].xref
-                    if "修改放大率为默认" in options:
-                        action_str = f"[{page0_xref} 0 R /Fit]"
-                    else:
-                        action_str = f"[{page0_xref} 0 R /XYZ null null null]"
+                    action_str = f"[{page0_xref} 0 R /Fit]" if "修改放大率为默认" in options else f"[{page0_xref} 0 R /XYZ null null null]"
                     doc.xref_set_key(catalog_xref, "OpenAction", action_str)
                     changed = True
 
@@ -142,34 +130,250 @@ class PDFProcessor:
                         page.set_cropbox(target_rect)
                         changed = True
 
+            # ====================================================
+            # 模块三：书签管理与优化
+            # ====================================================
+            bookmark_options = [
+                "修改书签设置为承前缩放",
+                "修改书签的设置为在新窗口中打开",
+                "删除书签的外部链接",
+                "删除失效的书签（即未分配任何操作的书签）",
+                "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"
+            ]
+
+            if any(opt in options for opt in bookmark_options):
+                toc = doc.get_toc(simple=False)
+                if toc:
+                    new_toc = []
+                    toc_modified = False
+
+                    for item in toc:
+                        lvl, title, page, dest = item
+                        kind = dest.get("kind", fitz.LINK_NONE)
+                        delete_it = False
+
+                        if "删除书签的外部链接" in options and kind == fitz.LINK_URI:
+                            delete_it = True
+                        if "删除失效的书签（即未分配任何操作的书签）" in options:
+                            if kind == fitz.LINK_NONE or (
+                                    kind == fitz.LINK_GOTO and (page < 1 or page > doc.page_count)):
+                                delete_it = True
+                        if "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）" in options:
+                            if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                                delete_it = True
+
+                        if delete_it:
+                            toc_modified = True
+                            continue
+
+                        if "修改书签设置为承前缩放" in options and kind == fitz.LINK_GOTO:
+                            if dest.get("zoom") != 0.0:
+                                dest["zoom"] = 0.0
+                                toc_modified = True
+                        if "修改书签的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                            if not dest.get("newWindow"):
+                                dest["newWindow"] = True
+                                toc_modified = True
+
+                        if kind == fitz.LINK_GOTO:
+                            if page < 1:
+                                page = 1;
+                                toc_modified = True
+                            elif page > doc.page_count:
+                                page = doc.page_count;
+                                toc_modified = True
+
+                        new_toc.append([lvl, title, page, dest])
+
+                    if toc_modified:
+                        if new_toc:
+                            for i in range(len(new_toc)):
+                                if i == 0:
+                                    new_toc[i][0] = 1
+                                else:
+                                    prev_lvl = new_toc[i - 1][0]
+                                    if new_toc[i][0] > prev_lvl + 1:
+                                        new_toc[i][0] = prev_lvl + 1
+                        doc.set_toc(new_toc)
+                        changed = True
+
+            # ====================================================
+            # 模块四：超链接处理与外观控制
+            # ====================================================
+            hyperlink_options = [
+                "将外链接中的绝对路径转相对路径", "修改超链接的设置为承前缩放",
+                "修改超链接的设置为在新窗口中打开", "修改超链接文本至蓝色字体",
+                "修改超链接文本至黑色边框", "超链接有边框则蓝框黑字",
+                "超链接无边框且蓝字则蓝框黑字", "删除超链接边框"
+            ]
+
+            if any(opt in options for opt in hyperlink_options):
+                for page in doc:
+                    links = page.get_links()
+                    for link in links:
+                        link_modified = False
+                        kind = link.get("kind", fitz.LINK_NONE)
+
+                        if "将外链接中的绝对路径转相对路径" in options and kind == fitz.LINK_FILE:
+                            file_path = link.get("file", "")
+                            if file_path and (
+                                    ":" in file_path or file_path.startswith("/") or file_path.startswith("\\")):
+                                link["file"] = os.path.basename(file_path.replace("\\", "/"))
+                                link_modified = True
+                        if "修改超链接的设置为承前缩放" in options and kind == fitz.LINK_GOTO:
+                            if link.get("zoom") != 0.0:
+                                link["zoom"] = 0.0
+                                link_modified = True
+                        if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR,
+                                                                                      fitz.LINK_LAUNCH]:
+                            if not link.get("newWindow"):
+                                link["newWindow"] = True
+                                link_modified = True
+
+                        if link_modified:
+                            page.update_link(link)
+                            changed = True
+
+                    for annot in page.annots():
+                        if annot.type[0] == 8:  # 8 代表 LINK 注释
+                            annot_changed = False
+                            border = annot.border
+                            has_border = border and border.get("width", 0) > 0
+
+                            def is_text_blue(rect):
+                                text_dict = page.get_text("dict", clip=rect)
+                                for block in text_dict.get("blocks", []):
+                                    for line in block.get("lines", []):
+                                        for span in line.get("spans", []):
+                                            color = span.get("color", 0)
+                                            b = color & 0xFF
+                                            g = (color >> 8) & 0xFF
+                                            r = (color >> 16) & 0xFF
+                                            if b > r + 40 and b > g + 40:
+                                                return True
+                                return False
+
+                            if "删除超链接边框" in options:
+                                if has_border:
+                                    annot.set_border(width=0)
+                                    annot_changed = True
+                            elif "修改超链接文本至黑色边框" in options:
+                                annot.set_border(width=1.0)
+                                annot.set_colors(stroke=(0, 0, 0))
+                                annot_changed = True
+                            elif "修改超链接文本至蓝色字体" in options:
+                                annot.set_border(width=1.0)
+                                annot.set_colors(stroke=(0, 0, 1))
+                                annot_changed = True
+                            elif "超链接有边框则蓝框黑字" in options:
+                                if has_border:
+                                    annot.set_border(width=1.0)
+                                    annot.set_colors(stroke=(0, 0, 1))
+                                    annot_changed = True
+                            elif "超链接无边框且蓝字则蓝框黑字" in options:
+                                if not has_border and is_text_blue(annot.rect):
+                                    annot.set_border(width=1.0)
+                                    annot.set_colors(stroke=(0, 0, 1))
+                                    annot_changed = True
+
+                            if annot_changed:
+                                annot.update()
+                                changed = True
+
+            # ====================================================
+            # 模块五：违规内容清理与安全性 (Compliance Cleanup)
+            # ====================================================
+            cleanup_options = [
+                "删除外部链接（网页、邮箱地址）", "删除外部链接（网页、邮箱地址）且将文字改成黑色",
+                "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
+                "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",  # 注意UI里的选项名保持一致
+                "删除JavaScript, 3D内容或者动态内容", "删除文档附件",
+                "删除文档标签", "删除PDF注释", "删除文档说明", "删除所有链接和书签"
+            ]
+
+            if any(opt in options for opt in cleanup_options):
+                if "删除所有链接和书签" in options:
+                    doc.set_toc([])
+                    for page in doc:
+                        for link in page.get_links():
+                            page.delete_link(link)
+                    changed = True
+                else:
+                    for page in doc:
+                        for link in page.get_links():
+                            kind = link.get("kind", fitz.LINK_NONE)
+                            delete_it = False
+
+                            if kind == fitz.LINK_URI and (
+                                    "删除外部链接（网页、邮箱地址）" in options or "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options):
+                                delete_it = True
+                            if kind == fitz.LINK_NONE and (
+                                    "删除失效的链接（即未分配任何操作的链接）" in options or "删除无效的超链接，且将文字改成黑色" in options):
+                                delete_it = True
+                            if "删除未知动作的链接（即GoTo, GoToRi和Launch之外的链接）" in options and kind not in [
+                                fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                                delete_it = True
+
+                            if delete_it:
+                                page.delete_link(link)
+                                changed = True
+
+                if "删除PDF注释" in options:
+                    for page in doc:
+                        for annot in page.annots():
+                            if annot.type[0] != 8:
+                                page.delete_annot(annot)
+                                changed = True
+
+                if "删除JavaScript, 3D内容或者动态内容" in options:
+                    doc.xref_set_key(catalog_xref, "Names", "null")
+                    changed = True
+
+                if "删除文档附件" in options:
+                    if doc.embfile_count() > 0:
+                        for emb in doc.embfile_names():
+                            doc.embfile_del(emb)
+                        changed = True
+
+                if "删除文档标签" in options:
+                    doc.xref_set_key(catalog_xref, "StructTreeRoot", "null")
+                    doc.xref_set_key(catalog_xref, "MarkInfo", "null")
+                    changed = True
+
+                if "删除文档说明" in options:
+                    doc.set_metadata({})
+                    doc.xref_set_key(catalog_xref, "PieceInfo", "null")
+                    changed = True
+
+            # ====================================================
+            # 模块六：文件级优化与输出 (File Optimization)
+            # ====================================================
+            is_linear = "修改文件为快速网页浏览" in options
+
             # ================= 保存与双擎流转 =================
-            if changed:
-                if needs_gs_embed:
-                    # 如果被修改过，且需要嵌入字体：先保存为临时文件，再交接给 GS 引擎重构
+            if changed or is_linear:
+                if needs_gs_engine:
                     temp_pdf = str(output_path) + ".tmp.pdf"
-                    doc.save(temp_pdf, garbage=3, deflate=True)
+                    doc.save(temp_pdf, garbage=3, deflate=True, linear=is_linear)
                     doc.close()
                     try:
                         PDFProcessor._embed_fonts_with_gs(temp_pdf, output_path)
                     finally:
                         if os.path.exists(temp_pdf):
-                            os.remove(temp_pdf)  # 确保临时文件被清理
+                            os.remove(temp_pdf)
                 else:
-                    # 仅 PyMuPDF 处理
-                    doc.save(output_path, garbage=3, deflate=True)
+                    doc.save(output_path, garbage=3, deflate=True, linear=is_linear)
                     doc.close()
             else:
                 doc.close()
-                if needs_gs_embed:
-                    # 属性未变，但需要嵌入字体：直接将原文件交接给 GS 引擎
+                if needs_gs_engine:
                     PDFProcessor._embed_fonts_with_gs(input_path, output_path)
                 else:
-                    # 什么都没改，直接复制原文件
                     shutil.copy2(input_path, output_path)
 
             return True, "✅ 处理成功"
 
         except FileNotFoundError as e:
-            return False, f"⚠️ 缺少组件: {str(e)}"
+            return False, f"⚠️ 缺少引擎组件: {str(e)}"
         except Exception as e:
             return False, f"❌ 处理失败: {str(e)}"

@@ -1,5 +1,6 @@
 import os
 import csv
+import re
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -12,8 +13,6 @@ from pdf_processor import PDFProcessor
 # ==========================================
 class ProcessWorker(QThread):
     progress = Signal(int, str, str)  # 信号: 行号, 状态文本, 颜色名称
-
-    # 【修复重点】：避免使用 'finished' 命名，因为它会与 QThread 内置信号冲突导致执行两次
     all_completed = Signal()
 
     def __init__(self, file_list, options, output_dir):
@@ -23,19 +22,35 @@ class ProcessWorker(QThread):
         self.output_dir = output_dir
 
     def run(self):
+        # 预先判断是否需要执行 eCTD 级别的重命名规则
+        rename_ectd = "文件名修改为符合电子申报/eCTD要求的格式" in self.options
+
         for row_idx, file_path in enumerate(self.file_list):
             self.progress.emit(row_idx, "⏳ 处理中...", "blue")
 
             base_name = os.path.basename(file_path)
-            out_path = os.path.join(self.output_dir, f"{base_name}")
 
-            # 调用核心处理引擎 (已重命名为统一入口 process_document)
+            # 【模块六功能】：执行电子申报级别的文件重命名规范
+            if rename_ectd:
+                name, ext = os.path.splitext(base_name)
+                # 规范：全小写，替换空格为短横线，仅保留英文字母、数字、短横线和下划线
+                name = name.lower().replace(" ", "-")
+                name = re.sub(r'[^a-z0-9_-]', '', name)
+
+                # 防御性处理：如果全中文字符被清空了，给予一个默认安全命名
+                if not name:
+                    name = f"doc_{row_idx + 1:03d}"
+
+                base_name = f"{name}{ext.lower()}"
+
+            out_path = os.path.join(self.output_dir, base_name)
+
+            # 调用核心处理引擎
             success, msg = PDFProcessor.process_document(file_path, out_path, self.options)
 
             color = "green" if success else "red"
             self.progress.emit(row_idx, msg, color)
 
-        # 发送自定义完成信号
         self.all_completed.emit()
 
 
@@ -46,8 +61,8 @@ class MainController:
     def __init__(self, view):
         self.view = view
         self.loaded_files = set()
-        self.file_list = []  # 保持文件的加入顺序，对应表格里的 row_index
-        self.process_logs = []  # 存储处理日志记录
+        self.file_list = []
+        self.process_logs = []
         self.setup_connections()
 
     def setup_connections(self):
@@ -59,7 +74,6 @@ class MainController:
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
 
-        # 处理配置选项的互斥联动逻辑
         self.setup_exclusive_options()
 
     def setup_exclusive_options(self):
@@ -68,9 +82,7 @@ class MainController:
         cb_letter = self.view.all_checkboxes.get("一键批量将页面切换成Letter")
 
         if cb_a4 and cb_letter:
-            # 勾选 A4 时，自动取消勾选 Letter
             cb_a4.toggled.connect(lambda checked: cb_letter.setChecked(False) if checked else None)
-            # 勾选 Letter 时，自动取消勾选 A4
             cb_letter.toggled.connect(lambda checked: cb_a4.setChecked(False) if checked else None)
 
     def open_folder_dialog(self):
@@ -96,17 +108,23 @@ class MainController:
     def add_files_to_table(self, file_paths):
         for path_obj in file_paths:
             str_path = str(path_obj)
+
             if str_path in self.loaded_files:
+                if str_path in self.file_list:
+                    row_idx = self.file_list.index(str_path)
+                    self.view.update_table_row_status(row_idx, "等待中", Qt.darkGray)
                 continue
+
             self.loaded_files.add(str_path)
             self.file_list.append(str_path)
             self.view.add_table_row(f"📄 {path_obj.name}", str_path, "等待中")
+
         self.update_ui_counters()
 
     def clear_table(self):
         self.loaded_files.clear()
         self.file_list.clear()
-        self.process_logs.clear()  # 清空旧日志
+        self.process_logs.clear()
         self.view.clear_table_ui()
         self.update_ui_counters()
 
@@ -136,10 +154,7 @@ class MainController:
 
         self.worker = ProcessWorker(self.file_list, selected_options, str(out_dir))
         self.worker.progress.connect(self.update_processing_status)
-
-        # 绑定重命名后的信号
         self.worker.all_completed.connect(self.processing_finished)
-
         self.worker.start()
 
     def update_processing_status(self, row_idx, status_msg, color_name):
@@ -151,7 +166,6 @@ class MainController:
         qt_color = color_map.get(color_name, Qt.black)
         self.view.update_table_row_status(row_idx, status_msg, qt_color)
 
-        # 记录最终的处理日志（排除带有⏳的过度状态，只记录成功或失败）
         if not status_msg.startswith("⏳"):
             time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             file_path = self.file_list[row_idx]
@@ -177,11 +191,9 @@ class MainController:
         else:
             lines = []
             for log in self.process_logs:
-                # log: (时间, 文件名, 路径, 结果)
                 lines.append(f"[{log[0]}] {log[1]}\n   ↳ 路径: {log[2]}\n   ↳ 结果: {log[3]}")
             dialog.text_edit.setPlainText("\n\n".join(lines))
 
-            # 绑定导出 CSV 事件
             dialog.btn_export.clicked.connect(lambda: self.export_logs_to_csv(dialog))
 
         dialog.exec()
@@ -193,7 +205,6 @@ class MainController:
             return
 
         try:
-            # 使用 utf-8-sig 编码，确保 Excel 打开 CSV 文件时中文字符不会乱码
             with open(save_path, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
                 writer.writerow(["处理时间", "文件名", "文件路径", "处理结果"])
@@ -201,6 +212,6 @@ class MainController:
                     writer.writerow(log)
 
             QMessageBox.information(self.view, "成功", f"日志已成功导出至：\n{save_path}")
-            dialog.accept()  # 导出成功后自动关闭日志弹窗
+            dialog.accept()
         except Exception as e:
             QMessageBox.critical(self.view, "错误", f"导出日志失败：{str(e)}")
