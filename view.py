@@ -1,22 +1,167 @@
+import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QCheckBox, QStackedWidget, QScrollArea, QButtonGroup,
     QDialog, QTextEdit
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 
 
-class LogDialog(QDialog):
-    def __init__(self, parent=None):
+# ================== 自定义无边框拖拽对话框基类 ==================
+class FramelessDraggableDialog(QDialog):
+    def __init__(self, title_text, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("处理日志记录")
-        self.resize(650, 450)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)  # 支持圆角透明背景
 
-        layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        # 整体圆角和边框容器
+        self.bg_frame = QFrame()
+        self.bg_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #D1D5DB;
+                border-radius: 8px;
+            }
+        """)
+        bg_layout = QVBoxLayout(self.bg_frame)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(0)
+
+        # 顶部自定义标题栏
+        self.title_bar = QFrame()
+        self.title_bar.setFixedHeight(40)
+        self.title_bar.setStyleSheet("""
+            background-color: #F9FAFB; 
+            border: none;
+            border-bottom: 1px solid #E5E7EB; 
+            border-top-left-radius: 8px; 
+            border-top-right-radius: 8px;
+        """)
+        tb_layout = QHBoxLayout(self.title_bar)
+        tb_layout.setContentsMargins(16, 0, 8, 0)
+
+        title_lbl = QLabel(title_text)
+        title_lbl.setStyleSheet("font-weight: bold; color: #374151; font-size: 13px; border: none;")
+        tb_layout.addWidget(title_lbl)
+        tb_layout.addStretch()
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(30, 30)
+        btn_close.setStyleSheet("""
+            QPushButton { background: transparent; border: none; font-size: 14px; color: #9CA3AF; border-radius: 4px; } 
+            QPushButton:hover { background-color: #E5E7EB; color: #EF4444; }
+        """)
+        btn_close.clicked.connect(self.reject)
+        tb_layout.addWidget(btn_close)
+
+        bg_layout.addWidget(self.title_bar)
+
+        # 内部内容区
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("border: none; background-color: transparent;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(24, 24, 24, 24)
+        bg_layout.addWidget(self.content_widget)
+
+        self.main_layout.addWidget(self.bg_frame)
+
+    def mousePressEvent(self, event):
+        """接管鼠标按下事件：若点击在高度 40px 以内的标题栏区域，则记录起始坐标"""
+        if event.button() == Qt.LeftButton and event.position().y() < 40:
+            self.drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        """接管鼠标移动事件：应用拖拽偏移"""
+        if event.buttons() == Qt.LeftButton and hasattr(self, 'drag_pos'):
+            self.move(event.globalPosition().toPoint() - self.drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """接管释放事件：清除记录"""
+        if hasattr(self, 'drag_pos'):
+            del self.drag_pos
+            event.accept()
+
+
+# ================== 具体的业务对话框 ==================
+
+class CustomMessageBox(FramelessDraggableDialog):
+    """用于完全替代原生 QMessageBox 的统一提示框"""
+
+    def __init__(self, title_text, message_text, msg_type="info", show_cancel=False, parent=None):
+        super().__init__(title_text, parent)
+        self.resize(400, 200)
+
+        icons = {
+            "info": "ℹ️",
+            "success": "✅",
+            "warning": "⚠️",
+            "error": "❌",
+            "question": "❓"
+        }
+        icon_char = icons.get(msg_type, "ℹ️")
+
+        content_h_layout = QHBoxLayout()
+        content_h_layout.setSpacing(16)
+
+        icon_lbl = QLabel(icon_char)
+        icon_lbl.setStyleSheet("font-size: 36px; border: none; background: transparent;")
+        icon_lbl.setAlignment(Qt.AlignTop)
+
+        msg_lbl = QLabel(message_text)
+        msg_lbl.setWordWrap(True)
+        msg_lbl.setStyleSheet("color: #374151; font-size: 13px; border: none; line-height: 1.5;")
+        msg_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        content_h_layout.addWidget(icon_lbl)
+        content_h_layout.addWidget(msg_lbl, 1)
+
+        self.content_layout.addLayout(content_h_layout)
+        self.content_layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        btn_layout.addStretch()
+
+        if show_cancel:
+            self.btn_cancel = QPushButton("取 消")
+            self.btn_cancel.setFixedSize(80, 32)
+            self.btn_cancel.setStyleSheet(
+                "background-color: #F3F4F6; color: #374151; border-radius: 6px; font-weight: bold; border: 1px solid #D1D5DB;")
+            self.btn_cancel.clicked.connect(self.reject)
+            btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_ok = QPushButton("确 定")
+        self.btn_ok.setFixedSize(80, 32)
+        if msg_type in ["error", "warning"]:
+            # 危险操作显示为红色按钮
+            self.btn_ok.setStyleSheet(
+                "background-color: #EF4444; color: white; border-radius: 6px; font-weight: bold; border: none;")
+        else:
+            self.btn_ok.setStyleSheet(
+                "background-color: #2563EB; color: white; border-radius: 6px; font-weight: bold; border: none;")
+        self.btn_ok.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_ok)
+
+        self.content_layout.addLayout(btn_layout)
+
+
+class LogDialog(FramelessDraggableDialog):
+    def __init__(self, parent=None):
+        super().__init__("📝 处理日志记录", parent)
+        self.resize(650, 480)
+
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
-        layout.addWidget(self.text_edit)
+        self.text_edit.setStyleSheet(
+            "background-color: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; color: #374151; font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
+        self.content_layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
         self.btn_export = QPushButton("⬇️ 导出为 CSV")
@@ -30,14 +175,81 @@ class LogDialog(QDialog):
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_export)
         btn_layout.addWidget(self.btn_close)
-        layout.addLayout(btn_layout)
-
-        self.setStyleSheet("""
-            QDialog { background-color: #F9FAFB; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
-            QTextEdit { background-color: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; color: #374151; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
-        """)
+        self.content_layout.addLayout(btn_layout)
 
 
+class SettingsDialog(FramelessDraggableDialog):
+    def __init__(self, parent=None):
+        super().__init__("⚙️ 全局设置", parent)
+        self.resize(400, 240)
+
+        self.content_layout.setSpacing(16)
+
+        title = QLabel("常规选项")
+        title.setStyleSheet("color: #9CA3AF; font-size: 12px; font-weight: bold; border: none;")
+        self.content_layout.addWidget(title)
+
+        cb_style = """
+            QCheckBox { font-size: 13px; color: #374151; spacing: 8px; border: none; }
+            QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #D1D5DB; background: white; margin-top: 1px;}
+            QCheckBox::indicator:checked { background: #2563EB; border-color: #2563EB; }
+        """
+
+        self.cb_auto_open = QCheckBox("处理完成后自动打开输出文件夹")
+        self.cb_auto_open.setChecked(True)
+        self.cb_auto_open.setStyleSheet(cb_style)
+
+        self.cb_overwrite = QCheckBox("覆盖原始文件 (不推荐)")
+        self.cb_overwrite.setChecked(False)
+        self.cb_overwrite.setStyleSheet(cb_style.replace("color: #374151;", "color: #EF4444;"))
+
+        self.content_layout.addWidget(self.cb_auto_open)
+        self.content_layout.addWidget(self.cb_overwrite)
+        self.content_layout.addStretch()
+
+        btn_close = QPushButton("确 定")
+        btn_close.setFixedHeight(36)
+        btn_close.setStyleSheet(
+            "background-color: #2563EB; color: white; border-radius: 6px; font-weight: bold; border: none;")
+        btn_close.clicked.connect(self.accept)
+        self.content_layout.addWidget(btn_close)
+
+
+class AboutDialog(FramelessDraggableDialog):
+    def __init__(self, parent=None):
+        super().__init__("ℹ️ 关于软件", parent)
+        self.resize(450, 300)
+
+        about_text = QLabel(
+            "<h2 style='color:#1D4ED8; margin-bottom: 4px;'>RATools for PDF</h2>"
+            "<p style='color:#6B7280; font-size: 12px; margin-top: 0;'>Version 1.0.0</p>"
+            "<hr style='border: none; border-top: 1px solid #E5E7EB;'/>"
+            "<p style='color:#374151; line-height: 1.6; margin-top: 16px;'>"
+            "专为 RA (Regulatory Affairs) 递交开发的 PDF 批量处理引擎。<br><br>"
+            "支持 eCTD 格式标准要求，包含快速清理、非标准字体嵌入、书签链接校验等合规功能。"
+            "</p>"
+            "<br>"
+            "<p style='color:#9CA3AF; font-size: 11px;'>"
+            "基于 PySide6 & PyMuPDF 构建<br>"
+            "遵循 GNU GPL v3 开源协议"
+            "</p>"
+        )
+        about_text.setWordWrap(True)
+        about_text.setTextFormat(Qt.RichText)
+        about_text.setStyleSheet("border: none;")
+        self.content_layout.addWidget(about_text)
+
+        self.content_layout.addStretch()
+
+        btn_close = QPushButton("关 闭")
+        btn_close.setFixedHeight(36)
+        btn_close.setStyleSheet(
+            "background-color: #E5E7EB; color: #374151; border-radius: 6px; font-weight: bold; border: none;")
+        btn_close.clicked.connect(self.accept)
+        self.content_layout.addWidget(btn_close)
+
+
+# ================== 自定义组件与主窗口 ==================
 class DropZoneLabel(QLabel):
     files_dropped = Signal(list)
 
@@ -73,60 +285,120 @@ class MainWindow(QMainWindow):
 
         self.all_checkboxes = {}
 
+        # 预先初始化设置对话框
+        self.settings_dialog = SettingsDialog(self)
+        self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
+        self.all_checkboxes["覆盖原始文件 (不推荐)"] = self.settings_dialog.cb_overwrite
+
+        # 润色描述后的数据字典 (解耦 UI 文本与底层 ID)
         self.MODULES_DATA = [
             {
                 "icon": "👀",
                 "title": "初始视图与文档属性",
                 "options": [
-                    "修改打开页面为第一页", "修改页面布局为默认",
-                    "修改放大率为默认", "修改导览标签",
-                    "PDF若存在书签则收起", "根据文件名在PDF文档属性中自动添加文件标题"
+                    {"id": "修改打开页面为第一页", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
+                    {"id": "修改页面布局为默认", "title": "重置页面布局",
+                     "desc": "将页面布局恢复为单页连续显示的默认状态"},
+                    {"id": "修改放大率为默认", "title": "重置缩放比例",
+                     "desc": "将打开时的缩放比例设置为适合页面或默认值"},
+                    {"id": "修改导览标签", "title": "启用书签导航",
+                     "desc": "强制 PDF 打开时自动展开左侧的书签/导览面板"},
+                    {"id": "PDF若存在书签则收起", "title": "折叠所有书签",
+                     "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
+                    {"id": "根据文件名在PDF文档属性中自动添加文件标题", "title": "同步文件名为标题",
+                     "desc": "自动将当前 PDF 的文件名写入文档属性的“标题”元数据中"}
                 ]
             },
             {
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    "一键批量将页面切换成A4", "一键批量将页面切换成Letter",
-                    "一键批量嵌入所有非标准字体（中文）", "一键批量嵌入所有非标准字体（英文）"
+                    {"id": "一键批量将页面切换成A4", "title": "强制转为 A4 尺寸",
+                     "desc": "统一将所有页面裁切/调整为标准的 A4 纸张尺寸"},
+                    {"id": "一键批量将页面切换成Letter", "title": "强制转为 Letter 尺寸",
+                     "desc": "统一将所有页面裁切/调整为标准的 Letter (信纸) 尺寸"},
+                    {"id": "一键批量嵌入所有非标准字体（中文）", "title": "嵌入全部中文字体",
+                     "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准中文字体完全嵌入"},
+                    {"id": "一键批量嵌入所有非标准字体（英文）", "title": "嵌入全部英文字体",
+                     "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准英文字体完全嵌入"}
                 ]
             },
             {
                 "icon": "🔖",
                 "title": "书签管理与优化",
                 "options": [
-                    "修改书签设置为承前缩放", "修改书签的设置为在新窗口中打开",
-                    "删除书签的外部链接", "删除失效的书签（即未分配任何操作的书签）",
-                    "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"
+                    {"id": "修改书签设置为承前缩放", "title": "书签设为承前缩放",
+                     "desc": "点击书签跳转时，保持当前页面的缩放比例不变 (Inherit Zoom)"},
+                    {"id": "修改书签的设置为在新窗口中打开", "title": "书签动作：新窗口打开",
+                     "desc": "配置书签的链接跳转默认在新的 PDF 浏览器窗口中打开"},
+                    {"id": "删除书签的外部链接", "title": "清理书签外部链接",
+                     "desc": "移除书签中指向网页或外部文件的 URI 动作"},
+                    {"id": "删除失效的书签（即未分配任何操作的书签）", "title": "清理失效书签",
+                     "desc": "自动检测并删除未指向任何有效页面或动作的空书签"},
+                    {"id": "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）", "title": "清理非标准动作书签",
+                     "desc": "仅保留内部跳转、外部文档和调用命令，删除其它未知动作"}
                 ]
             },
             {
                 "icon": "🔗",
                 "title": "超链接处理与外观控制",
                 "options": [
-                    "将外链接中的绝对路径转相对路径", "修改超链接的设置为承前缩放",
-                    "修改超链接的设置为在新窗口中打开", "修改超链接文本至蓝色字体",
-                    "修改超链接文本至黑色边框", "超链接有边框则蓝框黑字",
-                    "超链接无边框且蓝字则蓝框黑字", "删除超链接边框"
+                    {"id": "将外链接中的绝对路径转相对路径", "title": "绝对路径转相对路径",
+                     "desc": "将外部文件链接的绝对路径 (如 C:\\...) 自动转换为相对路径"},
+                    {"id": "修改超链接的设置为承前缩放", "title": "超链接设为承前缩放",
+                     "desc": "点击链接跳转时，保持当前屏幕的视图缩放比例 (Inherit Zoom)"},
+                    {"id": "修改超链接的设置为在新窗口中打开", "title": "链接动作：新窗口打开",
+                     "desc": "强制外部文档或网页链接在独立的新窗口中打开"},
+                    {"id": "修改超链接文本至蓝色字体", "title": "链接文本设为蓝色",
+                     "desc": "自动识别超链接区域并将其文本颜色变更为标准蓝色"},
+                    {"id": "修改超链接文本至黑色边框", "title": "链接区域加黑框",
+                     "desc": "为所有的有效超链接区域添加 1px 的黑色实线边框"},
+                    {"id": "超链接有边框则蓝框黑字", "title": "标准化有框链接",
+                     "desc": "若超链接已存在边框，则统一转为蓝框黑字样式"},
+                    {"id": "超链接无边框且蓝字则蓝框黑字", "title": "标准化无框蓝字链接",
+                     "desc": "若超链接无边框且文字为蓝色，则统一转为蓝框黑字样式"},
+                    {"id": "删除超链接边框", "title": "清除所有链接边框",
+                     "desc": "移除文档内所有超链接的可见边框，保持页面排版干净"}
                 ]
             },
             {
                 "icon": "🛡️",
                 "title": "违规内容清理与安全性",
                 "options": [
-                    "删除外部链接（网页、邮箱地址）", "删除外部链接（网页、邮箱地址）且将文字改成黑色",
-                    "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
-                    "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",
-                    "删除JavaScript, 3D内容或者动态内容", "删除文档附件",
-                    "删除文档标签", "删除PDF注释", "删除文档说明", "删除所有链接和书签"
+                    {"id": "删除外部链接（网页、邮箱地址）", "title": "删除外部 URI 链接",
+                     "desc": "清理指向外部网站、邮箱等所有 URI 类型的超链接"},
+                    {"id": "删除外部链接（网页、邮箱地址）且将文字改成黑色", "title": "删除外部 URI 链接并去色",
+                     "desc": "清理 URI 链接的同时，将该链接对应的文本颜色重置为黑色"},
+                    {"id": "删除失效的链接（即未分配任何操作的链接）", "title": "清理失效超链接",
+                     "desc": "自动扫描并移除所有未分配有效动作 (Action) 的空链接"},
+                    {"id": "删除无效的超链接，且将文字改成黑色", "title": "清理失效链接并去色",
+                     "desc": "移除空链接，并将该区域相关的文本颜色恢复为普通黑色"},
+                    {"id": "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",
+                     "title": "清理非标准动作链接", "desc": "仅保留内部/外部跳转和执行动作，移除其它所有的特殊行为"},
+                    {"id": "删除JavaScript, 3D内容或者动态内容", "title": "彻底清除动态内容 (JS/3D)",
+                     "desc": "删除文档内所有的 JavaScript 脚本、3D 模型等交互元素以满足安全合规"},
+                    {"id": "删除文档附件", "title": "移除所有内嵌附件",
+                     "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
+                    {"id": "删除文档标签", "title": "移除结构化标签",
+                     "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
+                    {"id": "删除PDF注释", "title": "清理所有高亮/批注",
+                     "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
+                    {"id": "删除文档说明", "title": "清空文档元数据",
+                     "desc": "移除除标题外所有的作者、创建时间等 PieceInfo 和 Metadata"},
+                    {"id": "删除所有链接和书签", "title": "暴力净化 (移除全部链接和书签)",
+                     "desc": "一键清除文档内所有的导航书签与页面超链接"}
                 ]
             },
             {
                 "icon": "📦",
                 "title": "文件级优化与输出",
                 "options": [
-                    "PDF版本转换", "修改文件为快速网页浏览",
-                    "文件名修改为符合电子申报/eCTD要求的格式"
+                    {"id": "PDF版本转换", "title": "PDF 兼容性降级转换",
+                     "desc": "通过引擎重构处理，提升旧版本电子阅读器的兼容性"},
+                    {"id": "修改文件为快速网页浏览", "title": "启用线性化 (快速网页浏览)",
+                     "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
+                    {"id": "文件名修改为符合电子申报/eCTD要求的格式", "title": "eCTD 文件名合规格式化",
+                     "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]
             }
         ]
@@ -138,15 +410,28 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
         header.setFixedHeight(56)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(24, 0, 24, 0)
-        title_label = QLabel("📄 RATools for PDF")
-        title_label.setObjectName("titleLabel")
-        header_layout.addWidget(title_label)
+
+        self.btn_top_settings = QPushButton("⚙️ 全局设置")
+        self.btn_top_settings.setObjectName("topBtn")
+        self.btn_top_settings.clicked.connect(self.settings_dialog.show)
+
+        self.btn_top_about = QPushButton("ℹ️ 关于")
+        self.btn_top_about.setObjectName("topBtn")
+        self.btn_top_about.clicked.connect(self.show_about_dialog)
+
+        # 按钮直接从左侧开始排列
+        header_layout.addWidget(self.btn_top_settings)
+        header_layout.addWidget(self.btn_top_about)
+
+        # 将自适应伸缩放到最右侧，挤压按钮靠左
         header_layout.addStretch()
+
         main_layout.addWidget(header)
 
         middle_container = QFrame()
@@ -154,6 +439,7 @@ class MainWindow(QMainWindow):
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.setSpacing(0)
 
+        # ================= 左侧导航栏 =================
         left_sidebar = QFrame()
         left_sidebar.setObjectName("leftSidebar")
         left_sidebar.setFixedWidth(256)
@@ -178,12 +464,9 @@ class MainWindow(QMainWindow):
 
         self.nav_buttons[0].setChecked(True)
         left_layout.addStretch()
-
-        settings_btn = QPushButton("⚙️  全局设置")
-        settings_btn.setObjectName("navBtn")
-        left_layout.addWidget(settings_btn)
         middle_layout.addWidget(left_sidebar)
 
+        # ================= 中间主要视图 =================
         main_view = QFrame()
         main_view.setObjectName("mainView")
         main_view_layout = QVBoxLayout(main_view)
@@ -231,6 +514,7 @@ class MainWindow(QMainWindow):
 
         middle_layout.addWidget(main_view)
 
+        # ================= 右侧设置区 =================
         right_sidebar = QFrame()
         right_sidebar.setObjectName("rightSidebar")
         right_sidebar.setFixedWidth(320)
@@ -276,14 +560,15 @@ class MainWindow(QMainWindow):
 
             page_layout.addWidget(self._create_section_label("处理规则选项"))
             for opt in mod["options"]:
-                page_layout.addWidget(self._create_checkbox(opt, "", False))
+                # 注意：这里传入的是解耦后的 opt["id"], opt["title"], opt["desc"]
+                page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
             # 书签模块注入 IO 按钮
             if mod["title"] == "书签管理与优化":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("高级数据交换"))
                 btn_layout = QVBoxLayout()
-                btn_layout.setSpacing(8)  # 设置纵向排列的间距
+                btn_layout.setSpacing(8)
                 btn_layout.addWidget(self.btn_export_bookmarks)
                 btn_layout.addWidget(self.btn_import_bookmarks)
                 page_layout.addLayout(btn_layout)
@@ -293,7 +578,7 @@ class MainWindow(QMainWindow):
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("高级数据交换"))
                 btn_layout = QVBoxLayout()
-                btn_layout.setSpacing(8)  # 设置纵向排列的间距
+                btn_layout.setSpacing(8)
                 btn_layout.addWidget(self.btn_export_links)
                 btn_layout.addWidget(self.btn_import_links)
                 page_layout.addLayout(btn_layout)
@@ -307,6 +592,7 @@ class MainWindow(QMainWindow):
         middle_layout.addWidget(right_sidebar)
         main_layout.addWidget(middle_container)
 
+        # ================= 底部操作栏 =================
         footer = QFrame()
         footer.setObjectName("footer")
         footer.setFixedHeight(64)
@@ -332,15 +618,85 @@ class MainWindow(QMainWindow):
         self.nav_btn_group.idClicked.connect(self.switch_settings_page)
         self.apply_stylesheet()
 
+        # ================= 初始化 QSettings 持久化存储 =================
+        # 生成在当前运行目录下的 settings.ini 文件中
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        ini_path = os.path.join(current_dir, "settings.ini")
+        self.app_settings = QSettings(ini_path, QSettings.IniFormat)
+
+        # 建立底层中文 ID 到纯英文 INI Key 的映射表，避免中文被转义
+        self.settings_key_map = {
+            "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
+            "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
+        }
+        for i, mod in enumerate(self.MODULES_DATA):
+            for j, opt in enumerate(mod["options"]):
+                # 按照结构自动生成漂亮的英文Key: 如 Modules/Mod_0_Opt_1
+                self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
+
+        self.load_all_settings()
+
+    # ================= 弹窗替换调用接口 =================
+
+    def show_info_message(self, title, message):
+        """替代 QMessageBox.information"""
+        CustomMessageBox(title, message, msg_type="info", parent=self).exec()
+
+    def show_success_message(self, title, message):
+        """成功提示"""
+        CustomMessageBox(title, message, msg_type="success", parent=self).exec()
+
+    def show_warning_message(self, title, message):
+        """替代 QMessageBox.warning"""
+        CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
+
+    def show_error_message(self, title, message):
+        """替代 QMessageBox.critical"""
+        CustomMessageBox(title, message, msg_type="error", parent=self).exec()
+
+    def show_confirm_message(self, title, message):
+        """替代 QMessageBox.question，返回 True 或 False"""
+        dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
+        return dlg.exec() == QDialog.Accepted
+
+    # ================================================
+
+    def load_all_settings(self):
+        """读取 QSettings 并恢复所有的复选框状态"""
+        for opt_id, cb in self.all_checkboxes.items():
+            key = self.settings_key_map.get(opt_id)
+            if key:
+                val = self.app_settings.value(key)
+                if val is not None:
+                    # 兼容不同系统 QSettings 对 bool 返回 'true' 字符串的问题
+                    is_checked = str(val).lower() == 'true'
+                    cb.setChecked(is_checked)
+
+    def closeEvent(self, event):
+        """主窗口关闭前，拦截并利用英文映射表保存状态"""
+        for opt_id, cb in self.all_checkboxes.items():
+            key = self.settings_key_map.get(opt_id)
+            if key:
+                self.app_settings.setValue(key, cb.isChecked())
+        super().closeEvent(event)
+
+    def show_about_dialog(self):
+        if not hasattr(self, 'about_dialog'):
+            self.about_dialog = AboutDialog(self)
+        self.about_dialog.show()
+        self.about_dialog.raise_()
+        self.about_dialog.activateWindow()
+
     def switch_settings_page(self, index):
         self.settings_stack.setCurrentIndex(index)
         self.rh_title.setText(f"{self.MODULES_DATA[index]['title']} 设置")
 
     def get_selected_options(self):
+        # 注意：现在的字典 key 是底层需要的原始 ID
         selected = []
-        for title, cb in self.all_checkboxes.items():
+        for opt_id, cb in self.all_checkboxes.items():
             if cb.isChecked():
-                selected.append(title)
+                selected.append(opt_id)
         return selected
 
     def add_table_row(self, name, path, status):
@@ -374,29 +730,36 @@ class MainWindow(QMainWindow):
         lbl.setStyleSheet("color: #9CA3AF; font-size: 12px; font-weight: bold; margin-bottom: 4px;")
         return lbl
 
-    def _create_checkbox(self, title, desc, checked):
+    def _create_checkbox(self, opt_id, title, desc, checked):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
+
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
+
         cb = QCheckBox()
         cb.setChecked(checked)
-        self.all_checkboxes[title] = cb
+        # 以底层 id 绑定复选框实例
+        self.all_checkboxes[opt_id] = cb
+
         title_lbl = QLabel(title)
         title_lbl.setWordWrap(True)
         title_lbl.setStyleSheet("font-weight: 500; color: #374151;")
         title_lbl.mousePressEvent = lambda event, checkbox=cb: checkbox.toggle()
+
         top_layout.addWidget(cb, 0, Qt.AlignTop)
         top_layout.addWidget(title_lbl, 1)
         layout.addLayout(top_layout)
+
         if desc:
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("color: #6B7280; font-size: 11px; margin-left: 24px;")
             layout.addWidget(desc_lbl)
+
         return container
 
     def apply_stylesheet(self):
@@ -407,7 +770,11 @@ class MainWindow(QMainWindow):
         #leftSidebar { border-right: 1px solid #E5E7EB; }
         #rightSidebar { border-left: 1px solid #E5E7EB; }
         #footer { border-top: 1px solid #E5E7EB; }
-        #titleLabel { font-size: 18px; font-weight: bold; color: #111827; }
+
+        /* 顶部按钮样式 */
+        #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
+        #topBtn:hover { background-color: #F3F4F6; color: #111827; }
+
         #navTitle { color: #9CA3AF; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-bottom: 4px; }
         #navBtn { text-align: left; padding: 10px 12px; border: none; border-radius: 8px; color: #4B5563; font-weight: 500; background-color: transparent; }
         #navBtn:hover { background-color: #F3F4F6; }
