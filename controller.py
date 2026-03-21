@@ -20,11 +20,12 @@ class ProcessWorker(QThread):
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
-    def __init__(self, files, options, output_dir, overwrite_original=False):
+    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False):
         super().__init__()
         self.files = files
         self.options = options
         self.output_dir = output_dir
+        self.common_base = common_base
         self.overwrite_original = overwrite_original
 
     def run(self):
@@ -44,13 +45,27 @@ class ProcessWorker(QThread):
                     if not name: name = f"doc_{i + 1:03d}"
                     base_name = f"{name}{ext.lower()}"
 
-                # 决定输出路径
+                # 决定输出路径 (支持保留原有文件夹层级结构)
                 if self.overwrite_original:
                     out_path = file_path + ".tmp_overwrite.pdf"
                 else:
-                    out_path = os.path.join(self.output_dir, base_name)
+                    if self.common_base:
+                        # 计算当前文件相对于公共根目录的相对路径
+                        file_dir = os.path.dirname(os.path.abspath(file_path))
+                        rel_dir = os.path.relpath(file_dir, self.common_base)
+                        if rel_dir == '.':
+                            target_dir = self.output_dir
+                        else:
+                            target_dir = os.path.join(self.output_dir, rel_dir)
+                    else:
+                        # 降级方案：如果不在同盘符，直接扁平化输出到目标文件夹
+                        target_dir = self.output_dir
 
-                # 精准调用 pdf_processor.py 中的静态方法！
+                    # 自动创建不存在的层级文件夹
+                    os.makedirs(target_dir, exist_ok=True)
+                    out_path = os.path.join(target_dir, base_name)
+
+                # 精准调用 pdf_processor.py 中的静态方法
                 success, msg = PDFProcessor.process_document(file_path, out_path, self.options)
 
                 # 覆盖原文件逻辑
@@ -104,7 +119,7 @@ class IOActionWorker(QThread):
                                    f"[{datetime.now().strftime('%H:%M:%S')}] 正在处理: {base_name}")
                 success, msg = False, ""
 
-                # 精准调用 pdf_processor.py 中的底层数据交换静态方法！
+                # 精准调用 pdf_processor.py 中的底层数据交换静态方法
                 if self.action_type == 'export_bookmarks':
                     csv_path = os.path.join(self.target_dir, f"{name_no_ext}_bookmarks.csv")
                     PDFProcessor.export_bookmarks(file_path, csv_path)
@@ -151,6 +166,7 @@ class MainController(QObject):
         self.view = view
         self.loaded_files = []
         self.process_logs = ""
+        self.last_output_dir = ""
 
         self.setup_connections()
 
@@ -247,20 +263,34 @@ class MainController(QObject):
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
 
+        out_dir = ""
+        common_base = ""
+
         if overwrite_original:
             if not self.view.show_confirm_message("⚠️ 危险操作确认",
                                                   "您勾选了【覆盖原始文件】。\n此操作不可逆，强烈建议您在操作前备份文件！\n\n是否继续？"):
                 return
+        else:
+            # 弹出对话框，让用户主动选择想要保存的根目录
+            user_selected_dir = QFileDialog.getExistingDirectory(self.view, "选择输出文件保存的根目录")
+            if not user_selected_dir:
+                return  # 用户取消了选择
 
-        first_file = Path(self.loaded_files[0])
-        out_dir = first_file.parent / "RATools_Output"
-        if not overwrite_original:
-            out_dir.mkdir(exist_ok=True)
+            out_dir = os.path.join(user_selected_dir, "RATools_Output")
+            self.last_output_dir = out_dir
+
+            try:
+                # 提取所有文件所在的绝对路径目录，并计算它们共有的最长路径前缀
+                dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+                common_base = os.path.commonpath(dirs)
+            except ValueError:
+                # 异常处理：例如文件分别位于 Windows 的 C 盘和 D 盘，没有共同路径
+                common_base = ""
 
         self.view.btn_start.setEnabled(False)
         self.view.btn_start.setText("处理中...")
 
-        self.worker = ProcessWorker(self.loaded_files, selected_options, str(out_dir), overwrite_original)
+        self.worker = ProcessWorker(self.loaded_files, selected_options, out_dir, common_base, overwrite_original)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
@@ -312,14 +342,13 @@ class MainController(QObject):
 
         self.view.show_success_message("✅ 处理完成", "所有 PDF 文件的批量处理任务已结束！")
 
+        # 如果勾选了自动打开输出文件夹，利用新记录的 self.last_output_dir 进行跳转
         auto_open_cb = self.view.all_checkboxes.get("处理完成后自动打开输出文件夹")
         if auto_open_cb and auto_open_cb.isChecked() and self.loaded_files:
             overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
             if overwrite_cb and not overwrite_cb.isChecked():
-                first_file_dir = os.path.dirname(self.loaded_files[0])
-                output_dir = os.path.join(first_file_dir, "RATools_Output")
-                if os.path.exists(output_dir):
-                    self._open_directory(output_dir)
+                if hasattr(self, 'last_output_dir') and self.last_output_dir and os.path.exists(self.last_output_dir):
+                    self._open_directory(self.last_output_dir)
 
     def processing_error(self, error_msg):
         self.process_logs += f"\n[致命错误] {error_msg}\n"
