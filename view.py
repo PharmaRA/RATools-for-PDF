@@ -7,9 +7,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 
 
-# ==========================================
-# 自定义组件：查看日志弹窗
-# ==========================================
 class LogDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -17,7 +14,6 @@ class LogDialog(QDialog):
         self.resize(650, 450)
 
         layout = QVBoxLayout(self)
-
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         layout.addWidget(self.text_edit)
@@ -42,9 +38,6 @@ class LogDialog(QDialog):
         """)
 
 
-# ==========================================
-# 自定义组件：支持拖拽的 Label
-# ==========================================
 class DropZoneLabel(QLabel):
     files_dropped = Signal(list)
 
@@ -78,43 +71,32 @@ class MainWindow(QMainWindow):
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
 
-        # -----------------------------------------
-        # 【新增】存储所有的复选框引用，方便控制器获取状态
-        # -----------------------------------------
         self.all_checkboxes = {}
 
-        # 定义所有的模块及对应的设置选项数据
         self.MODULES_DATA = [
             {
                 "icon": "👀",
                 "title": "初始视图与文档属性",
                 "options": [
-                    "修改打开页面为第一页",
-                    "修改页面布局为默认",
-                    "修改放大率为默认",
-                    "修改导览标签",
-                    "PDF若存在书签则收起",
-                    "根据文件名在PDF文档属性中自动添加文件标题"
+                    "修改打开页面为第一页", "修改页面布局为默认",
+                    "修改放大率为默认", "修改导览标签",
+                    "PDF若存在书签则收起", "根据文件名在PDF文档属性中自动添加文件标题"
                 ]
             },
             {
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    "一键批量将页面切换成A4",
-                    "一键批量将页面切换成Letter",
-                    "一键批量嵌入所有非标准字体（中文）",
-                    "一键批量嵌入所有非标准字体（英文）"
+                    "一键批量将页面切换成A4", "一键批量将页面切换成Letter",
+                    "一键批量嵌入所有非标准字体（中文）", "一键批量嵌入所有非标准字体（英文）"
                 ]
             },
             {
                 "icon": "🔖",
                 "title": "书签管理与优化",
                 "options": [
-                    "修改书签设置为承前缩放",
-                    "修改书签的设置为在新窗口中打开",
-                    "删除书签的外部链接",
-                    "删除失效的书签（即未分配任何操作的书签）",
+                    "修改书签设置为承前缩放", "修改书签的设置为在新窗口中打开",
+                    "删除书签的外部链接", "删除失效的书签（即未分配任何操作的书签）",
                     "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"
                 ]
             },
@@ -122,47 +104,33 @@ class MainWindow(QMainWindow):
                 "icon": "🔗",
                 "title": "超链接处理与外观控制",
                 "options": [
-                    "将外链接中的绝对路径转相对路径",
-                    "修改超链接的设置为承前缩放",
-                    "修改超链接的设置为在新窗口中打开",
-                    "修改超链接文本至蓝色字体",
-                    "修改超链接文本至黑色边框",
-                    "超链接有边框则蓝框黑字",
-                    "超链接无边框且蓝字则蓝框黑字",
-                    "删除超链接边框"
+                    "将外链接中的绝对路径转相对路径", "修改超链接的设置为承前缩放",
+                    "修改超链接的设置为在新窗口中打开", "修改超链接文本至蓝色字体",
+                    "修改超链接文本至黑色边框", "超链接有边框则蓝框黑字",
+                    "超链接无边框且蓝字则蓝框黑字", "删除超链接边框"
                 ]
             },
             {
                 "icon": "🛡️",
-                "title": "违规内容清理",
+                "title": "违规内容清理与安全性",
                 "options": [
-                    "删除外部链接（网页、邮箱地址）",
-                    "删除外部链接（网页、邮箱地址）且将文字改成黑色",
-                    "删除失效的链接（即未分配任何操作的链接）",
-                    "删除无效的超链接，且将文字改成黑色",
-                    "删除未知动作的链接（即GoTo, GoToRi和Launch之外的链接）",
-                    "删除JavaScript, 3D内容或者动态内容",
-                    "删除文档附件",
-                    "删除文档标签",
-                    "删除PDF注释",
-                    "删除文档说明",
-                    "删除所有链接和书签"
+                    "删除外部链接（网页、邮箱地址）", "删除外部链接（网页、邮箱地址）且将文字改成黑色",
+                    "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
+                    "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",
+                    "删除JavaScript, 3D内容或者动态内容", "删除文档附件",
+                    "删除文档标签", "删除PDF注释", "删除文档说明", "删除所有链接和书签"
                 ]
             },
             {
                 "icon": "📦",
                 "title": "文件级优化与输出",
                 "options": [
-                    "PDF版本转换",
-                    "修改文件为快速网页浏览",
+                    "PDF版本转换", "修改文件为快速网页浏览",
                     "文件名修改为符合电子申报/eCTD要求的格式"
                 ]
             }
         ]
 
-        # -----------------------------------------
-        # 1. 核心布局系统
-        # -----------------------------------------
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
@@ -170,38 +138,28 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # -----------------------------------------
-        # 2. 顶部标题栏 (Header)
-        # -----------------------------------------
         header = QFrame()
         header.setObjectName("header")
         header.setFixedHeight(56)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(24, 0, 24, 0)
-
         title_label = QLabel("📄 RATools for PDF")
         title_label.setObjectName("titleLabel")
-
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         main_layout.addWidget(header)
 
-        # -----------------------------------------
-        # 3. 中间横向布局层
-        # -----------------------------------------
         middle_container = QFrame()
         middle_layout = QHBoxLayout(middle_container)
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.setSpacing(0)
 
-        # === 3.1 左侧导航栏 ===
         left_sidebar = QFrame()
         left_sidebar.setObjectName("leftSidebar")
         left_sidebar.setFixedWidth(256)
         left_layout = QVBoxLayout(left_sidebar)
         left_layout.setContentsMargins(16, 16, 16, 16)
         left_layout.setSpacing(8)
-
         nav_title = QLabel("功能模块")
         nav_title.setObjectName("navTitle")
         left_layout.addWidget(nav_title)
@@ -210,7 +168,6 @@ class MainWindow(QMainWindow):
         self.nav_btn_group = QButtonGroup(self)
         self.nav_btn_group.setExclusive(True)
 
-        # 动态生成导航按钮
         for idx, mod in enumerate(self.MODULES_DATA):
             btn = QPushButton(f"{mod['icon']}  {mod['title']}")
             btn.setCheckable(True)
@@ -219,16 +176,14 @@ class MainWindow(QMainWindow):
             self.nav_btn_group.addButton(btn, idx)
             left_layout.addWidget(btn)
 
-        self.nav_buttons[0].setChecked(True)  # 默认选中第一项
+        self.nav_buttons[0].setChecked(True)
         left_layout.addStretch()
 
         settings_btn = QPushButton("⚙️  全局设置")
         settings_btn.setObjectName("navBtn")
         left_layout.addWidget(settings_btn)
-
         middle_layout.addWidget(left_sidebar)
 
-        # === 3.2 中间主工作区 ===
         main_view = QFrame()
         main_view.setObjectName("mainView")
         main_view_layout = QVBoxLayout(main_view)
@@ -241,7 +196,6 @@ class MainWindow(QMainWindow):
         self.drop_zone.setFixedHeight(128)
         main_view_layout.addWidget(self.drop_zone)
 
-        # 文件列表区
         list_container = QFrame()
         list_container.setObjectName("listContainer")
         list_layout = QVBoxLayout(list_container)
@@ -252,39 +206,31 @@ class MainWindow(QMainWindow):
         list_header.setObjectName("listHeader")
         list_header_layout = QHBoxLayout(list_header)
         list_header_layout.setContentsMargins(16, 8, 16, 8)
-
         self.list_title = QLabel("待处理列表 (0)")
         self.list_title.setStyleSheet("font-weight: bold; color: #374151;")
-
         self.add_folder_btn = QPushButton("添加文件夹")
         self.add_folder_btn.setObjectName("textBtn")
-
         list_header_layout.addWidget(self.list_title)
         list_header_layout.addStretch()
         list_header_layout.addWidget(self.add_folder_btn)
         list_layout.addWidget(list_header)
 
-        # 表格控件
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["文件名", "路径", "状态"])
-
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.setColumnWidth(0, 260)
-
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-
         list_layout.addWidget(self.table)
         main_view_layout.addWidget(list_container)
 
         middle_layout.addWidget(main_view)
 
-        # === 3.3 右侧设置面板 ===
         right_sidebar = QFrame()
         right_sidebar.setObjectName("rightSidebar")
         right_sidebar.setFixedWidth(320)
@@ -295,27 +241,33 @@ class MainWindow(QMainWindow):
         right_header = QFrame()
         right_header.setObjectName("rightHeader")
         rh_layout = QVBoxLayout(right_header)
-
-        # 动态标题
         self.rh_title = QLabel(f"{self.MODULES_DATA[0]['title']} 设置")
         self.rh_title.setStyleSheet("font-weight: bold; font-size: 14px;")
-
         rh_desc = QLabel("勾选需要执行的处理规则")
         rh_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-
         rh_layout.addWidget(self.rh_title)
         rh_layout.addWidget(rh_desc)
         right_layout.addWidget(right_header)
 
-        # 创建滚动区域及堆叠窗口
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setObjectName("settingsScroll")
-
         self.settings_stack = QStackedWidget()
 
-        # 动态生成每个模块的设置页面
+        # === 定义专属的高级 IO 操作按钮 ===
+        btn_style = "background-color: #F3F4F6; color: #374151; border-radius: 6px; padding: 6px 12px; font-weight: bold; border: 1px solid #D1D5DB;"
+
+        self.btn_export_bookmarks = QPushButton("📤 批量导出书签 (CSV)")
+        self.btn_import_bookmarks = QPushButton("📥 批量导入书签 (CSV)")
+        self.btn_export_links = QPushButton("📤 批量导出链接 (JSON)")
+        self.btn_import_links = QPushButton("📥 批量导入链接 (JSON)")
+
+        for btn in [self.btn_export_bookmarks, self.btn_import_bookmarks, self.btn_export_links, self.btn_import_links]:
+            btn.setStyleSheet(btn_style)
+            btn.setCursor(Qt.PointingHandCursor)
+
+        # 动态生成页面，并将按钮注入对应模块
         for mod in self.MODULES_DATA:
             page = QWidget()
             page_layout = QVBoxLayout(page)
@@ -323,9 +275,28 @@ class MainWindow(QMainWindow):
             page_layout.setSpacing(16)
 
             page_layout.addWidget(self._create_section_label("处理规则选项"))
-
             for opt in mod["options"]:
                 page_layout.addWidget(self._create_checkbox(opt, "", False))
+
+            # 书签模块注入 IO 按钮
+            if mod["title"] == "书签管理与优化":
+                page_layout.addSpacing(12)
+                page_layout.addWidget(self._create_section_label("高级数据交换"))
+                btn_layout = QVBoxLayout()
+                btn_layout.setSpacing(8)  # 设置纵向排列的间距
+                btn_layout.addWidget(self.btn_export_bookmarks)
+                btn_layout.addWidget(self.btn_import_bookmarks)
+                page_layout.addLayout(btn_layout)
+
+            # 链接模块注入 IO 按钮
+            elif mod["title"] == "超链接处理与外观控制":
+                page_layout.addSpacing(12)
+                page_layout.addWidget(self._create_section_label("高级数据交换"))
+                btn_layout = QVBoxLayout()
+                btn_layout.setSpacing(8)  # 设置纵向排列的间距
+                btn_layout.addWidget(self.btn_export_links)
+                btn_layout.addWidget(self.btn_import_links)
+                page_layout.addLayout(btn_layout)
 
             page_layout.addStretch()
             self.settings_stack.addWidget(page)
@@ -336,9 +307,6 @@ class MainWindow(QMainWindow):
         middle_layout.addWidget(right_sidebar)
         main_layout.addWidget(middle_container)
 
-        # -----------------------------------------
-        # 4. 底部控制栏
-        # -----------------------------------------
         footer = QFrame()
         footer.setObjectName("footer")
         footer.setFixedHeight(64)
@@ -349,41 +317,26 @@ class MainWindow(QMainWindow):
         self.btn_clear.setObjectName("actionBtn")
         self.btn_log = QPushButton("📋 查看/导出日志")
         self.btn_log.setObjectName("actionBtn")
-
         footer_layout.addWidget(self.btn_clear)
         footer_layout.addWidget(self.btn_log)
         footer_layout.addStretch()
 
         self.info_label = QLabel("共计 <b>0</b> 个文件")
-
-        # 【修改】将其赋值给 self，以便外部绑定事件和状态改变
         self.btn_start = QPushButton("▶ 开始批量处理")
         self.btn_start.setObjectName("startBtn")
-
         footer_layout.addWidget(self.info_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.btn_start)
-
         main_layout.addWidget(footer)
 
-        # -----------------------------------------
-        # 初始化与事件绑定
-        # -----------------------------------------
         self.nav_btn_group.idClicked.connect(self.switch_settings_page)
         self.apply_stylesheet()
 
-    # ==========================================
-    # UI 交互与切换
-    # ==========================================
     def switch_settings_page(self, index):
         self.settings_stack.setCurrentIndex(index)
         self.rh_title.setText(f"{self.MODULES_DATA[index]['title']} 设置")
 
-    # ==========================================
-    # UI 数据接口 (供 Controller 调用)
-    # ==========================================
     def get_selected_options(self):
-        """【新增】获取当前所有被用户勾选的处理规则"""
         selected = []
         for title, cb in self.all_checkboxes.items():
             if cb.isChecked():
@@ -393,20 +346,17 @@ class MainWindow(QMainWindow):
     def add_table_row(self, name, path, status):
         row_index = self.table.rowCount()
         self.table.insertRow(row_index)
-
         name_item = QTableWidgetItem(name)
         name_item.setToolTip(name)
         path_item = QTableWidgetItem(path)
         path_item.setToolTip(path)
         status_item = QTableWidgetItem(status)
         status_item.setForeground(Qt.darkGray)
-
         self.table.setItem(row_index, 0, name_item)
         self.table.setItem(row_index, 1, path_item)
         self.table.setItem(row_index, 2, status_item)
 
     def update_table_row_status(self, row_index, status_text, color=Qt.black):
-        """【新增】更新表格中指定行的处理状态文本和颜色"""
         item = self.table.item(row_index, 2)
         if item:
             item.setText(status_text)
@@ -419,9 +369,6 @@ class MainWindow(QMainWindow):
         self.list_title.setText(f"待处理列表 ({count})")
         self.info_label.setText(f"共计 <b>{count}</b> 个文件")
 
-    # ==========================================
-    # 辅助与样式函数
-    # ==========================================
     def _create_section_label(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet("color: #9CA3AF; font-size: 12px; font-weight: bold; margin-bottom: 4px;")
@@ -432,32 +379,24 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
-
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
-
         cb = QCheckBox()
         cb.setChecked(checked)
-
-        # 【新增】将实例存储进字典中，用于提取用户勾选状态
         self.all_checkboxes[title] = cb
-
         title_lbl = QLabel(title)
         title_lbl.setWordWrap(True)
         title_lbl.setStyleSheet("font-weight: 500; color: #374151;")
         title_lbl.mousePressEvent = lambda event, checkbox=cb: checkbox.toggle()
-
         top_layout.addWidget(cb, 0, Qt.AlignTop)
         top_layout.addWidget(title_lbl, 1)
         layout.addLayout(top_layout)
-
         if desc:
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("color: #6B7280; font-size: 11px; margin-left: 24px;")
             layout.addWidget(desc_lbl)
-
         return container
 
     def apply_stylesheet(self):
