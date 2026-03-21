@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFrame, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QStackedWidget, QScrollArea, QButtonGroup,
     QDialog, QTextEdit
 )
@@ -140,7 +140,6 @@ class CustomMessageBox(FramelessDraggableDialog):
         self.btn_ok = QPushButton("确 定")
         self.btn_ok.setFixedSize(80, 32)
         if msg_type in ["error", "warning"]:
-            # 危险操作显示为红色按钮
             self.btn_ok.setStyleSheet(
                 "background-color: #EF4444; color: white; border-radius: 6px; font-weight: bold; border: none;")
         else:
@@ -285,12 +284,10 @@ class MainWindow(QMainWindow):
 
         self.all_checkboxes = {}
 
-        # 预先初始化设置对话框
         self.settings_dialog = SettingsDialog(self)
         self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
         self.all_checkboxes["覆盖原始文件 (不推荐)"] = self.settings_dialog.cb_overwrite
 
-        # 润色描述后的数据字典 (解耦 UI 文本与底层 ID)
         self.MODULES_DATA = [
             {
                 "icon": "👀",
@@ -425,13 +422,9 @@ class MainWindow(QMainWindow):
         self.btn_top_about.setObjectName("topBtn")
         self.btn_top_about.clicked.connect(self.show_about_dialog)
 
-        # 按钮直接从左侧开始排列
         header_layout.addWidget(self.btn_top_settings)
         header_layout.addWidget(self.btn_top_about)
-
-        # 将自适应伸缩放到最右侧，挤压按钮靠左
         header_layout.addStretch()
-
         main_layout.addWidget(header)
 
         middle_container = QFrame()
@@ -498,18 +491,17 @@ class MainWindow(QMainWindow):
         list_header_layout.addWidget(self.add_folder_btn)
         list_layout.addWidget(list_header)
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["文件名", "路径", "状态"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.setColumnWidth(0, 260)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setShowGrid(False)
-        self.table.verticalHeader().setVisible(False)
-        list_layout.addWidget(self.table)
+        # ================= 文件树视图替代原生表格 =================
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["文件 / 文件夹", "绝对路径", "当前状态"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tree.header().setStretchLastSection(False)
+        self.tree.setColumnWidth(0, 320)
+        self.tree.setSelectionBehavior(QTreeWidget.SelectRows)
+        self.tree.setAlternatingRowColors(True)
+        list_layout.addWidget(self.tree)
         main_view_layout.addWidget(list_container)
 
         middle_layout.addWidget(main_view)
@@ -539,9 +531,7 @@ class MainWindow(QMainWindow):
         scroll_area.setObjectName("settingsScroll")
         self.settings_stack = QStackedWidget()
 
-        # === 定义专属的高级 IO 操作按钮 ===
         btn_style = "background-color: #F3F4F6; color: #374151; border-radius: 6px; padding: 6px 12px; font-weight: bold; border: 1px solid #D1D5DB;"
-
         self.btn_export_bookmarks = QPushButton("📤 批量导出书签 (CSV)")
         self.btn_import_bookmarks = QPushButton("📥 批量导入书签 (CSV)")
         self.btn_export_links = QPushButton("📤 批量导出链接 (JSON)")
@@ -551,7 +541,6 @@ class MainWindow(QMainWindow):
             btn.setStyleSheet(btn_style)
             btn.setCursor(Qt.PointingHandCursor)
 
-        # 动态生成页面，并将按钮注入对应模块
         for mod in self.MODULES_DATA:
             page = QWidget()
             page_layout = QVBoxLayout(page)
@@ -560,10 +549,8 @@ class MainWindow(QMainWindow):
 
             page_layout.addWidget(self._create_section_label("处理规则选项"))
             for opt in mod["options"]:
-                # 注意：这里传入的是解耦后的 opt["id"], opt["title"], opt["desc"]
                 page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
-            # 书签模块注入 IO 按钮
             if mod["title"] == "书签管理与优化":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("高级数据交换"))
@@ -573,7 +560,6 @@ class MainWindow(QMainWindow):
                 btn_layout.addWidget(self.btn_import_bookmarks)
                 page_layout.addLayout(btn_layout)
 
-            # 链接模块注入 IO 按钮
             elif mod["title"] == "超链接处理与外观控制":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("高级数据交换"))
@@ -619,61 +605,46 @@ class MainWindow(QMainWindow):
         self.apply_stylesheet()
 
         # ================= 初始化 QSettings 持久化存储 =================
-        # 生成在当前运行目录下的 settings.ini 文件中
         current_dir = os.path.dirname(os.path.abspath(__file__))
         ini_path = os.path.join(current_dir, "settings.ini")
         self.app_settings = QSettings(ini_path, QSettings.IniFormat)
 
-        # 建立底层中文 ID 到纯英文 INI Key 的映射表，避免中文被转义
         self.settings_key_map = {
             "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
             "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
         }
         for i, mod in enumerate(self.MODULES_DATA):
             for j, opt in enumerate(mod["options"]):
-                # 按照结构自动生成漂亮的英文Key: 如 Modules/Mod_0_Opt_1
                 self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
 
         self.load_all_settings()
 
-    # ================= 弹窗替换调用接口 =================
-
     def show_info_message(self, title, message):
-        """替代 QMessageBox.information"""
         CustomMessageBox(title, message, msg_type="info", parent=self).exec()
 
     def show_success_message(self, title, message):
-        """成功提示"""
         CustomMessageBox(title, message, msg_type="success", parent=self).exec()
 
     def show_warning_message(self, title, message):
-        """替代 QMessageBox.warning"""
         CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
 
     def show_error_message(self, title, message):
-        """替代 QMessageBox.critical"""
         CustomMessageBox(title, message, msg_type="error", parent=self).exec()
 
     def show_confirm_message(self, title, message):
-        """替代 QMessageBox.question，返回 True 或 False"""
         dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
         return dlg.exec() == QDialog.Accepted
 
-    # ================================================
-
     def load_all_settings(self):
-        """读取 QSettings 并恢复所有的复选框状态"""
         for opt_id, cb in self.all_checkboxes.items():
             key = self.settings_key_map.get(opt_id)
             if key:
                 val = self.app_settings.value(key)
                 if val is not None:
-                    # 兼容不同系统 QSettings 对 bool 返回 'true' 字符串的问题
                     is_checked = str(val).lower() == 'true'
                     cb.setChecked(is_checked)
 
     def closeEvent(self, event):
-        """主窗口关闭前，拦截并利用英文映射表保存状态"""
         for opt_id, cb in self.all_checkboxes.items():
             key = self.settings_key_map.get(opt_id)
             if key:
@@ -692,34 +663,14 @@ class MainWindow(QMainWindow):
         self.rh_title.setText(f"{self.MODULES_DATA[index]['title']} 设置")
 
     def get_selected_options(self):
-        # 注意：现在的字典 key 是底层需要的原始 ID
         selected = []
         for opt_id, cb in self.all_checkboxes.items():
             if cb.isChecked():
                 selected.append(opt_id)
         return selected
 
-    def add_table_row(self, name, path, status):
-        row_index = self.table.rowCount()
-        self.table.insertRow(row_index)
-        name_item = QTableWidgetItem(name)
-        name_item.setToolTip(name)
-        path_item = QTableWidgetItem(path)
-        path_item.setToolTip(path)
-        status_item = QTableWidgetItem(status)
-        status_item.setForeground(Qt.darkGray)
-        self.table.setItem(row_index, 0, name_item)
-        self.table.setItem(row_index, 1, path_item)
-        self.table.setItem(row_index, 2, status_item)
-
-    def update_table_row_status(self, row_index, status_text, color=Qt.black):
-        item = self.table.item(row_index, 2)
-        if item:
-            item.setText(status_text)
-            item.setForeground(color)
-
-    def clear_table_ui(self):
-        self.table.setRowCount(0)
+    def clear_tree_ui(self):
+        self.tree.clear()
 
     def update_counters_ui(self, count):
         self.list_title.setText(f"待处理列表 ({count})")
@@ -742,7 +693,6 @@ class MainWindow(QMainWindow):
 
         cb = QCheckBox()
         cb.setChecked(checked)
-        # 以底层 id 绑定复选框实例
         self.all_checkboxes[opt_id] = cb
 
         title_lbl = QLabel(title)
@@ -771,7 +721,6 @@ class MainWindow(QMainWindow):
         #rightSidebar { border-left: 1px solid #E5E7EB; }
         #footer { border-top: 1px solid #E5E7EB; }
 
-        /* 顶部按钮样式 */
         #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
         #topBtn:hover { background-color: #F3F4F6; color: #111827; }
 
@@ -786,9 +735,13 @@ class MainWindow(QMainWindow):
         #listHeader { border-bottom: 1px solid #E5E7EB; background-color: #F9FAFB; border-top-left-radius: 12px; border-top-right-radius: 12px; }
         #textBtn { color: #2563EB; border: none; background: transparent; font-weight: 500; }
         #textBtn:hover { color: #1D4ED8; }
-        QTableWidget { border: none; background-color: white; color: #374151; gridline-color: #F3F4F6; }
-        QTableWidget::item { padding: 4px; border-bottom: 1px solid #F3F4F6; }
+
+        /* 树形视图专属样式 */
+        QTreeWidget { border: none; background-color: white; color: #374151; outline: none; }
+        QTreeWidget::item { padding: 6px; border-bottom: 1px solid #F3F4F6; }
+        QTreeWidget::item:selected { background-color: #EFF6FF; color: #1D4ED8; }
         QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #6B7280; font-weight: 500; text-align: left; }
+
         #rightHeader { border-bottom: 1px solid #E5E7EB; padding: 16px 20px; }
         #settingsScroll { border: none; background-color: transparent; }
         #settingsScroll > QWidget > QWidget { background-color: white; }

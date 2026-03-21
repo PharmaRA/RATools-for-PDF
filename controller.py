@@ -4,7 +4,7 @@ import platform
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 from PySide6.QtGui import QColor
 
@@ -50,7 +50,6 @@ class ProcessWorker(QThread):
                     out_path = file_path + ".tmp_overwrite.pdf"
                 else:
                     if self.common_base:
-                        # 计算当前文件相对于公共根目录的相对路径
                         file_dir = os.path.dirname(os.path.abspath(file_path))
                         rel_dir = os.path.relpath(file_dir, self.common_base)
                         if rel_dir == '.':
@@ -58,17 +57,14 @@ class ProcessWorker(QThread):
                         else:
                             target_dir = os.path.join(self.output_dir, rel_dir)
                     else:
-                        # 降级方案：如果不在同盘符，直接扁平化输出到目标文件夹
                         target_dir = self.output_dir
 
-                    # 自动创建不存在的层级文件夹
                     os.makedirs(target_dir, exist_ok=True)
                     out_path = os.path.join(target_dir, base_name)
 
-                # 精准调用 pdf_processor.py 中的静态方法
+                # 调用核心引擎静态方法
                 success, msg = PDFProcessor.process_document(file_path, out_path, self.options)
 
-                # 覆盖原文件逻辑
                 if success and self.overwrite_original:
                     try:
                         os.replace(out_path, file_path)
@@ -119,7 +115,6 @@ class IOActionWorker(QThread):
                                    f"[{datetime.now().strftime('%H:%M:%S')}] 正在处理: {base_name}")
                 success, msg = False, ""
 
-                # 精准调用 pdf_processor.py 中的底层数据交换静态方法
                 if self.action_type == 'export_bookmarks':
                     csv_path = os.path.join(self.target_dir, f"{name_no_ext}_bookmarks.csv")
                     PDFProcessor.export_bookmarks(file_path, csv_path)
@@ -168,26 +163,26 @@ class MainController(QObject):
         self.process_logs = ""
         self.last_output_dir = ""
 
+        # 建立缓存字典，以便快速在文件树中更新和查找节点
+        self.folder_nodes = {}
+        self.file_nodes = {}
+
         self.setup_connections()
 
     def setup_connections(self):
-        # 基础文件列表交互：绑定拖拽与点击添加文件
         self.view.drop_zone.files_dropped.connect(self.add_files)
         self.view.drop_zone.mousePressEvent = self.open_file_dialog
         self.view.add_folder_btn.clicked.connect(self.add_folder)
         self.view.btn_clear.clicked.connect(self.clear_list)
 
-        # 核心功能交互
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
 
-        # 高级数据 IO 交互
         self.view.btn_export_bookmarks.clicked.connect(lambda: self.handle_io_action('export_bookmarks'))
         self.view.btn_import_bookmarks.clicked.connect(lambda: self.handle_io_action('import_bookmarks'))
         self.view.btn_export_links.clicked.connect(lambda: self.handle_io_action('export_links'))
         self.view.btn_import_links.clicked.connect(lambda: self.handle_io_action('import_links'))
 
-        # 互斥选项配置：A4 和 Letter 只能选其一
         self.setup_exclusive_options()
 
     def setup_exclusive_options(self):
@@ -209,44 +204,109 @@ class MainController(QObject):
                 self.add_files(file_paths)
 
     def add_files(self, paths):
-        new_count = 0
-
-        # 提取所有实际的 pdf 路径（支持解析传入的文件夹）
         valid_pdf_paths = []
         for p in paths:
             if os.path.isfile(p) and p.lower().endswith('.pdf'):
-                valid_pdf_paths.append(p)
+                valid_pdf_paths.append(os.path.normpath(p))
             elif os.path.isdir(p):
                 for root, _, files in os.walk(p):
                     for file in files:
                         if file.lower().endswith('.pdf'):
-                            valid_pdf_paths.append(os.path.join(root, file))
+                            valid_pdf_paths.append(os.path.normpath(os.path.join(root, file)))
 
-        for path in valid_pdf_paths:
-            if path not in self.loaded_files:
-                self.loaded_files.append(path)
-                name = os.path.basename(path)
-                self.view.add_table_row(name, path, "等待处理")
-                new_count += 1
+        to_add = [p for p in valid_pdf_paths if p not in self.loaded_files]
+        if not to_add:
+            if paths:
+                self.view.show_info_message("ℹ️ 提示", "添加的文件或文件夹中没有新的 PDF 文件，或文件已存在于列表中。")
+            return
+
+        # 智能算法：获取这一次批量拖入文件的公共根路径
+        dirs = [os.path.dirname(os.path.abspath(p)) for p in to_add]
+        try:
+            common_base = os.path.commonpath(dirs)
+        except ValueError:
+            common_base = ""  # 如果跨盘符（如C盘和D盘），则降级使用绝对路径树
+
+        for path in to_add:
+            self.loaded_files.append(path)
+            p = Path(path)
+            parent_item = self.view.tree.invisibleRootItem()
+
+            if common_base:
+                # 挂载公共根目录节点
+                if common_base not in self.folder_nodes:
+                    root_node = QTreeWidgetItem(parent_item)
+                    root_name = os.path.basename(common_base) or common_base
+                    root_node.setText(0, f"📁 {root_name}")
+                    root_node.setText(1, common_base)
+                    root_node.setExpanded(True)
+                    self.folder_nodes[common_base] = root_node
+
+                parent_item = self.folder_nodes[common_base]
+
+                # 动态生成中间补全目录
+                rel_dir = os.path.relpath(os.path.dirname(path), common_base)
+                if rel_dir != '.':
+                    current_path = Path(common_base)
+                    for part in Path(rel_dir).parts:
+                        current_path = current_path / part
+                        current_path_str = str(current_path)
+                        if current_path_str not in self.folder_nodes:
+                            node = QTreeWidgetItem(parent_item)
+                            node.setText(0, f"📁 {part}")
+                            node.setText(1, current_path_str)
+                            node.setExpanded(True)
+                            self.folder_nodes[current_path_str] = node
+                        parent_item = self.folder_nodes[current_path_str]
+            else:
+                # 跨盘符降级处理，从硬盘根目录往下建树
+                current_path = Path(p.parts[0])
+                root_str = str(current_path)
+                if root_str not in self.folder_nodes:
+                    node = QTreeWidgetItem(parent_item)
+                    node.setText(0, f"💽 {root_str}")
+                    node.setText(1, root_str)
+                    node.setExpanded(True)
+                    self.folder_nodes[root_str] = node
+                parent_item = self.folder_nodes[root_str]
+
+                for part in p.parts[1:-1]:
+                    current_path = current_path / part
+                    current_path_str = str(current_path)
+                    if current_path_str not in self.folder_nodes:
+                        node = QTreeWidgetItem(parent_item)
+                        node.setText(0, f"📁 {part}")
+                        node.setText(1, current_path_str)
+                        node.setExpanded(True)
+                        self.folder_nodes[current_path_str] = node
+                    parent_item = self.folder_nodes[current_path_str]
+
+            # 挂载最终的文件节点
+            file_node = QTreeWidgetItem(parent_item)
+            file_node.setText(0, f"📄 {p.name}")
+            file_node.setText(1, path)
+            file_node.setText(2, "等待处理")
+            file_node.setForeground(2, Qt.darkGray)
+
+            # 将创建的文件节点加入字典中进行状态管理
+            self.file_nodes[path] = file_node
 
         self.view.update_counters_ui(len(self.loaded_files))
-
-        if new_count == 0 and paths:
-            self.view.show_info_message("ℹ️ 提示", "添加的文件或文件夹中没有新的 PDF 文件，或文件已存在于列表中。")
 
     def add_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self.view, "选择包含 PDF 的文件夹")
         if folder_path:
-            # 既然 add_files 现在支持解析文件夹了，直接复用逻辑即可
             self.add_files([folder_path])
 
     def clear_list(self):
         if not self.loaded_files:
             return
 
-        if self.view.show_confirm_message("🗑️ 确认清空", "您确定要清空待处理列表吗？"):
+        if self.view.show_confirm_message("🗑️ 确认清空", "您确定要清空待处理文件树吗？"):
             self.loaded_files.clear()
-            self.view.clear_table_ui()
+            self.folder_nodes.clear()
+            self.file_nodes.clear()
+            self.view.clear_tree_ui()
             self.view.update_counters_ui(0)
             self.process_logs = ""
 
@@ -271,20 +331,17 @@ class MainController(QObject):
                                                   "您勾选了【覆盖原始文件】。\n此操作不可逆，强烈建议您在操作前备份文件！\n\n是否继续？"):
                 return
         else:
-            # 弹出对话框，让用户主动选择想要保存的根目录
             user_selected_dir = QFileDialog.getExistingDirectory(self.view, "选择输出文件保存的根目录")
             if not user_selected_dir:
-                return  # 用户取消了选择
+                return
 
             out_dir = os.path.join(user_selected_dir, "RATools_Output")
             self.last_output_dir = out_dir
 
             try:
-                # 提取所有文件所在的绝对路径目录，并计算它们共有的最长路径前缀
                 dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
                 common_base = os.path.commonpath(dirs)
             except ValueError:
-                # 异常处理：例如文件分别位于 Windows 的 C 盘和 D 盘，没有共同路径
                 common_base = ""
 
         self.view.btn_start.setEnabled(False)
@@ -323,6 +380,9 @@ class MainController(QObject):
         self.io_worker.start()
 
     def update_progress(self, row_index, status_text, log_msg):
+        # 获取与该行对应的精确文件路径，用于树节点的映射更新
+        file_path = self.loaded_files[row_index]
+
         if status_text in ["处理完成", "操作成功"]:
             color = QColor(16, 185, 129)  # 绿色
         elif status_text in ["处理失败", "操作失败"]:
@@ -332,7 +392,12 @@ class MainController(QObject):
         else:
             color = QColor(37, 99, 235)  # 蓝色处理中
 
-        self.view.update_table_row_status(row_index, status_text, color)
+        # 查字典，直接更新树节点UI
+        if file_path in self.file_nodes:
+            node = self.file_nodes[file_path]
+            node.setText(2, status_text)
+            node.setForeground(2, color)
+
         self.process_logs += f"{log_msg}\n"
 
     def processing_finished(self, summary):
@@ -342,7 +407,6 @@ class MainController(QObject):
 
         self.view.show_success_message("✅ 处理完成", "所有 PDF 文件的批量处理任务已结束！")
 
-        # 如果勾选了自动打开输出文件夹，利用新记录的 self.last_output_dir 进行跳转
         auto_open_cb = self.view.all_checkboxes.get("处理完成后自动打开输出文件夹")
         if auto_open_cb and auto_open_cb.isChecked() and self.loaded_files:
             overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
@@ -390,7 +454,6 @@ class MainController(QObject):
                 self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
 
     def _open_directory(self, dir_path):
-        """跨平台打开目录"""
         sys_plat = platform.system()
         try:
             if sys_plat == "Windows":
