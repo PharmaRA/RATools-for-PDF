@@ -4,7 +4,7 @@ import platform
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
+from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem, QMenu
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 from PySide6.QtGui import QColor
 
@@ -184,6 +184,237 @@ class MainController(QObject):
         self.view.btn_import_links.clicked.connect(lambda: self.handle_io_action('import_links'))
 
         self.setup_exclusive_options()
+
+        # 绑定树形图的右键菜单请求事件
+        self.view.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
+        # 绑定树形图双击事件
+        self.view.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+    # ================= 核心：右键菜单生成与分发 =================
+    def show_tree_context_menu(self, pos):
+        selected_items = self.view.tree.selectedItems()
+        if not selected_items:
+            return
+
+        menu = QMenu(self.view.tree)
+        # 使得菜单样式与整体 UI 现代感保持一致
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #D1D5DB;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 28px 6px 20px;
+                border-radius: 4px;
+                color: #374151;
+                font-size: 13px;
+            }
+            QMenu::item:selected {
+                background-color: #F3F4F6;
+                color: #2563EB;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #E5E7EB;
+                margin: 4px 8px;
+            }
+            QMenu::item:disabled {
+                color: #9CA3AF;
+            }
+        """)
+
+        action_remove = menu.addAction("🗑️ 移除选中项")
+
+        # menu.addSeparator()
+
+        # 只有在选中单个文件/文件夹时，才允许执行详情查看和定位
+        is_single_selection = len(selected_items) == 1
+        target_path = selected_items[0].text(1) if is_single_selection else ""
+
+        action_extend_1 = menu.addAction("🔍 定位到文件位置")
+        action_extend_1.setEnabled(is_single_selection)
+
+        action_extend_2 = menu.addAction("📄 查看文件详情...")
+        action_extend_2.setEnabled(is_single_selection)
+
+        # 映射坐标并在当前鼠标位置弹出
+        action = menu.exec(self.view.tree.viewport().mapToGlobal(pos))
+
+        if action == action_remove:
+            self.remove_selected_items(selected_items)
+        elif action == action_extend_1:
+            self.locate_file(target_path)
+        elif action == action_extend_2:
+            self.show_file_details(target_path)
+
+    def on_item_double_clicked(self, item, column):
+        """双击列表项直接使用系统默认软件打开 PDF 文件"""
+        path = item.text(1)
+        if not os.path.exists(path):
+            self.view.show_warning_message("⚠️ 警告", "无法打开，该文件或文件夹可能已被移动或删除！")
+            return
+
+        # 仅打开文件（如果是PDF文件），如果是文件夹则展开/收起节点（由组件默认处理）
+        if os.path.isfile(path) and path.lower().endswith('.pdf'):
+            sys_plat = platform.system()
+            try:
+                if sys_plat == "Windows":
+                    os.startfile(path)
+                elif sys_plat == "Darwin":
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["xdg-open", path])
+            except Exception as e:
+                self.view.show_error_message("❌ 打开失败", f"无法使用默认程序打开文件：\n{str(e)}")
+
+    def locate_file(self, path):
+        """定位文件或文件夹位置（在系统文件资源管理器中打开并高亮显示）"""
+        if not os.path.exists(path):
+            self.view.show_warning_message("⚠️ 警告", "无法定位，该文件或文件夹可能已被移动或删除！")
+            return
+
+        sys_plat = platform.system()
+        try:
+            if sys_plat == "Windows":
+                if os.path.isfile(path):
+                    # Windows 下使用 explorer /select 高亮选中指定文件
+                    subprocess.Popen(['explorer', '/select,', os.path.normpath(path)])
+                else:
+                    os.startfile(path)
+            elif sys_plat == "Darwin":
+                # macOS 使用 open -R 会在 Finder 中展示并选中文件
+                subprocess.Popen(["open", "-R", path])
+            else:
+                # Linux 一般打开其所在目录
+                target_dir = os.path.dirname(path) if os.path.isfile(path) else path
+                subprocess.Popen(["xdg-open", target_dir])
+        except Exception as e:
+            self.view.show_error_message("❌ 定位失败", f"无法打开系统资源管理器：\n{str(e)}")
+
+    def show_file_details(self, path):
+        """读取并弹窗显示选中项的系统属性以及 PDF 特有元数据"""
+        if not os.path.exists(path):
+            self.view.show_warning_message("⚠️ 警告", "无法读取信息，该文件或文件夹可能已被移动或删除！")
+            return
+
+        try:
+            stat = os.stat(path)
+            created_time = datetime.fromtimestamp(stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S')
+            modified_time = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+
+            details = [f"📂 路径：{path}\n"]
+
+            if os.path.isfile(path):
+                size_kb = stat.st_size / 1024
+                size_mb = size_kb / 1024
+                if size_mb > 1:
+                    details.append(f"📏 大小：{size_mb:.2f} MB")
+                else:
+                    details.append(f"📏 大小：{size_kb:.2f} KB")
+
+                # 若是 PDF 文件，则利用 PyMuPDF 深入解析其内部元数据
+                if path.lower().endswith('.pdf'):
+                    try:
+                        import fitz  # 局部导入以避免在顶部造成非必须依赖
+                        doc = fitz.open(path)
+                        details.append(f"📑 页数：{doc.page_count} 页")
+                        if doc.needs_pass:
+                            details.append("🔒 状态：文档已加密")
+                        else:
+                            meta = doc.metadata
+                            if meta:
+                                title = meta.get("title", "")
+                                author = meta.get("author", "")
+                                if title: details.append(f"📌 标题：{title}")
+                                if author: details.append(f"👤 作者：{author}")
+                        doc.close()
+                    except Exception:
+                        details.append("⚠️ 提示：无法解析 PDF 内部属性，文件可能已损坏")
+            else:
+                details.append("📁 类型：文件夹")
+
+            details.append("")  # 空行作为分隔
+            details.append(f"🕒 创建时间：{created_time}")
+            details.append(f"⏱️ 修改时间：{modified_time}")
+
+            info_text = "\n".join(details)
+            self.view.show_info_message("📄 文件详细信息", info_text)
+
+        except Exception as e:
+            self.view.show_error_message("❌ 读取失败", f"获取文件信息时发生异常：\n{str(e)}")
+
+    def remove_selected_items(self, selected_items):
+        """
+        处理树节点的移除操作。
+        逻辑：递归收集所有选中的文件路径 -> 更新后台数据 -> 删除 UI 节点 -> 自动清理空文件夹
+        """
+        paths_to_remove = set()
+
+        # 1. 内部递归函数：若选中的是文件夹，自动把下面的文件全部圈中
+        def collect_paths(item):
+            path = item.text(1)
+            if path in self.file_nodes:
+                paths_to_remove.add(path)
+            for i in range(item.childCount()):
+                collect_paths(item.child(i))
+
+        for item in selected_items:
+            collect_paths(item)
+
+        # 2. 从后台数组和字典中彻底注销这些文件
+        self.loaded_files = [p for p in self.loaded_files if p not in paths_to_remove]
+        for p in paths_to_remove:
+            if p in self.file_nodes:
+                del self.file_nodes[p]
+
+        # 3. 移除 UI 可视节点（注意：父节点被删除时，子节点自动消亡，需防止指针悬空）
+        for item in selected_items:
+            if item.treeWidget() is None:
+                continue  # 该节点已经被随着父节点的删除而连带删除了
+
+            parent = item.parent()
+            if parent:
+                parent.removeChild(item)
+            else:
+                self.view.tree.takeTopLevelItem(self.view.tree.indexOfTopLevelItem(item))
+
+        # 4. 清理残留的、由于文件被移空而变成“孤儿”的空文件夹
+        self._cleanup_empty_folders()
+
+        # 5. 更新左下角的总数统计
+        self.view.update_counters_ui(len(self.loaded_files))
+
+    def _cleanup_empty_folders(self):
+        """循环扫描并删除不再包含任何文件的空文件夹节点，以及已被从UI中移除的游离节点（Ghost Nodes）"""
+        changed = True
+        while changed:
+            changed = False
+            empty_paths = []
+
+            for path, node in self.folder_nodes.items():
+                # 1. 捕获游离的幽灵节点（用户直接删除了父文件夹，导致它脱离了UI树）
+                if node.treeWidget() is None:
+                    empty_paths.append(path)
+                # 2. 捕获空文件夹（文件夹还在UI树上，但其内部的文件被逐一删空了）
+                elif node.childCount() == 0:
+                    empty_paths.append(path)
+
+            for path in empty_paths:
+                node = self.folder_nodes[path]
+
+                # 如果节点还在 UI 树上，将其可视部分移除
+                if node.treeWidget() is not None:
+                    parent = node.parent()
+                    if parent:
+                        parent.removeChild(node)
+                    else:
+                        self.view.tree.takeTopLevelItem(self.view.tree.indexOfTopLevelItem(node))
+
+                # 从后台缓存字典中彻底销毁该文件夹的记录
+                del self.folder_nodes[path]
+                changed = True
 
     def setup_exclusive_options(self):
         cb_a4 = self.view.all_checkboxes.get("一键批量将页面切换成A4")

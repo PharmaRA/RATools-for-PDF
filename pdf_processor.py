@@ -36,7 +36,7 @@ class PDFProcessor:
             raise FileNotFoundError(f"未找到 Ghostscript 引擎！\n请确保已将引擎文件放置在: {gs_exe}")
 
         cmd = [
-            gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4", "-dPDFSETTINGS=/prepress",
+            gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7", "-dPDFSETTINGS=/prepress",
             "-dNOPAUSE", "-dQUIET", "-dBATCH", "-dSubsetFonts=true", "-dEmbedAllFonts=true",
             f"-sOutputFile={output_pdf}", input_pdf
         ]

@@ -2,8 +2,8 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
-    QHeaderView, QCheckBox, QStackedWidget, QScrollArea, QButtonGroup,
-    QDialog, QTextEdit
+    QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
+    QDialog, QTextEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 
@@ -491,7 +491,7 @@ class MainWindow(QMainWindow):
         list_header_layout.addWidget(self.add_folder_btn)
         list_layout.addWidget(list_header)
 
-        # ================= 文件树视图替代原生表格 =================
+        # ================= 文件树视图 =================
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["文件 / 文件夹", "绝对路径", "当前状态"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
@@ -499,7 +499,11 @@ class MainWindow(QMainWindow):
         self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.tree.header().setStretchLastSection(False)
         self.tree.setColumnWidth(0, 320)
+
         self.tree.setSelectionBehavior(QTreeWidget.SelectRows)
+        self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+
         self.tree.setAlternatingRowColors(True)
         list_layout.addWidget(self.tree)
         main_view_layout.addWidget(list_container)
@@ -525,11 +529,21 @@ class MainWindow(QMainWindow):
         rh_layout.addWidget(rh_desc)
         right_layout.addWidget(right_header)
 
+        # ⚠️彻底摒弃 QStackedWidget，使用底层纯净的 QScrollArea 和 QVBoxLayout 组合
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setObjectName("settingsScroll")
-        self.settings_stack = QStackedWidget()
+
+        self.settings_container = QWidget()
+        self.settings_layout = QVBoxLayout(self.settings_container)
+        self.settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_layout.setSpacing(0)
+
+        # 存储每一个页面的包装容器
+        self.settings_pages = []
 
         btn_style = "background-color: #F3F4F6; color: #374151; border-radius: 6px; padding: 6px 12px; font-weight: bold; border: 1px solid #D1D5DB;"
         self.btn_export_bookmarks = QPushButton("📤 批量导出书签 (CSV)")
@@ -570,9 +584,13 @@ class MainWindow(QMainWindow):
                 page_layout.addLayout(btn_layout)
 
             page_layout.addStretch()
-            self.settings_stack.addWidget(page)
 
-        scroll_area.setWidget(self.settings_stack)
+            # 将每个页面按顺序加入核心布局并暂时隐藏
+            self.settings_layout.addWidget(page)
+            page.hide()
+            self.settings_pages.append(page)
+
+        scroll_area.setWidget(self.settings_container)
         right_layout.addWidget(scroll_area)
 
         middle_layout.addWidget(right_sidebar)
@@ -602,6 +620,9 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(footer)
 
         self.nav_btn_group.idClicked.connect(self.switch_settings_page)
+
+        # 立刻触发一次以展示第一页内容
+        self.switch_settings_page(0)
         self.apply_stylesheet()
 
         # ================= 初始化 QSettings 持久化存储 =================
@@ -659,8 +680,14 @@ class MainWindow(QMainWindow):
         self.about_dialog.activateWindow()
 
     def switch_settings_page(self, index):
-        self.settings_stack.setCurrentIndex(index)
         self.rh_title.setText(f"{self.MODULES_DATA[index]['title']} 设置")
+
+        # ⚠️使用原生的显示/隐藏逻辑：隐藏的 QWidget 在 QVBoxLayout 中绝对不占任何空间参与高度计算
+        for i, page in enumerate(self.settings_pages):
+            if i == index:
+                page.show()
+            else:
+                page.hide()
 
     def get_selected_options(self):
         selected = []
@@ -715,10 +742,11 @@ class MainWindow(QMainWindow):
     def apply_stylesheet(self):
         qss = """
         QMainWindow { background-color: #F9FAFB; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; }
+
         #header, #leftSidebar, #rightSidebar, #footer { background-color: white; }
         #header { border-bottom: 1px solid #E5E7EB; }
         #leftSidebar { border-right: 1px solid #E5E7EB; }
-        #rightSidebar { border-left: 1px solid #E5E7EB; }
+        #rightSidebar { border-left: 1px solid #E5E7EB; } 
         #footer { border-top: 1px solid #E5E7EB; }
 
         #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
@@ -737,14 +765,17 @@ class MainWindow(QMainWindow):
         #textBtn:hover { color: #1D4ED8; }
 
         /* 树形视图专属样式 */
-        QTreeWidget { border: none; background-color: white; color: #374151; outline: none; }
+        QTreeWidget { border: none; background-color: white; color: #374151; outline: none; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
         QTreeWidget::item { padding: 6px; border-bottom: 1px solid #F3F4F6; }
         QTreeWidget::item:selected { background-color: #EFF6FF; color: #1D4ED8; }
         QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #6B7280; font-weight: 500; text-align: left; }
 
         #rightHeader { border-bottom: 1px solid #E5E7EB; padding: 16px 20px; }
-        #settingsScroll { border: none; background-color: transparent; }
-        #settingsScroll > QWidget > QWidget { background-color: white; }
+
+        /* 透明化包裹层，避免与外层背景冲突 */
+        #settingsScroll { border: none; background-color: transparent; margin: 0; padding: 0; }
+        #settingsScroll > QWidget { background-color: transparent; }
+        #settingsScroll > QWidget > QWidget { background-color: transparent; margin: 0; padding: 0; }
 
         QScrollBar:vertical { border: none; background: transparent; width: 8px; margin: 0px; }
         QScrollBar::handle:vertical { background: #D1D5DB; min-height: 30px; border-radius: 4px; }
