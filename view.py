@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDialog, QTextEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
+from PySide6.QtGui import QIcon  # 引入 QIcon
 
 
 # ================== 自定义无边框拖拽对话框基类 ==================
@@ -279,6 +280,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RATools for PDF")
+
+        # === 添加原生窗口图标 ===
+        self.setWindowIcon(QIcon("icon.png"))
+
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
 
