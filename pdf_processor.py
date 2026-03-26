@@ -195,12 +195,14 @@ class PDFProcessor:
             if "修改打开页面为第一页" in options or "修改放大率为默认" in options:
                 if doc.page_count > 0:
                     page0_xref = doc[0].xref
-                    action_str = f"[{page0_xref} 0 R /Fit]" if "修改放大率为默认" in options else f"[{page0_xref} 0 R /XYZ null null null]"
+                    # /XYZ null null null 表示使用阅读器默认缩放，不强制 Fit/固定倍率
+                    action_str = f"[{page0_xref} 0 R /XYZ null null null]"
                     doc.xref_set_key(catalog_xref, "OpenAction", action_str);
                     changed = True
 
             if "修改页面布局为默认" in options:
-                doc.xref_set_key(catalog_xref, "PageLayout", "/SinglePage");
+                # 恢复为 PDF 阅读器默认行为：移除显式 PageLayout 设置
+                doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
 
             if "修改导览标签" in options:
@@ -345,10 +347,85 @@ class PDFProcessor:
                 if "删除所有链接和书签" in options:
                     doc.set_toc([])
                     for page in doc:
-                        for link in page.get_links(): page.delete_link(link)
+                        # 直接删除 Link 注释，避免部分 PDF 中 delete_link 命中不到
+                        for annot in page.annots() or []:
+                            try:
+                                if annot.type[0] == 8:  # 8 代表 LINK 注释
+                                    page.delete_annot(annot)
+                            except Exception:
+                                pass
+                        # 兜底：再按 get_links 删除一遍
+                        for link in page.get_links():
+                            try:
+                                page.delete_link(link)
+                            except Exception:
+                                pass
                     changed = True
                 else:
                     for page in doc:
+                        decolor_rects = []
+
+                        def _is_span_blue(span_color_int: int) -> bool:
+                            # span["color"] 是 0xRRGGBB
+                            b = span_color_int & 0xFF
+                            g = (span_color_int >> 8) & 0xFF
+                            r = (span_color_int >> 16) & 0xFF
+                            return b > r + 40 and b > g + 40
+
+                        def _overlay_black_text_in_rect(rect: fitz.Rect):
+                            try:
+                                text_dict = page.get_text("dict", clip=rect)
+                            except Exception:
+                                return
+                            for block in text_dict.get("blocks", []):
+                                for line in block.get("lines", []):
+                                    for span in line.get("spans", []):
+                                        try:
+                                            txt = span.get("text", "")
+                                            if not txt.strip():
+                                                continue
+                                            if not _is_span_blue(span.get("color", 0)):
+                                                continue
+                                            bbox = span.get("bbox", None)
+                                            if not bbox or len(bbox) != 4:
+                                                continue
+                                            span_rect = fitz.Rect(bbox)
+                                            # 叠加黑字覆盖蓝字（不重写内容流，尽量低风险）
+                                            page.insert_textbox(
+                                                span_rect,
+                                                txt,
+                                                fontsize=span.get("size", 11),
+                                                fontname="helv",
+                                                color=(0, 0, 0),
+                                                overlay=True,
+                                            )
+                                            changed = True
+                                        except Exception:
+                                            continue
+
+                        # 外部 URI 链接：优先用 delete_annot 方式确保真的移除可点击行为
+                        if (
+                            "删除外部链接（网页、邮箱地址）" in options
+                            or "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options
+                        ):
+                            for annot in page.annots() or []:
+                                try:
+                                    if annot.type[0] != 8:
+                                        continue
+                                    uri = ""
+                                    # PyMuPDF 不同版本可能用不同字段暴露 uri
+                                    if hasattr(annot, "uri"):
+                                        uri = getattr(annot, "uri") or ""
+                                    if not uri and hasattr(annot, "info"):
+                                        uri = annot.info.get("uri", "") or ""
+                                    if uri:
+                                        if "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                                            decolor_rects.append(annot.rect)
+                                        page.delete_annot(annot)
+                                        changed = True
+                                except Exception:
+                                    pass
+
                         for link in page.get_links():
                             kind = link.get("kind", fitz.LINK_NONE)
                             delete_it = False
@@ -358,7 +435,19 @@ class PDFProcessor:
                                     "删除失效的链接（即未分配任何操作的链接）" in options or "删除无效的超链接，且将文字改成黑色" in options): delete_it = True
                             if "删除未知动作的链接（即GoTo, GoToRi和Launch之外的链接）" in options and kind not in [
                                 fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]: delete_it = True
-                            if delete_it: page.delete_link(link); changed = True
+                            if delete_it:
+                                if kind == fitz.LINK_URI and "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                                    try:
+                                        decolor_rects.append(fitz.Rect(link.get("from")))
+                                    except Exception:
+                                        pass
+                                page.delete_link(link)
+                                changed = True
+
+                        # 去色：对刚刚删除的外部 URI 区域叠加黑色文字
+                        if decolor_rects and "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                            for r in decolor_rects:
+                                _overlay_black_text_in_rect(r)
 
                 if "删除PDF注释" in options:
                     for page in doc:
