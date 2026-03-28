@@ -569,11 +569,11 @@ class PDFProcessor:
                 doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
 
-            if "修改导览标签" in options:
+            if "默认启用书签导航" in options:
                 doc.xref_set_key(catalog_xref, "PageMode", "/UseOutlines");
                 changed = True
 
-            if "PDF若存在书签则收起" in options:
+            if "折叠所有书签" in options:
                 toc = doc.get_toc(simple=False)
                 if toc:
                     for item in toc:
@@ -773,7 +773,7 @@ class PDFProcessor:
                                "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
                                "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",
                                "删除JavaScript, 3D内容或者动态内容", "删除文档附件", "删除文档标签", "删除PDF注释",
-                               "删除文档说明", "删除所有链接和书签"]
+                               "删除文档元数据", "删除所有链接和书签"]
             if any(opt in options for opt in cleanup_options):
                 if "删除所有链接和书签" in options:
                     doc.set_toc([])
@@ -915,12 +915,12 @@ class PDFProcessor:
                     doc.xref_set_key(catalog_xref, "StructTreeRoot", "null")
                     doc.xref_set_key(catalog_xref, "MarkInfo", "null");
                     changed = True
-                if "删除文档说明" in options:
+                if "删除文档元数据" in options:
                     doc.set_metadata({});
                     doc.xref_set_key(catalog_xref, "PieceInfo", "null");
                     changed = True
 
-            is_linear = "修改文件为快速网页浏览" in options
+            is_linear = "设置为快速网页浏览" in options
             if changed or is_linear:
                 if needs_gs_engine:
                     temp_pdf = str(output_path) + ".tmp.pdf"

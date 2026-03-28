@@ -174,6 +174,9 @@ class MainController(QObject):
         self.view.drop_zone.mousePressEvent = self.open_file_dialog
         self.view.add_folder_btn.clicked.connect(self.add_folder)
         self.view.btn_clear.clicked.connect(self.clear_list)
+        self.view.btn_preset_china.clicked.connect(lambda: self.view.toggle_preset("china"))
+        self.view.btn_preset_us.clicked.connect(lambda: self.view.toggle_preset("us"))
+        self.view.btn_clear_selected_options.clicked.connect(self.view.clear_selected_options)
 
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)

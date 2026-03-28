@@ -277,8 +277,60 @@ class DropZoneLabel(QLabel):
 
 
 class MainWindow(QMainWindow):
+    PRESET_OPTION_ALIASES = {
+        "默认启用书签导航": "修改导览标签",
+        "折叠所有书签": "PDF若存在书签则收起",
+        "设置为快速网页浏览": "修改文件为快速网页浏览",
+        "删除文档元数据": "删除文档说明",
+    }
+
+    PRESET_OPTIONS = {
+        "china": {
+            "title": "中国 eCTD",
+            "options": {
+                "PDF版本转换",
+                "设置为快速网页浏览",
+                "默认启用书签导航",
+                "修改页面布局为默认",
+                "修改打开页面为第一页",
+                "修改书签设置为承前缩放",
+                "删除外部链接（网页、邮箱地址）",
+                "删除PDF注释",
+                "删除文档元数据",
+                "删除文档附件",
+                "删除JavaScript, 3D内容或者动态内容",
+                "修改超链接的设置为承前缩放",
+                "修改超链接的设置为在新窗口中打开",
+                "修改书签的设置为在新窗口中打开",
+                "折叠所有书签",
+                "文件名修改为符合电子申报/eCTD要求的格式",
+            },
+        },
+        "us": {
+            "title": "美国 eCTD",
+            "options": {
+                "PDF版本转换",
+                "设置为快速网页浏览",
+                "默认启用书签导航",
+                "修改页面布局为默认",
+                "修改打开页面为第一页",
+                "修改书签设置为承前缩放",
+                "删除PDF注释",
+                "删除文档元数据",
+                "删除文档附件",
+                "删除JavaScript, 3D内容或者动态内容",
+                "修改超链接的设置为承前缩放",
+                "修改超链接的设置为在新窗口中打开",
+                "修改书签的设置为在新窗口中打开",
+            },
+        },
+    }
+
     def __init__(self):
         super().__init__()
+        self.custom_selection_before_preset = set()
+        self.active_preset_key = None
+        self.is_applying_preset = False
         self.setWindowTitle("RATools for PDF")
 
         # === 添加原生窗口图标 ===
@@ -301,8 +353,8 @@ class MainWindow(QMainWindow):
                     {"id": "修改打开页面为第一页", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
                     {"id": "修改页面布局为默认", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
                     {"id": "修改放大率为默认", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
-                    {"id": "修改导览标签", "title": "启用书签导航", "desc": "强制PDF打开时自动展开左侧的书签/导览面板"},
-                    {"id": "PDF若存在书签则收起", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
+                    {"id": "默认启用书签导航", "title": "启用书签导航", "desc": "强制PDF打开时自动展开左侧的书签/导览面板"},
+                    {"id": "折叠所有书签", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
                     {"id": "根据文件名在PDF文档属性中自动添加文件标题", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
                 ]
             },
@@ -353,7 +405,7 @@ class MainWindow(QMainWindow):
                     {"id": "删除文档附件", "title": "移除所有内嵌附件", "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
                     {"id": "删除文档标签", "title": "移除结构化标签", "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
                     {"id": "删除PDF注释", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
-                    {"id": "删除文档说明", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
+                    {"id": "删除文档元数据", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
                     {"id": "删除所有链接和书签", "title": "暴力净化 (移除全部链接和书签)", "desc": "一键清除文档内所有的导航书签与页面超链接"}
                 ]
             },
@@ -361,8 +413,8 @@ class MainWindow(QMainWindow):
                 "icon": "📦",
                 "title": "文件级优化与输出",
                 "options": [
-                    {"id": "PDF版本转换", "title": "PDF 兼容性降级转换", "desc": "通过引擎重构处理，提升旧版本电子阅读器的兼容性"},
-                    {"id": "修改文件为快速网页浏览", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
+                    {"id": "PDF版本转换", "title": "PDF 版本转换", "desc": "将PDF版本修改为1.7版本"},
+                    {"id": "设置为快速网页浏览", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
                     {"id": "文件名修改为符合电子申报/eCTD要求的格式", "title": "eCTD 文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]
             }
@@ -551,6 +603,28 @@ class MainWindow(QMainWindow):
                 btn_layout.addWidget(self.btn_import_links)
                 page_layout.addLayout(btn_layout)
 
+            if mod["title"] == "初始视图与属性":
+                for alias, target in [
+                    ("默认启用书签导航", "修改导览标签"),
+                    ("折叠所有书签", "PDF若存在书签则收起"),
+                ]:
+                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
+                        self.all_checkboxes[alias] = self.all_checkboxes[target]
+
+            if mod["title"] == "文件级优化与输出":
+                for alias, target in [
+                    ("设置为快速网页浏览", "修改文件为快速网页浏览"),
+                ]:
+                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
+                        self.all_checkboxes[alias] = self.all_checkboxes[target]
+
+            if mod["title"] == "违规内容清理与安全性":
+                for alias, target in [
+                    ("删除文档元数据", "删除文档说明"),
+                ]:
+                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
+                        self.all_checkboxes[alias] = self.all_checkboxes[target]
+
             page_layout.addStretch()
 
             # 将每个页面按顺序加入核心布局并暂时隐藏
@@ -563,6 +637,38 @@ class MainWindow(QMainWindow):
 
         middle_layout.addWidget(right_sidebar)
         main_layout.addWidget(middle_container)
+
+        preset_bar = QFrame()
+        preset_bar.setObjectName("presetBar")
+        preset_layout = QHBoxLayout(preset_bar)
+        preset_layout.setContentsMargins(24, 10, 24, 10)
+        preset_layout.setSpacing(10)
+
+        preset_label = QLabel("预设")
+        preset_label.setObjectName("presetLabel")
+        preset_layout.addWidget(preset_label)
+
+        self.btn_preset_china = QPushButton("中国eCTD")
+        self.btn_preset_china.setObjectName("presetBtn")
+        self.btn_preset_china.setCheckable(True)
+        preset_layout.addWidget(self.btn_preset_china)
+
+        self.btn_preset_us = QPushButton("美国eCTD")
+        self.btn_preset_us.setObjectName("presetBtn")
+        self.btn_preset_us.setCheckable(True)
+        preset_layout.addWidget(self.btn_preset_us)
+
+        self.btn_clear_selected_options = QPushButton("全部取消")
+        self.btn_clear_selected_options.setObjectName("actionBtn")
+
+        self.preset_btn_group = QButtonGroup(self)
+        self.preset_btn_group.setExclusive(True)
+        self.preset_btn_group.addButton(self.btn_preset_china)
+        self.preset_btn_group.addButton(self.btn_preset_us)
+
+        preset_layout.addStretch()
+        preset_layout.addWidget(self.btn_clear_selected_options)
+        main_layout.addWidget(preset_bar)
 
         # ================= 底部操作栏 =================
         footer = QFrame()
@@ -641,12 +747,108 @@ class MainWindow(QMainWindow):
             if old_cn or old_en:
                 merged_font_opt.setChecked(True)
 
+        self.custom_selection_before_preset = set(self.get_selected_options())
+        # 预设按钮默认使用“中国 eCTD”，不跟随上次会话持久化
+        self.apply_preset("china", persist=False)
+
     def closeEvent(self, event):
         for opt_id, cb in self.all_checkboxes.items():
             key = self.settings_key_map.get(opt_id)
             if key:
                 self.app_settings.setValue(key, cb.isChecked())
         super().closeEvent(event)
+
+    def get_selected_preset(self):
+        return self.active_preset_key
+
+    def _set_preset_button_state(self, preset_key):
+        self.preset_btn_group.setExclusive(False)
+        self.btn_preset_china.setChecked(preset_key == "china")
+        self.btn_preset_us.setChecked(preset_key == "us")
+        self.preset_btn_group.setExclusive(True)
+
+    def restore_custom_selection(self):
+        checkbox_groups = {}
+        for opt_id, cb in self.all_checkboxes.items():
+            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
+                continue
+            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+
+        self.is_applying_preset = True
+        try:
+            for group in checkbox_groups.values():
+                should_check = any(key in self.custom_selection_before_preset for key in group["keys"])
+                group["checkbox"].setChecked(should_check)
+        finally:
+            self.is_applying_preset = False
+
+        self.active_preset_key = None
+        self._set_preset_button_state(None)
+
+    def toggle_preset(self, preset_key):
+        if self.active_preset_key == preset_key:
+            self.restore_custom_selection()
+            return
+
+        if self.active_preset_key is None:
+            self.custom_selection_before_preset = set(self.get_selected_options())
+
+        self.apply_preset(preset_key)
+
+    def clear_selected_options(self):
+        checkbox_groups = {}
+        for opt_id, cb in self.all_checkboxes.items():
+            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
+                continue
+            checkbox_groups.setdefault(id(cb), cb)
+
+        self.is_applying_preset = True
+        try:
+            for cb in checkbox_groups.values():
+                cb.setChecked(False)
+        finally:
+            self.is_applying_preset = False
+
+        self.active_preset_key = None
+        self._set_preset_button_state(None)
+        self.custom_selection_before_preset = set()
+
+    def apply_preset(self, preset_key, persist=True):
+        preset = self.PRESET_OPTIONS.get(preset_key)
+        if not preset:
+            return
+
+        target_options = set(preset["options"])
+        for alias, actual in self.PRESET_OPTION_ALIASES.items():
+            if alias in target_options:
+                target_options.add(actual)
+
+        checkbox_groups = {}
+        for opt_id, cb in self.all_checkboxes.items():
+            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
+                continue
+            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+
+        self.is_applying_preset = True
+        try:
+            for group in checkbox_groups.values():
+                should_check = any(key in target_options for key in group["keys"])
+                group["checkbox"].setChecked(should_check)
+        finally:
+            self.is_applying_preset = False
+
+        self.active_preset_key = preset_key
+        self._set_preset_button_state(preset_key)
+
+    def on_checkbox_toggled(self, _checked):
+        if self.is_applying_preset:
+            return
+
+        if self.active_preset_key is not None:
+            self.active_preset_key = None
+            self._set_preset_button_state(None)
+
+        self.custom_selection_before_preset = set(self.get_selected_options())
 
     def show_about_dialog(self):
         if not hasattr(self, 'about_dialog'):
@@ -696,6 +898,7 @@ class MainWindow(QMainWindow):
 
         cb = QCheckBox()
         cb.setChecked(checked)
+        cb.toggled.connect(self.on_checkbox_toggled)
         self.all_checkboxes[opt_id] = cb
 
         title_lbl = QLabel(title)
@@ -724,6 +927,8 @@ class MainWindow(QMainWindow):
         #leftSidebar { border-right: 1px solid #E5E7EB; }
         #rightSidebar { border-left: 1px solid #E5E7EB; } 
         #footer { border-top: 1px solid #E5E7EB; }
+        #presetBar { background-color: white; border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
+        #presetLabel { color: #6B7280; font-size: 12px; font-weight: 600; }
 
         #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
         #topBtn:hover { background-color: #F3F4F6; color: #111827; }
@@ -769,6 +974,9 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator:checked { background: #2563EB; border-color: #2563EB; }
         #actionBtn { padding: 8px 16px; border: 1px solid transparent; border-radius: 8px; background-color: transparent; color: #4B5563; font-weight: 500; }
         #actionBtn:hover { background-color: #F3F4F6; }
+        #presetBtn { padding: 6px 14px; border: 1px solid #D1D5DB; border-radius: 8px; background-color: white; color: #4B5563; font-weight: 600; }
+        #presetBtn:hover { background-color: #F9FAFB; border-color: #9CA3AF; }
+        #presetBtn:checked { background-color: #EFF6FF; border-color: #93C5FD; color: #1D4ED8; }
         #startBtn { padding: 10px 24px; background-color: #2563EB; color: white; border-radius: 8px; font-weight: bold; border: none; }
         #startBtn:hover { background-color: #1D4ED8; }
         #startBtn:pressed { background-color: #1E40AF; }
