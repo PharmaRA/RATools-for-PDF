@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
                     {"id": "删除文档附件", "title": "移除所有内嵌附件", "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
                     {"id": "删除文档标签", "title": "移除结构化标签", "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
                     {"id": "删除PDF注释", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
-                    {"id": "删除文档说明", "title": "清空文档元数据", "desc": "移除除标题外所有的作者、创建时间等 PieceInfo 和 Metadata"},
+                    {"id": "删除文档说明", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
                     {"id": "删除所有链接和书签", "title": "暴力净化 (移除全部链接和书签)", "desc": "一键清除文档内所有的导航书签与页面超链接"}
                 ]
             },

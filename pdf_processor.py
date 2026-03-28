@@ -309,10 +309,17 @@ class PDFProcessor:
 
     @staticmethod
     def _make_text_block_blue(block_text):
+        return PDFProcessor._make_text_block_color(block_text, (0.0, 0.0, 1.0))
+
+    @staticmethod
+    def _make_text_block_color(block_text, color_rgb):
+        r, g, b = color_rgb
+        color_cmd = f"{r:g} {g:g} {b:g} rg"
+
         if " rg" in block_text:
-            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+-?[0-9.]+\s+-?[0-9.]+\s+rg", "0 0 1 rg", block_text, count=1)
+            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+-?[0-9.]+\s+-?[0-9.]+\s+rg", color_cmd, block_text, count=1)
         if " g" in block_text:
-            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+g", "0 0 1 rg", block_text, count=1)
+            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+g", color_cmd, block_text, count=1)
 
         tj_pos = block_text.find("TJ")
         if tj_pos == -1:
@@ -320,25 +327,20 @@ class PDFProcessor:
         if tj_pos == -1:
             return block_text
 
-        return block_text[:tj_pos] + "0 0 1 rg\n" + block_text[tj_pos:]
+        return block_text[:tj_pos] + color_cmd + "\n" + block_text[tj_pos:]
 
     @staticmethod
-    def _apply_blue_text_via_content_stream(doc, page):
-        link_rects = []
-        link_obj = page.first_link
-        while link_obj:
-            link_rects.append(link_obj.rect)
-            link_obj = link_obj.next
-
-        if not link_rects:
+    def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, only_if_blue=False):
+        if not target_rects:
             return False
 
         target_indexes = set()
         for trace_index, trace in enumerate(page.get_texttrace()):
             if trace.get("type") != 0:
                 continue
+
             bbox = fitz.Rect(trace.get("bbox", (0, 0, 0, 0)))
-            if not any(PDFProcessor._rects_intersect(bbox, rect) for rect in link_rects):
+            if not any(PDFProcessor._rects_intersect(bbox, rect) for rect in target_rects):
                 continue
 
             chars = trace.get("chars", ())
@@ -358,24 +360,21 @@ class PDFProcessor:
                 visible_char_count += 1
                 rect = fitz.Rect(char_bbox)
                 center = fitz.Point((rect.x0 + rect.x1) / 2.0, (rect.y0 + rect.y1) / 2.0)
-                if PDFProcessor._point_in_any_rect(center, link_rects):
+                if PDFProcessor._point_in_any_rect(center, target_rects):
                     inside_char_count += 1
 
             if visible_char_count == 0:
                 continue
             if inside_char_count == 0:
                 continue
-
-            # 保守策略：只有当整段可见字符几乎都落在链接区域内，才允许改色。
-            # 这样会牺牲一部分命中率，但能尽量避免误伤链接旁边的普通文本。
             if inside_char_count != visible_char_count:
                 continue
 
             color = trace.get("color", (0.0, 0.0, 0.0))
-            if isinstance(color, tuple) and len(color) >= 3:
-                if color[2] > color[0] + 0.1 and color[2] > color[1] + 0.1:
+            if only_if_blue and isinstance(color, tuple) and len(color) >= 3:
+                is_blue = color[2] > color[0] + 0.1 and color[2] > color[1] + 0.1
+                if not is_blue:
                     continue
-
             target_indexes.add(trace_index)
 
         if not target_indexes:
@@ -402,7 +401,7 @@ class PDFProcessor:
                 if current_index not in target_indexes:
                     return block
 
-                new_block = PDFProcessor._make_text_block_blue(block)
+                new_block = PDFProcessor._make_text_block_color(block, color_rgb)
                 if new_block != block:
                     changed = True
                 return new_block
@@ -412,6 +411,21 @@ class PDFProcessor:
                 doc.update_stream(xref, new_stream_text.encode("latin1"))
 
         return changed
+
+    @staticmethod
+    def _apply_blue_text_via_content_stream(doc, page):
+        link_rects = []
+        link_obj = page.first_link
+        while link_obj:
+            link_rects.append(link_obj.rect)
+            link_obj = link_obj.next
+        return PDFProcessor._apply_text_color_via_content_stream(
+            doc,
+            page,
+            link_rects,
+            (0.0, 0.0, 1.0),
+            only_if_blue=False,
+        )
 
     @staticmethod
     def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
@@ -829,10 +843,15 @@ class PDFProcessor:
                                     "删除外部链接（网页、邮箱地址）" in options or "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options): delete_it = True
                             if kind == fitz.LINK_NONE and (
                                     "删除失效的链接（即未分配任何操作的链接）" in options or "删除无效的超链接，且将文字改成黑色" in options): delete_it = True
-                            if "删除未知动作的链接（即GoTo, GoToRi和Launch之外的链接）" in options and kind not in [
+                            if "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）" in options and kind not in [
                                 fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]: delete_it = True
                             if delete_it:
                                 if kind == fitz.LINK_URI and "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                                    try:
+                                        decolor_rects.append(fitz.Rect(link.get("from")))
+                                    except Exception:
+                                        pass
+                                if kind == fitz.LINK_NONE and "删除无效的超链接，且将文字改成黑色" in options:
                                     try:
                                         decolor_rects.append(fitz.Rect(link.get("from")))
                                     except Exception:
@@ -841,14 +860,28 @@ class PDFProcessor:
                                 changed = True
 
                         # 去色：对刚刚删除的外部 URI 区域叠加黑色文字
-                        if decolor_rects and "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
-                            for r in decolor_rects:
-                                _overlay_black_text_in_rect(r)
+                        if decolor_rects and (
+                            "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options
+                            or "删除无效的超链接，且将文字改成黑色" in options
+                        ):
+                            if PDFProcessor._apply_text_color_via_content_stream(
+                                doc,
+                                page,
+                                decolor_rects,
+                                (0.0, 0.0, 0.0),
+                                only_if_blue=True,
+                            ):
+                                changed = True
 
                 if "删除PDF注释" in options:
                     for page in doc:
-                        for annot in page.annots():
-                            if annot.type[0] != 8: page.delete_annot(annot); changed = True
+                        annots = list(page.annots() or [])
+                        for annot in annots:
+                            try:
+                                page.delete_annot(annot)
+                                changed = True
+                            except Exception:
+                                pass
 
                 if "删除JavaScript, 3D内容或者动态内容" in options:
                     doc.xref_set_key(catalog_xref, "Names", "null");
