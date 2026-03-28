@@ -5,6 +5,8 @@ import subprocess
 import shutil
 import csv
 import json
+import re
+from urllib.parse import unquote
 from pathlib import Path
 
 
@@ -132,6 +134,7 @@ class PDFProcessor:
     def import_links(pdf_path, json_path, output_path):
         """清除原有链接，根据 JSON 精准复原超链接布局"""
         doc = fitz.open(pdf_path)
+        link_file_kind = getattr(fitz, "LINK_FILE", None)
 
         with open(json_path, 'r', encoding='utf-8') as f:
             links_data = json.load(f)
@@ -152,7 +155,7 @@ class PDFProcessor:
                 new_link = {"kind": kind, "from": rect}
                 if kind == fitz.LINK_URI:
                     new_link["uri"] = ld.get('uri', '')
-                elif kind == fitz.LINK_FILE:
+                elif link_file_kind is not None and kind == link_file_kind:
                     new_link["file"] = ld.get('file', '')
                 elif kind in [fitz.LINK_GOTO, fitz.LINK_GOTOR]:
                     new_link["page"] = ld.get('target_page', 0)
@@ -168,6 +171,325 @@ class PDFProcessor:
         doc.save(output_path, garbage=3, deflate=True)
         doc.close()
 
+    @staticmethod
+    def _is_text_blue(page, rect):
+        text_dict = page.get_text("dict", clip=rect)
+        for block in text_dict.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    color = span.get("color", 0)
+                    b = color & 0xFF
+                    g = (color >> 8) & 0xFF
+                    r = (color >> 16) & 0xFF
+                    if b > r + 40 and b > g + 40:
+                        return True
+        return False
+
+    @staticmethod
+    def _overlay_text_color_in_rect(page, rect, color, skip_if_already_blue=False, erase_background=False):
+        try:
+            text_dict = page.get_text("dict", clip=rect)
+        except Exception:
+            return False
+
+        changed = False
+        for block in text_dict.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    try:
+                        txt = span.get("text", "")
+                        if not txt.strip():
+                            continue
+
+                        span_color = span.get("color", 0)
+                        b = span_color & 0xFF
+                        g = (span_color >> 8) & 0xFF
+                        r = (span_color >> 16) & 0xFF
+                        is_blue = b > r + 40 and b > g + 40
+                        if skip_if_already_blue and is_blue:
+                            continue
+
+                        bbox = span.get("bbox", None)
+                        if not bbox or len(bbox) != 4:
+                            continue
+
+                        span_rect = fitz.Rect(bbox)
+                        origin = span.get("origin", None)
+                        if not origin or len(origin) != 2:
+                            origin = (span_rect.x0, span_rect.y1)
+                        font_candidates = []
+                        original_font = span.get("font", "")
+                        if original_font:
+                            font_candidates.append(original_font)
+
+                        if any(ord(ch) > 127 for ch in txt):
+                            font_candidates.extend(["china-s", "cjk", "helv"])
+                        else:
+                            font_candidates.append("helv")
+
+                        inserted = False
+                        for font_name in font_candidates:
+                            try:
+                                if erase_background and not inserted:
+                                    page.draw_rect(span_rect, color=None, fill=(1, 1, 1), overlay=True)
+
+                                page.insert_text(
+                                    origin,
+                                    txt,
+                                    fontsize=span.get("size", 11),
+                                    fontname=font_name,
+                                    color=color,
+                                    overlay=True,
+                                )
+                                inserted = True
+                                changed = True
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+
+        return changed
+
+    @staticmethod
+    def _link_has_visible_border(doc, link_obj):
+        border = link_obj.border or {}
+        if border.get("width", 0) > 0:
+            return True
+
+        xref = getattr(link_obj, "xref", 0)
+        if not xref:
+            return False
+
+        try:
+            raw_obj = doc.xref_object(xref)
+        except Exception:
+            return False
+
+        bs_match = re.search(r"/BS\s*<<.*?/W\s+([0-9.]+)", raw_obj, re.S)
+        if bs_match:
+            try:
+                return float(bs_match.group(1)) > 0
+            except Exception:
+                pass
+
+        border_match = re.search(r"/Border\s*\[\s*[0-9.]+\s+[0-9.]+\s+([0-9.]+)", raw_obj)
+        if border_match:
+            try:
+                return float(border_match.group(1)) > 0
+            except Exception:
+                pass
+
+        return False
+
+    @staticmethod
+    def _force_link_new_window(doc, xref):
+        if not xref:
+            return
+
+        try:
+            link_obj = doc.xref_object(xref)
+            if "/NewWindow" in link_obj:
+                link_obj = re.sub(r"/NewWindow\s+(true|false)", "/NewWindow true", link_obj)
+            elif "/S /GoToR" in link_obj:
+                link_obj = link_obj.replace("/S /GoToR", "/S /GoToR\n    /NewWindow true", 1)
+            elif "/S /Launch" in link_obj:
+                link_obj = link_obj.replace("/S /Launch", "/S /Launch\n    /NewWindow true", 1)
+            doc.update_object(xref, link_obj)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _rects_intersect(a, b):
+        return not (a.x1 <= b.x0 or a.x0 >= b.x1 or a.y1 <= b.y0 or a.y0 >= b.y1)
+
+    @staticmethod
+    def _point_in_any_rect(point, rects):
+        return any(rect.contains(point) for rect in rects)
+
+    @staticmethod
+    def _make_text_block_blue(block_text):
+        if " rg" in block_text:
+            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+-?[0-9.]+\s+-?[0-9.]+\s+rg", "0 0 1 rg", block_text, count=1)
+        if " g" in block_text:
+            return re.sub(r"(?<![0-9.])-?[0-9.]+\s+g", "0 0 1 rg", block_text, count=1)
+
+        tj_pos = block_text.find("TJ")
+        if tj_pos == -1:
+            tj_pos = block_text.find("Tj")
+        if tj_pos == -1:
+            return block_text
+
+        return block_text[:tj_pos] + "0 0 1 rg\n" + block_text[tj_pos:]
+
+    @staticmethod
+    def _apply_blue_text_via_content_stream(doc, page):
+        link_rects = []
+        link_obj = page.first_link
+        while link_obj:
+            link_rects.append(link_obj.rect)
+            link_obj = link_obj.next
+
+        if not link_rects:
+            return False
+
+        target_indexes = set()
+        for trace_index, trace in enumerate(page.get_texttrace()):
+            if trace.get("type") != 0:
+                continue
+            bbox = fitz.Rect(trace.get("bbox", (0, 0, 0, 0)))
+            if not any(PDFProcessor._rects_intersect(bbox, rect) for rect in link_rects):
+                continue
+
+            chars = trace.get("chars", ())
+            visible_char_count = 0
+            inside_char_count = 0
+            for ch in chars:
+                if len(ch) < 4:
+                    continue
+                unicode_codepoint = ch[0]
+                if unicode_codepoint in (9, 10, 13, 32):
+                    continue
+
+                char_bbox = ch[3]
+                if not char_bbox or len(char_bbox) != 4:
+                    continue
+
+                visible_char_count += 1
+                rect = fitz.Rect(char_bbox)
+                center = fitz.Point((rect.x0 + rect.x1) / 2.0, (rect.y0 + rect.y1) / 2.0)
+                if PDFProcessor._point_in_any_rect(center, link_rects):
+                    inside_char_count += 1
+
+            if visible_char_count == 0:
+                continue
+            if inside_char_count == 0:
+                continue
+
+            # 保守策略：只有当整段可见字符几乎都落在链接区域内，才允许改色。
+            # 这样会牺牲一部分命中率，但能尽量避免误伤链接旁边的普通文本。
+            if inside_char_count != visible_char_count:
+                continue
+
+            color = trace.get("color", (0.0, 0.0, 0.0))
+            if isinstance(color, tuple) and len(color) >= 3:
+                if color[2] > color[0] + 0.1 and color[2] > color[1] + 0.1:
+                    continue
+
+            target_indexes.add(trace_index)
+
+        if not target_indexes:
+            return False
+
+        text_block_index = 0
+        changed = False
+        content_xrefs = page.get_contents()
+        if not isinstance(content_xrefs, (list, tuple)):
+            content_xrefs = [content_xrefs]
+
+        for xref in content_xrefs:
+            stream_bytes = doc.xref_stream(xref)
+            stream_text = stream_bytes.decode("latin1", "ignore")
+
+            def replace_bt_block(match):
+                nonlocal text_block_index, changed
+                block = match.group(0)
+                if "Tj" not in block and "TJ" not in block:
+                    return block
+
+                current_index = text_block_index
+                text_block_index += 1
+                if current_index not in target_indexes:
+                    return block
+
+                new_block = PDFProcessor._make_text_block_blue(block)
+                if new_block != block:
+                    changed = True
+                return new_block
+
+            new_stream_text = re.sub(r"BT.*?ET", replace_bt_block, stream_text, flags=re.S)
+            if new_stream_text != stream_text:
+                doc.update_stream(xref, new_stream_text.encode("latin1"))
+
+        return changed
+
+    @staticmethod
+    def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
+        changed = False
+
+        for link in page.get_links():
+            link_modified = False
+            kind = link.get("kind", fitz.LINK_NONE)
+
+            if "将外链接中的绝对路径转相对路径" in options and kind in file_like_link_kinds:
+                file_path = link.get("file", "")
+                decoded_file_path = unquote(file_path) if file_path else ""
+                if decoded_file_path and (
+                    ":" in decoded_file_path or decoded_file_path.startswith("/") or decoded_file_path.startswith("\\")
+                ):
+                    link["file"] = os.path.basename(decoded_file_path.replace("\\", "/"))
+                    link_modified = True
+
+            if "修改超链接的设置为承前缩放" in options and kind == fitz.LINK_GOTO:
+                if link.get("zoom") != 0.0:
+                    link["zoom"] = 0.0
+                    link_modified = True
+
+            if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                if not link.get("newWindow"):
+                    link["newWindow"] = True
+                    link_modified = True
+
+            if not link_modified:
+                continue
+
+            page.update_link(link)
+            if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                PDFProcessor._force_link_new_window(doc, link.get("xref", 0))
+            changed = True
+
+        return changed
+
+    @staticmethod
+    def _apply_hyperlink_styles(doc, page, options):
+        changed = False
+
+        if "修改超链接文本至蓝色字体" in options:
+            if PDFProcessor._apply_blue_text_via_content_stream(doc, page):
+                changed = True
+
+        link_obj = page.first_link
+
+        while link_obj:
+            link_changed = False
+            has_border = PDFProcessor._link_has_visible_border(doc, link_obj)
+
+            if "删除超链接边框" in options:
+                if has_border:
+                    link_obj.set_border(width=0)
+                    link_changed = True
+            elif "修改超链接文本至黑色边框" in options:
+                link_obj.set_border(width=1.0)
+                link_obj.set_colors(stroke=(0, 0, 0))
+                link_changed = True
+            elif "超链接有边框则蓝框黑字" in options:
+                if has_border:
+                    link_obj.set_border(width=1.0)
+                    link_obj.set_colors(stroke=(0, 0, 1))
+                    link_changed = True
+            elif "超链接无边框且蓝字则蓝框黑字" in options:
+                if not has_border and PDFProcessor._is_text_blue(page, link_obj.rect):
+                    link_obj.set_border(width=1.0)
+                    link_obj.set_colors(stroke=(0, 0, 1))
+                    link_changed = True
+
+            if link_changed:
+                changed = True
+
+            link_obj = link_obj.next
+
+        return changed
+
     # ====================================================
     # 六大核心合规清理模块入口
     # ====================================================
@@ -175,6 +497,10 @@ class PDFProcessor:
     def process_document(input_path, output_path, options):
         try:
             doc = fitz.open(input_path)
+            link_file_kind = getattr(fitz, "LINK_FILE", None)
+            file_like_link_kinds = {fitz.LINK_GOTOR}
+            if link_file_kind is not None:
+                file_like_link_kinds.add(link_file_kind)
 
             if doc.needs_pass: return False, "❌ 文件已加密"
             changed = False
@@ -229,23 +555,119 @@ class PDFProcessor:
                         page.set_cropbox(target_rect);
                         changed = True
 
+            def _to_point(value):
+                if hasattr(value, "x") and hasattr(value, "y"):
+                    return fitz.Point(float(value.x), float(value.y))
+                if isinstance(value, (tuple, list)) and len(value) >= 2:
+                    try:
+                        return fitz.Point(float(value[0]), float(value[1]))
+                    except Exception:
+                        return fitz.Point(72.0, 36.0)
+                return fitz.Point(72.0, 36.0)
+
+            def _normalize_bookmark_dest(dest, kind):
+                if not isinstance(dest, dict):
+                    dest = {}
+
+                if kind == fitz.LINK_GOTO:
+                    try:
+                        page_idx = int(dest.get("page", 0))
+                    except Exception:
+                        page_idx = 0
+                    if page_idx < 0:
+                        page_idx = 0
+
+                    try:
+                        zoom = float(dest.get("zoom", 0.0))
+                    except Exception:
+                        zoom = 0.0
+
+                    return {
+                        "kind": fitz.LINK_GOTO,
+                        "page": page_idx,
+                        "to": _to_point(dest.get("to")),
+                        "zoom": zoom,
+                    }
+
+                if kind == fitz.LINK_GOTOR:
+                    try:
+                        page_idx = int(dest.get("page", 0))
+                    except Exception:
+                        page_idx = 0
+                    if page_idx < 0:
+                        page_idx = 0
+
+                    try:
+                        zoom = float(dest.get("zoom", 0.0))
+                    except Exception:
+                        zoom = 0.0
+
+                    file_path = dest.get("file", "")
+                    if file_path is None:
+                        file_path = ""
+
+                    return {
+                        "kind": fitz.LINK_GOTOR,
+                        "file": str(file_path),
+                        "page": page_idx,
+                        "to": _to_point(dest.get("to")),
+                        "zoom": zoom,
+                        "newWindow": bool(dest.get("newWindow", False)),
+                    }
+
+                if kind == fitz.LINK_LAUNCH:
+                    file_path = dest.get("file", "")
+                    if file_path is None:
+                        file_path = ""
+                    return {
+                        "kind": fitz.LINK_LAUNCH,
+                        "file": str(file_path),
+                        "newWindow": bool(dest.get("newWindow", False)),
+                    }
+
+                if kind == fitz.LINK_URI:
+                    uri = dest.get("uri", "")
+                    if uri is None:
+                        uri = ""
+                    return {
+                        "kind": fitz.LINK_URI,
+                        "uri": str(uri),
+                    }
+
+                return {"kind": fitz.LINK_NONE}
+
             bookmark_options = ["修改书签设置为承前缩放", "修改书签的设置为在新窗口中打开", "删除书签的外部链接",
-                                "删除失效的书签（即未分配任何操作的书签）",
-                                "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"]
+                                 "删除失效的书签（即未分配任何操作的书签）",
+                                 "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"]
             if any(opt in options for opt in bookmark_options):
                 toc = doc.get_toc(simple=False)
                 if toc:
                     new_toc = []
                     toc_modified = False
                     for item in toc:
-                        lvl, title, page, dest = item
+                        lvl, title, bm_page, dest = item
+                        if not isinstance(lvl, int):
+                            try:
+                                lvl = int(lvl)
+                            except Exception:
+                                lvl = 1
+                        if lvl < 1:
+                            lvl = 1
+
+                        if not isinstance(bm_page, int):
+                            try:
+                                bm_page = int(bm_page)
+                            except Exception:
+                                bm_page = 1
+
                         kind = dest.get("kind", fitz.LINK_NONE)
+                        dest = _normalize_bookmark_dest(dest, kind)
                         delete_it = False
 
                         if "删除书签的外部链接" in options and kind == fitz.LINK_URI: delete_it = True
                         if "删除失效的书签（即未分配任何操作的书签）" in options:
                             if kind == fitz.LINK_NONE or (
-                                    kind == fitz.LINK_GOTO and (page < 1 or page > doc.page_count)): delete_it = True
+                                    kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count)): delete_it = True
                         if "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）" in options:
                             if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]: delete_it = True
 
@@ -259,12 +681,12 @@ class PDFProcessor:
                             if not dest.get("newWindow"): dest["newWindow"] = True; toc_modified = True
 
                         if kind == fitz.LINK_GOTO:
-                            if page < 1:
-                                page = 1; toc_modified = True
-                            elif page > doc.page_count:
-                                page = doc.page_count; toc_modified = True
+                            if bm_page < 1:
+                                bm_page = 1; toc_modified = True
+                            elif bm_page > doc.page_count:
+                                bm_page = doc.page_count; toc_modified = True
 
-                        new_toc.append([lvl, title, page, dest])
+                        new_toc.append([lvl, title, bm_page, dest])
 
                     if toc_modified:
                         if new_toc:
@@ -274,7 +696,31 @@ class PDFProcessor:
                                 else:
                                     prev_lvl = new_toc[i - 1][0]
                                     if new_toc[i][0] > prev_lvl + 1: new_toc[i][0] = prev_lvl + 1
-                        doc.set_toc(new_toc);
+                        try:
+                            doc.set_toc(new_toc)
+                        except Exception:
+                            # 容错兜底：若目的地结构异常导致写入失败，降级为基础书签（标题+页码）
+                            fallback_toc = []
+                            prev_lvl = 1
+                            for lvl, title, bm_page, _dest in new_toc:
+                                if not isinstance(lvl, int):
+                                    lvl = prev_lvl
+                                if lvl < 1:
+                                    lvl = 1
+                                if lvl > prev_lvl + 1:
+                                    lvl = prev_lvl + 1
+
+                                if not isinstance(bm_page, int):
+                                    try:
+                                        bm_page = int(bm_page)
+                                    except Exception:
+                                        bm_page = 1
+                                bm_page = max(1, min(bm_page, doc.page_count))
+
+                                fallback_toc.append([lvl, title, bm_page])
+                                prev_lvl = lvl
+
+                            doc.set_toc(fallback_toc)
                         changed = True
 
             hyperlink_options = ["将外链接中的绝对路径转相对路径", "修改超链接的设置为承前缩放",
@@ -283,63 +729,10 @@ class PDFProcessor:
                                  "删除超链接边框"]
             if any(opt in options for opt in hyperlink_options):
                 for page in doc:
-                    links = page.get_links()
-                    for link in links:
-                        link_modified = False
-                        kind = link.get("kind", fitz.LINK_NONE)
-
-                        if "将外链接中的绝对路径转相对路径" in options and kind == fitz.LINK_FILE:
-                            file_path = link.get("file", "")
-                            if file_path and (
-                                    ":" in file_path or file_path.startswith("/") or file_path.startswith("\\")):
-                                link["file"] = os.path.basename(file_path.replace("\\", "/"));
-                                link_modified = True
-                        if "修改超链接的设置为承前缩放" in options and kind == fitz.LINK_GOTO:
-                            if link.get("zoom") != 0.0: link["zoom"] = 0.0; link_modified = True
-                        if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR,
-                                                                                      fitz.LINK_LAUNCH]:
-                            if not link.get("newWindow"): link["newWindow"] = True; link_modified = True
-
-                        if link_modified: page.update_link(link); changed = True
-
-                    for annot in page.annots():
-                        if annot.type[0] == 8:  # 8 代表 LINK 注释
-                            annot_changed = False
-                            border = annot.border
-                            has_border = border and border.get("width", 0) > 0
-
-                            def is_text_blue(rect):
-                                text_dict = page.get_text("dict", clip=rect)
-                                for block in text_dict.get("blocks", []):
-                                    for line in block.get("lines", []):
-                                        for span in line.get("spans", []):
-                                            color = span.get("color", 0)
-                                            b = color & 0xFF;
-                                            g = (color >> 8) & 0xFF;
-                                            r = (color >> 16) & 0xFF
-                                            if b > r + 40 and b > g + 40: return True
-                                return False
-
-                            if "删除超链接边框" in options:
-                                if has_border: annot.set_border(width=0); annot_changed = True
-                            elif "修改超链接文本至黑色边框" in options:
-                                annot.set_border(width=1.0);
-                                annot.set_colors(stroke=(0, 0, 0));
-                                annot_changed = True
-                            elif "修改超链接文本至蓝色字体" in options:
-                                annot.set_border(width=1.0);
-                                annot.set_colors(stroke=(0, 0, 1));
-                                annot_changed = True
-                            elif "超链接有边框则蓝框黑字" in options:
-                                if has_border: annot.set_border(width=1.0); annot.set_colors(
-                                    stroke=(0, 0, 1)); annot_changed = True
-                            elif "超链接无边框且蓝字则蓝框黑字" in options:
-                                if not has_border and is_text_blue(annot.rect):
-                                    annot.set_border(width=1.0);
-                                    annot.set_colors(stroke=(0, 0, 1));
-                                    annot_changed = True
-
-                            if annot_changed: annot.update(); changed = True
+                    if PDFProcessor._apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
+                        changed = True
+                    if PDFProcessor._apply_hyperlink_styles(doc, page, options):
+                        changed = True
 
             cleanup_options = ["删除外部链接（网页、邮箱地址）", "删除外部链接（网页、邮箱地址）且将文字改成黑色",
                                "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
