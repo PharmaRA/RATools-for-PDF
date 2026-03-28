@@ -172,6 +172,7 @@ class MainController(QObject):
     def setup_connections(self):
         self.view.drop_zone.files_dropped.connect(self.add_files)
         self.view.drop_zone.mousePressEvent = self.open_file_dialog
+        self.view.btn_add_files.clicked.connect(self.open_file_picker)
         self.view.add_folder_btn.clicked.connect(self.add_folder)
         self.view.btn_clear.clicked.connect(self.clear_list)
         self.view.btn_preset_china.clicked.connect(lambda: self.view.toggle_preset("china"))
@@ -428,14 +429,17 @@ class MainController(QObject):
 
     def open_file_dialog(self, event):
         if event.button() == Qt.LeftButton:
-            file_paths, _ = QFileDialog.getOpenFileNames(
-                self.view,
-                "选择 PDF 文件",
-                "",
-                "PDF Files (*.pdf);;All Files (*)"
-            )
-            if file_paths:
-                self.add_files(file_paths)
+            self.open_file_picker()
+
+    def open_file_picker(self):
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self.view,
+            "选择 PDF 文件",
+            "",
+            "PDF Files (*.pdf);;All Files (*)"
+        )
+        if file_paths:
+            self.add_files(file_paths)
 
     def add_files(self, paths):
         valid_pdf_paths = []

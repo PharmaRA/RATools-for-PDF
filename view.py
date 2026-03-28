@@ -205,6 +205,12 @@ class SettingsDialog(FramelessDraggableDialog):
 
         self.content_layout.addWidget(self.cb_auto_open)
         self.content_layout.addWidget(self.cb_overwrite)
+
+        danger_hint = QLabel("危险操作：直接覆盖源 PDF。建议仅在已有备份且确认规则无误后使用。")
+        danger_hint.setWordWrap(True)
+        danger_hint.setObjectName("dangerHint")
+        self.content_layout.addWidget(danger_hint)
+
         self.content_layout.addStretch()
 
         btn_close = QPushButton("确 定")
@@ -218,26 +224,80 @@ class SettingsDialog(FramelessDraggableDialog):
 class AboutDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("ℹ️ 关于软件", parent)
-        self.resize(450, 300)
+        self.resize(520, 360)
+        self.content_layout.setSpacing(16)
 
-        about_text = QLabel(
-            "<h2 style='color:#1D4ED8; margin-bottom: 4px;'>RATools for PDF</h2>"
-            "<p style='color:#6B7280; font-size: 12px; margin-top: 0;'>Version 1.0.0</p>"
-            "<hr style='border: none; border-top: 1px solid #E5E7EB;'/>"
-            "<p style='color:#374151; line-height: 1.6; margin-top: 16px;'>"
-            "专为 RA (Regulatory Affairs) 递交开发的 PDF 批量处理引擎。<br><br>"
-            "支持 eCTD 格式标准要求，包含快速清理、非标准字体嵌入、书签链接校验等合规功能。"
-            "</p>"
-            "<br>"
-            "<p style='color:#9CA3AF; font-size: 11px;'>"
-            "基于 PySide6 & PyMuPDF 构建<br>"
-            "遵循 GNU GPL v3 开源协议"
-            "</p>"
+        hero_card = QFrame()
+        hero_card.setStyleSheet(
+            "QFrame {"
+            "background-color: #F8FBFF;"
+            "border: 1px solid #D7E7F8;"
+            "border-radius: 10px;"
+            "}"
         )
-        about_text.setWordWrap(True)
-        about_text.setTextFormat(Qt.RichText)
-        about_text.setStyleSheet("border: none;")
-        self.content_layout.addWidget(about_text)
+        hero_layout = QVBoxLayout(hero_card)
+        hero_layout.setContentsMargins(18, 16, 18, 16)
+        hero_layout.setSpacing(6)
+
+        brand_title = QLabel("RATools for PDF")
+        brand_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #1D4ED8; border: none;")
+        version_badge = QLabel("Version 1.0.0")
+        version_badge.setStyleSheet(
+            "background-color: white; color: #2563EB; border: 1px solid #BFDBFE;"
+            "border-radius: 999px; padding: 4px 10px; font-weight: 600;"
+        )
+        version_badge.setAlignment(Qt.AlignCenter)
+        version_badge.setMaximumWidth(110)
+
+        hero_layout.addWidget(brand_title)
+        hero_layout.addWidget(version_badge, 0, Qt.AlignLeft)
+        self.content_layout.addWidget(hero_card)
+
+        intro_text = QLabel(
+            "用于RA递交资料整理的PDF处理工具，"
+            "帮助用户以更稳定的方式完成eCTD场景下常见的批量标准化操作。"
+        )
+        intro_text.setWordWrap(True)
+        intro_text.setStyleSheet("color: #374151; font-size: 13px; line-height: 1.7; border: none;")
+        self.content_layout.addWidget(intro_text)
+
+        features_title = QLabel("核心功能")
+        features_title.setStyleSheet("color: #111827; font-size: 13px; font-weight: bold; border: none;")
+        self.content_layout.addWidget(features_title)
+
+        features_text = QLabel(
+            "• 批量导入PDF文件或文件夹\n"
+            "• 按模块勾选规则，支持中国eCTD/美国eCTD预设\n"
+            "• 覆盖文档属性、书签、链接、动态内容与附件等常见合规项\n"
+            "• 输出处理日志，便于复核与追踪"
+        )
+        features_text.setWordWrap(True)
+        features_text.setStyleSheet("color: #475569; font-size: 12px; line-height: 1.8; border: none;")
+        self.content_layout.addWidget(features_text)
+
+        tech_card = QFrame()
+        tech_card.setStyleSheet(
+            "QFrame {"
+            "background-color: #F8FAFC;"
+            "border: 1px solid #E2E8F0;"
+            "border-radius: 10px;"
+            "}"
+        )
+        tech_layout = QVBoxLayout(tech_card)
+        tech_layout.setContentsMargins(16, 14, 16, 14)
+        tech_layout.setSpacing(4)
+
+        tech_title = QLabel("技术与许可")
+        tech_title.setStyleSheet("color: #111827; font-size: 13px; font-weight: bold; border: none;")
+        tech_detail = QLabel(
+            "基于PySide6、PyMuPDF及Ghostscript等项目构建\n"
+            "遵循GNU GPL v3开源协议"
+        )
+        tech_detail.setWordWrap(True)
+        tech_detail.setStyleSheet("color: #64748B; font-size: 12px; line-height: 1.7; border: none;")
+        tech_layout.addWidget(tech_title)
+        tech_layout.addWidget(tech_detail)
+        self.content_layout.addWidget(tech_card)
 
         self.content_layout.addStretch()
 
@@ -340,10 +400,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         self.all_checkboxes = {}
+        self.current_file_count = 0
 
         self.settings_dialog = SettingsDialog(self)
         self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
         self.all_checkboxes["覆盖原始文件 (不推荐)"] = self.settings_dialog.cb_overwrite
+        self.settings_dialog.cb_overwrite.toggled.connect(lambda _checked: self.refresh_selection_summary())
 
         self.MODULES_DATA = [
             {
@@ -483,14 +545,47 @@ class MainWindow(QMainWindow):
         main_view = QFrame()
         main_view.setObjectName("mainView")
         main_view_layout = QVBoxLayout(main_view)
-        main_view_layout.setContentsMargins(24, 24, 24, 24)
-        main_view_layout.setSpacing(24)
+        main_view_layout.setContentsMargins(20, 20, 20, 20)
+        main_view_layout.setSpacing(12)
 
-        self.drop_zone = DropZoneLabel("☁️\n点击或将 PDF 文件拖拽到此处\n支持批量选择文件夹")
+        import_card = QFrame()
+        import_card.setObjectName("importCard")
+        import_layout = QVBoxLayout(import_card)
+        import_layout.setContentsMargins(18, 18, 18, 14)
+        import_layout.setSpacing(12)
+
+        import_header = QHBoxLayout()
+        import_header.setContentsMargins(0, 0, 0, 0)
+        import_header.setSpacing(10)
+        import_title = QLabel("导入待处理文件")
+        import_title.setObjectName("sectionTitle")
+        import_hint = QLabel("支持拖入 PDF 或整个文件夹")
+        import_hint.setObjectName("sectionHint")
+        import_header.addWidget(import_title)
+        import_header.addStretch()
+        import_header.addWidget(import_hint)
+        import_layout.addLayout(import_header)
+
+        self.drop_zone = DropZoneLabel("拖拽 PDF 到这里\n或点击下方按钮快速添加")
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setAlignment(Qt.AlignCenter)
-        self.drop_zone.setFixedHeight(128)
-        main_view_layout.addWidget(self.drop_zone)
+        self.drop_zone.setFixedHeight(96)
+        import_layout.addWidget(self.drop_zone)
+
+        quick_actions = QHBoxLayout()
+        quick_actions.setContentsMargins(0, 0, 0, 0)
+        quick_actions.setSpacing(10)
+        self.btn_add_files = QPushButton("选择 PDF 文件")
+        self.btn_add_files.setObjectName("secondaryBtn")
+        self.add_folder_btn = QPushButton("选择文件夹")
+        self.add_folder_btn.setObjectName("secondaryBtn")
+        self.queue_meta_label = QLabel("当前队列为空")
+        self.queue_meta_label.setObjectName("mutedLabel")
+        quick_actions.addWidget(self.btn_add_files)
+        quick_actions.addWidget(self.add_folder_btn)
+        quick_actions.addSpacing(8)
+        quick_actions.addWidget(self.queue_meta_label, 1)
+        import_layout.addLayout(quick_actions)
 
         list_container = QFrame()
         list_container.setObjectName("listContainer")
@@ -502,13 +597,14 @@ class MainWindow(QMainWindow):
         list_header.setObjectName("listHeader")
         list_header_layout = QHBoxLayout(list_header)
         list_header_layout.setContentsMargins(16, 8, 16, 8)
-        self.list_title = QLabel("待处理列表 (0)")
-        self.list_title.setStyleSheet("font-weight: bold; color: #374151;")
-        self.add_folder_btn = QPushButton("添加文件夹")
-        self.add_folder_btn.setObjectName("textBtn")
+        self.list_title = QLabel("待处理队列 (0)")
+        self.list_title.setStyleSheet("font-weight: 700; color: #1F2937;")
+        self.btn_clear = QPushButton("清空列表")
+        self.btn_clear.setObjectName("actionBtn")
         list_header_layout.addWidget(self.list_title)
+        list_header_layout.addSpacing(12)
         list_header_layout.addStretch()
-        list_header_layout.addWidget(self.add_folder_btn)
+        list_header_layout.addWidget(self.btn_clear)
         list_layout.addWidget(list_header)
 
         # ================= 文件树视图 =================
@@ -516,17 +612,23 @@ class MainWindow(QMainWindow):
         self.tree.setHeaderLabels(["文件 / 文件夹", "绝对路径", "当前状态"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.Interactive)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.Fixed)
         self.tree.header().setStretchLastSection(False)
-        self.tree.setColumnWidth(0, 320)
+        self.tree.setColumnWidth(0, 280)
+        self.tree.setColumnWidth(2, 110)
 
         self.tree.setSelectionBehavior(QTreeWidget.SelectRows)
         self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.header().setMinimumSectionSize(90)
+        self.tree.header().resizeSection(1, 380)
 
         self.tree.setAlternatingRowColors(True)
+        self.tree.setRootIsDecorated(True)
         list_layout.addWidget(self.tree)
-        main_view_layout.addWidget(list_container)
+        import_layout.addWidget(list_container, 1)
+
+        main_view_layout.addWidget(import_card, 1)
 
         middle_layout.addWidget(main_view)
 
@@ -541,15 +643,18 @@ class MainWindow(QMainWindow):
         right_header = QFrame()
         right_header.setObjectName("rightHeader")
         rh_layout = QVBoxLayout(right_header)
-        self.rh_title = QLabel(f"{self.MODULES_DATA[0]['title']} 设置")
+        rh_layout.setContentsMargins(16, 18, 16, 14)
+        rh_layout.setSpacing(18)
+
+        self.rh_title = QLabel("处理规则选项")
         self.rh_title.setStyleSheet("font-weight: bold; font-size: 14px;")
-        rh_desc = QLabel("勾选需要执行的处理规则")
-        rh_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+
+        self.selection_summary_label = QLabel("尚未选择任何处理规则")
+        self.selection_summary_label.setObjectName("selectionSummary")
+        rh_layout.addWidget(self.selection_summary_label)
         rh_layout.addWidget(self.rh_title)
-        rh_layout.addWidget(rh_desc)
         right_layout.addWidget(right_header)
 
-        # ⚠️彻底摒弃 QStackedWidget，使用底层纯净的 QScrollArea 和 QVBoxLayout 组合
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
@@ -578,10 +683,9 @@ class MainWindow(QMainWindow):
         for mod in self.MODULES_DATA:
             page = QWidget()
             page_layout = QVBoxLayout(page)
-            page_layout.setContentsMargins(20, 20, 20, 20)
-            page_layout.setSpacing(16)
+            page_layout.setContentsMargins(20, 18, 20, 20)
+            page_layout.setSpacing(14)
 
-            page_layout.addWidget(self._create_section_label("处理规则选项"))
             for opt in mod["options"]:
                 page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
@@ -641,31 +745,38 @@ class MainWindow(QMainWindow):
         preset_bar = QFrame()
         preset_bar.setObjectName("presetBar")
         preset_layout = QHBoxLayout(preset_bar)
-        preset_layout.setContentsMargins(24, 10, 24, 10)
+        preset_layout.setContentsMargins(24, 12, 24, 12)
         preset_layout.setSpacing(10)
 
-        preset_label = QLabel("预设")
+        preset_label = QLabel("快速预设")
         preset_label.setObjectName("presetLabel")
         preset_layout.addWidget(preset_label)
 
         self.btn_preset_china = QPushButton("中国eCTD")
         self.btn_preset_china.setObjectName("presetBtn")
         self.btn_preset_china.setCheckable(True)
+        self.btn_preset_china.setFocusPolicy(Qt.NoFocus)
         preset_layout.addWidget(self.btn_preset_china)
 
         self.btn_preset_us = QPushButton("美国eCTD")
         self.btn_preset_us.setObjectName("presetBtn")
         self.btn_preset_us.setCheckable(True)
+        self.btn_preset_us.setFocusPolicy(Qt.NoFocus)
         preset_layout.addWidget(self.btn_preset_us)
 
         self.btn_clear_selected_options = QPushButton("全部取消")
         self.btn_clear_selected_options.setObjectName("actionBtn")
+
+        self.preset_summary_label = QLabel("默认载入中国 eCTD 预设，可按需微调。")
+        self.preset_summary_label.setObjectName("presetSummary")
 
         self.preset_btn_group = QButtonGroup(self)
         self.preset_btn_group.setExclusive(True)
         self.preset_btn_group.addButton(self.btn_preset_china)
         self.preset_btn_group.addButton(self.btn_preset_us)
 
+        preset_layout.addSpacing(8)
+        preset_layout.addWidget(self.preset_summary_label)
         preset_layout.addStretch()
         preset_layout.addWidget(self.btn_clear_selected_options)
         main_layout.addWidget(preset_bar)
@@ -677,18 +788,20 @@ class MainWindow(QMainWindow):
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(24, 0, 24, 0)
 
-        self.btn_clear = QPushButton("🗑️ 清空列表")
-        self.btn_clear.setObjectName("actionBtn")
         self.btn_log = QPushButton("📋 查看/导出日志")
         self.btn_log.setObjectName("actionBtn")
-        footer_layout.addWidget(self.btn_clear)
         footer_layout.addWidget(self.btn_log)
         footer_layout.addStretch()
 
-        self.info_label = QLabel("共计 <b>0</b> 个文件")
+        self.info_label = QLabel("0 个文件 · 0 条规则 · 中国 eCTD 预设")
+        self.info_label.setObjectName("footerSummary")
+        self.risk_hint_label = QLabel("")
+        self.risk_hint_label.setObjectName("footerHint")
         self.btn_start = QPushButton("▶ 开始批量处理")
         self.btn_start.setObjectName("startBtn")
         footer_layout.addWidget(self.info_label)
+        footer_layout.addSpacing(16)
+        footer_layout.addWidget(self.risk_hint_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
@@ -713,6 +826,7 @@ class MainWindow(QMainWindow):
                 self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
 
         self.load_all_settings()
+        self.refresh_selection_summary()
 
     def show_info_message(self, title, message):
         CustomMessageBox(title, message, msg_type="info", parent=self).exec()
@@ -784,6 +898,7 @@ class MainWindow(QMainWindow):
 
         self.active_preset_key = None
         self._set_preset_button_state(None)
+        self.refresh_selection_summary()
 
     def toggle_preset(self, preset_key):
         if self.active_preset_key == preset_key:
@@ -812,6 +927,7 @@ class MainWindow(QMainWindow):
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.custom_selection_before_preset = set()
+        self.refresh_selection_summary()
 
     def apply_preset(self, preset_key, persist=True):
         preset = self.PRESET_OPTIONS.get(preset_key)
@@ -839,6 +955,7 @@ class MainWindow(QMainWindow):
 
         self.active_preset_key = preset_key
         self._set_preset_button_state(preset_key)
+        self.refresh_selection_summary()
 
     def on_checkbox_toggled(self, _checked):
         if self.is_applying_preset:
@@ -849,6 +966,7 @@ class MainWindow(QMainWindow):
             self._set_preset_button_state(None)
 
         self.custom_selection_before_preset = set(self.get_selected_options())
+        self.refresh_selection_summary()
 
     def show_about_dialog(self):
         if not hasattr(self, 'about_dialog'):
@@ -858,8 +976,6 @@ class MainWindow(QMainWindow):
         self.about_dialog.activateWindow()
 
     def switch_settings_page(self, index):
-        self.rh_title.setText(f"{self.MODULES_DATA[index]['title']} 设置")
-
         # ⚠️使用原生的显示/隐藏逻辑：隐藏的 QWidget 在 QVBoxLayout 中绝对不占任何空间参与高度计算
         for i, page in enumerate(self.settings_pages):
             if i == index:
@@ -878,8 +994,46 @@ class MainWindow(QMainWindow):
         self.tree.clear()
 
     def update_counters_ui(self, count):
-        self.list_title.setText(f"待处理列表 ({count})")
-        self.info_label.setText(f"共计 <b>{count}</b> 个文件")
+        self.current_file_count = count
+        self.list_title.setText(f"待处理队列 ({count})")
+        if count == 0:
+            self.queue_meta_label.setText("当前队列为空")
+        else:
+            self.queue_meta_label.setText(f"已加入{count}个PDF")
+        self.refresh_selection_summary()
+
+    def refresh_selection_summary(self):
+        selected_count = len([
+            opt for opt in self.get_selected_options()
+            if opt not in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]
+        ])
+        preset_titles = {key: value["title"] for key, value in self.PRESET_OPTIONS.items()}
+        preset_key = self.active_preset_key if isinstance(self.active_preset_key, str) else ""
+        preset_text = preset_titles.get(preset_key, "自定义选择")
+        total_files = self.current_file_count
+
+        if selected_count == 0:
+            self.selection_summary_label.setText("尚未选择任何处理规则")
+        else:
+            self.selection_summary_label.setText(f"已选择 {selected_count} 条规则")
+
+        if self.active_preset_key:
+            self.preset_summary_label.setText(f"当前已应用 {preset_text} 预设，并可继续手动微调规则。")
+        else:
+            self.preset_summary_label.setText("当前为自定义规则组合，可随时切换到 eCTD 预设。")
+
+        self.info_label.setText(f"{total_files} 个文件 · {selected_count} 条规则 · {preset_text}")
+
+        overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
+        if overwrite_cb and overwrite_cb.isChecked():
+            self.risk_hint_label.setText("当前启用了覆盖原始文件，执行前请确认已有备份。")
+            self.risk_hint_label.setProperty("danger", True)
+        else:
+            self.risk_hint_label.setText("")
+            self.risk_hint_label.setProperty("danger", False)
+
+        self.style().unpolish(self.risk_hint_label)
+        self.style().polish(self.risk_hint_label)
 
     def _create_section_label(self, text):
         lbl = QLabel(text)
@@ -898,6 +1052,7 @@ class MainWindow(QMainWindow):
 
         cb = QCheckBox()
         cb.setChecked(checked)
+        cb.setFocusPolicy(Qt.NoFocus)
         cb.toggled.connect(self.on_checkbox_toggled)
         self.all_checkboxes[opt_id] = cb
 
@@ -920,64 +1075,74 @@ class MainWindow(QMainWindow):
 
     def apply_stylesheet(self):
         qss = """
-        QMainWindow { background-color: #F9FAFB; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; }
+        QMainWindow { background-color: #F4F6F8; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #1F2937; }
 
-        #header, #leftSidebar, #rightSidebar, #footer { background-color: white; }
-        #header { border-bottom: 1px solid #E5E7EB; }
+        #header, #leftSidebar, #rightSidebar, #footer, #presetBar { background-color: white; }
+        #header { border-bottom: 1px solid #DCE3EA; }
         #leftSidebar { border-right: 1px solid #E5E7EB; }
-        #rightSidebar { border-left: 1px solid #E5E7EB; } 
-        #footer { border-top: 1px solid #E5E7EB; }
-        #presetBar { background-color: white; border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
-        #presetLabel { color: #6B7280; font-size: 12px; font-weight: 600; }
+        #rightSidebar { border-left: 1px solid #E5E7EB; }
+        #footer { border-top: 1px solid #DCE3EA; }
+        #presetBar { border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
+        #presetLabel { color: #52606D; font-size: 12px; font-weight: 700; }
+        #presetSummary { color: #6B7280; font-size: 12px; }
 
         #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
         #topBtn:hover { background-color: #F3F4F6; color: #111827; }
 
-        #navTitle { color: #9CA3AF; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-bottom: 4px; }
-        #navBtn { text-align: left; padding: 10px 12px; border: none; border-radius: 8px; color: #4B5563; font-weight: 500; background-color: transparent; }
-        #navBtn:hover { background-color: #F3F4F6; }
-        #navBtn:checked { background-color: #EFF6FF; color: #1D4ED8; font-weight: bold; }
-        #mainView { background-color: #F9FAFB; }
-        #dropZone { border: 2px dashed #D1D5DB; border-radius: 12px; background-color: white; color: #6B7280; font-weight: 500; }
-        #dropZone:hover { border-color: #60A5FA; background-color: #EFF6FF; color: #2563EB; }
-        #listContainer { background-color: white; border: 1px solid #E5E7EB; border-radius: 12px; }
-        #listHeader { border-bottom: 1px solid #E5E7EB; background-color: #F9FAFB; border-top-left-radius: 12px; border-top-right-radius: 12px; }
-        #textBtn { color: #2563EB; border: none; background: transparent; font-weight: 500; }
-        #textBtn:hover { color: #1D4ED8; }
+        #navTitle { color: #94A3B8; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; }
+        #navBtn { text-align: left; padding: 11px 12px; border: 1px solid transparent; border-radius: 10px; color: #475569; font-weight: 600; background-color: transparent; }
+        #navBtn:hover { background-color: #F8FAFC; border-color: #E2E8F0; }
+        #navBtn:checked { background-color: #E8F1FF; color: #155EEF; font-weight: 700; border-color: #BFDBFE; }
+        #mainView { background-color: #F4F6F8; }
+        #importCard, #listContainer { background-color: white; border: 1px solid #E5E7EB; border-radius: 16px; }
+        #sectionTitle { font-size: 14px; font-weight: 700; color: #0F172A; }
+        #sectionHint { color: #64748B; font-size: 12px; }
+        #dropZone { border: 2px dashed #B8C6DB; border-radius: 14px; background-color: #F8FBFF; color: #52606D; font-weight: 600; }
+        #dropZone:hover { border-color: #60A5FA; background-color: #EFF6FF; color: #1D4ED8; }
+        #secondaryBtn { padding: 8px 14px; border: 1px solid #DCE3EA; border-radius: 9px; background-color: white; color: #334155; font-weight: 600; }
+        #secondaryBtn:hover { background-color: #F8FAFC; border-color: #CBD5E1; }
+        #mutedLabel { color: #64748B; font-size: 12px; }
+        #listHeader { border-bottom: 1px solid #E5E7EB; background-color: #F8FAFC; border-top-left-radius: 16px; border-top-right-radius: 16px; }
 
-        /* 树形视图专属样式 */
-        QTreeWidget { border: none; background-color: white; color: #374151; outline: none; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
-        QTreeWidget::item { padding: 6px; border-bottom: 1px solid #F3F4F6; }
-        QTreeWidget::item:selected { background-color: #EFF6FF; color: #1D4ED8; }
-        QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #6B7280; font-weight: 500; text-align: left; }
+        QTreeWidget { border: none; background-color: white; color: #334155; outline: none; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; alternate-background-color: #FBFDFF; }
+        QTreeWidget::item { padding: 7px; border-bottom: 1px solid #F1F5F9; }
+        QTreeWidget::item:selected { background-color: #E8F1FF; color: #155EEF; }
+        QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #64748B; font-weight: 600; text-align: left; }
 
-        #rightHeader { border-bottom: 1px solid #E5E7EB; padding: 16px 20px; }
+        #rightHeader { border-bottom: 1px solid #E5E7EB; }
+        #selectionSummary { color: #475569; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 8px 10px; qproperty-alignment: 'AlignCenter'; }
+        #dangerHint { color: #B42318; background-color: #FEF3F2; border: 1px solid #FECACA; border-radius: 8px; padding: 8px 10px; }
 
-        /* 透明化包裹层，避免与外层背景冲突 */
         #settingsScroll { border: none; background-color: transparent; margin: 0; padding: 0; }
         #settingsScroll > QWidget { background-color: transparent; }
         #settingsScroll > QWidget > QWidget { background-color: transparent; margin: 0; padding: 0; }
 
         QScrollBar:vertical { border: none; background: transparent; width: 8px; margin: 0px; }
-        QScrollBar::handle:vertical { background: #D1D5DB; min-height: 30px; border-radius: 4px; }
-        QScrollBar::handle:vertical:hover { background: #9CA3AF; }
+        QScrollBar::handle:vertical { background: #CBD5E1; min-height: 30px; border-radius: 4px; }
+        QScrollBar::handle:vertical:hover { background: #94A3B8; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 
         QScrollBar:horizontal { border: none; background: transparent; height: 8px; margin: 0px; }
-        QScrollBar::handle:horizontal { background: #D1D5DB; min-width: 30px; border-radius: 4px; }
-        QScrollBar::handle:horizontal:hover { background: #9CA3AF; }
+        QScrollBar::handle:horizontal { background: #CBD5E1; min-width: 30px; border-radius: 4px; }
+        QScrollBar::handle:horizontal:hover { background: #94A3B8; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; background: none; }
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
 
-        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #D1D5DB; background: white; margin-top: 1px;}
+        QCheckBox { outline: none; }
+        QCheckBox:focus { outline: none; }
+        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #CBD5E1; background: white; margin-top: 1px; }
         QCheckBox::indicator:checked { background: #2563EB; border-color: #2563EB; }
-        #actionBtn { padding: 8px 16px; border: 1px solid transparent; border-radius: 8px; background-color: transparent; color: #4B5563; font-weight: 500; }
-        #actionBtn:hover { background-color: #F3F4F6; }
-        #presetBtn { padding: 6px 14px; border: 1px solid #D1D5DB; border-radius: 8px; background-color: white; color: #4B5563; font-weight: 600; }
+        #actionBtn { padding: 8px 16px; border: 1px solid #D1D5DB; border-radius: 10px; background-color: white; color: #475569; font-weight: 600; }
+        #actionBtn:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
+        #presetBtn { padding: 6px 14px; border: 1px solid #D1D5DB; border-radius: 8px; background-color: white; color: #475569; font-weight: 600; }
         #presetBtn:hover { background-color: #F9FAFB; border-color: #9CA3AF; }
-        #presetBtn:checked { background-color: #EFF6FF; border-color: #93C5FD; color: #1D4ED8; }
-        #startBtn { padding: 10px 24px; background-color: #2563EB; color: white; border-radius: 8px; font-weight: bold; border: none; }
+        #presetBtn:checked { background-color: #E8F1FF; border-color: #93C5FD; color: #155EEF; }
+        #presetBtn:focus { outline: none; }
+        #footerSummary { color: #0F172A; font-weight: 700; }
+        #footerHint { color: #64748B; min-width: 0px; }
+        #footerHint[danger="true"] { color: #B42318; font-weight: 600; }
+        #startBtn { padding: 10px 24px; background-color: #2563EB; color: white; border-radius: 10px; font-weight: bold; border: none; }
         #startBtn:hover { background-color: #1D4ED8; }
         #startBtn:pressed { background-color: #1E40AF; }
         """
