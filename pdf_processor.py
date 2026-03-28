@@ -181,7 +181,10 @@ class PDFProcessor:
             catalog_xref = doc.pdf_catalog()
 
             needs_gs_engine = any(opt in options for opt in [
-                "一键批量嵌入所有非标准字体（中文）", "一键批量嵌入所有非标准字体（英文）", "PDF版本转换"
+                "一键批量嵌入所有非标准字体",
+                "一键批量嵌入所有非标准字体（中文）",
+                "一键批量嵌入所有非标准字体（英文）",
+                "PDF版本转换"
             ])
 
             if "根据文件名在PDF文档属性中自动添加文件标题" in options:

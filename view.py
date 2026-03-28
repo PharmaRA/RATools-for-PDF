@@ -314,10 +314,8 @@ class MainWindow(QMainWindow):
                      "desc": "统一将所有页面裁切/调整为标准的 A4 纸张尺寸"},
                     {"id": "一键批量将页面切换成Letter", "title": "强制转为 Letter 尺寸",
                      "desc": "统一将所有页面裁切/调整为标准的 Letter (信纸) 尺寸"},
-                    {"id": "一键批量嵌入所有非标准字体（中文）", "title": "嵌入全部中文字体",
-                     "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准中文字体完全嵌入"},
-                    {"id": "一键批量嵌入所有非标准字体（英文）", "title": "嵌入全部英文字体",
-                     "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准英文字体完全嵌入"}
+                    {"id": "一键批量嵌入所有非标准字体", "title": "嵌入全部非标准字体",
+                     "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准字体完全嵌入"}
                 ]
             },
             {
@@ -664,6 +662,14 @@ class MainWindow(QMainWindow):
                 if val is not None:
                     is_checked = str(val).lower() == 'true'
                     cb.setChecked(is_checked)
+
+        # 兼容旧版本：如果用户之前勾选过“中文/英文字体嵌入”，迁移到新的统一选项
+        merged_font_opt = self.all_checkboxes.get("一键批量嵌入所有非标准字体")
+        if merged_font_opt and not merged_font_opt.isChecked():
+            old_cn = str(self.app_settings.value("Modules/Mod_1_Opt_2", "false")).lower() == 'true'
+            old_en = str(self.app_settings.value("Modules/Mod_1_Opt_3", "false")).lower() == 'true'
+            if old_cn or old_en:
+                merged_font_opt.setChecked(True)
 
     def closeEvent(self, event):
         for opt_id, cb in self.all_checkboxes.items():
