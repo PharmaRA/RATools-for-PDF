@@ -52,6 +52,27 @@ class PDFProcessor:
         if result.returncode != 0:
             raise RuntimeError(f"Ghostscript 执行失败: {result.stderr}")
 
+    @staticmethod
+    def _linearize_with_gs(input_pdf, output_pdf):
+        gs_exe = PDFProcessor._get_gs_path()
+        if sys.platform in ["win32", "darwin"] and not os.path.exists(gs_exe):
+            raise FileNotFoundError(f"未找到 Ghostscript 引擎！\n请确保已将引擎文件放置在: {gs_exe}")
+
+        cmd = [
+            gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7",
+            "-dNOPAUSE", "-dQUIET", "-dBATCH", "-dFastWebView=true",
+            f"-sOutputFile={output_pdf}", input_pdf
+        ]
+
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Ghostscript 执行失败: {result.stderr}")
+
     # ====================================================
     # 数据 IO：导出与导入书签 (CSV)
     # ====================================================
@@ -903,18 +924,32 @@ class PDFProcessor:
             if changed or is_linear:
                 if needs_gs_engine:
                     temp_pdf = str(output_path) + ".tmp.pdf"
-                    doc.save(temp_pdf, garbage=3, deflate=True, linear=is_linear)
+                    doc.save(temp_pdf, garbage=3, deflate=True)
                     doc.close()
                     try:
-                        PDFProcessor._embed_fonts_with_gs(temp_pdf, output_path)
+                        if is_linear:
+                            PDFProcessor._linearize_with_gs(temp_pdf, output_path)
+                        else:
+                            PDFProcessor._embed_fonts_with_gs(temp_pdf, output_path)
                     finally:
                         if os.path.exists(temp_pdf): os.remove(temp_pdf)
                 else:
-                    doc.save(output_path, garbage=3, deflate=True, linear=is_linear);
-                    doc.close()
+                    if is_linear:
+                        temp_pdf = str(output_path) + ".tmp.pdf"
+                        doc.save(temp_pdf, garbage=3, deflate=True)
+                        doc.close()
+                        try:
+                            PDFProcessor._linearize_with_gs(temp_pdf, output_path)
+                        finally:
+                            if os.path.exists(temp_pdf): os.remove(temp_pdf)
+                    else:
+                        doc.save(output_path, garbage=3, deflate=True)
+                        doc.close()
             else:
                 doc.close()
-                if needs_gs_engine:
+                if is_linear:
+                    PDFProcessor._linearize_with_gs(input_path, output_path)
+                elif needs_gs_engine:
                     PDFProcessor._embed_fonts_with_gs(input_path, output_path)
                 else:
                     shutil.copy2(input_path, output_path)
