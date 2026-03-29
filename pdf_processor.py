@@ -811,7 +811,59 @@ class PDFProcessor:
                                "cleanup_remove_dynamic_content", "cleanup_remove_attachments", "cleanup_remove_tags", "cleanup_remove_annotations",
                                "cleanup_remove_metadata", "cleanup_remove_all_links_bookmarks"]
             if any(opt in options for opt in cleanup_options):
-                if "cleanup_remove_all_links_bookmarks" in options:
+                external_uri_opts = {"cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black"}
+                selected_cleanup_opts = {opt for opt in options if opt in cleanup_options}
+
+                # 性能快路径：仅删除外部 URI（可选去色）时，避免扫描注释和其他重逻辑
+                if selected_cleanup_opts and selected_cleanup_opts.issubset(external_uri_opts):
+                    for page in doc:
+                        decolor_rects = []
+                        removed_count = 0
+
+                        for link in page.get_links():
+                            if link.get("kind", fitz.LINK_NONE) != fitz.LINK_URI:
+                                continue
+                            if "cleanup_remove_external_uri_and_text_black" in options:
+                                try:
+                                    decolor_rects.append(fitz.Rect(link.get("from")))
+                                except Exception:
+                                    pass
+                            try:
+                                page.delete_link(link)
+                                removed_count += 1
+                                changed = True
+                            except Exception:
+                                pass
+
+                        # 仅在需要去色时触发内容流改色
+                        if decolor_rects and "cleanup_remove_external_uri_and_text_black" in options:
+                            if PDFProcessor._apply_text_color_via_content_stream(
+                                doc,
+                                page,
+                                decolor_rects,
+                                (0.0, 0.0, 0.0),
+                                only_if_blue=True,
+                            ):
+                                changed = True
+
+                        # 兼容兜底：若仍有 URI 链接残留，再做一次注释级删除
+                        if removed_count > 0 and any(
+                            l.get("kind", fitz.LINK_NONE) == fitz.LINK_URI for l in page.get_links()
+                        ):
+                            for annot in page.annots() or []:
+                                try:
+                                    if annot.type[0] != 8:
+                                        continue
+                                    uri = getattr(annot, "uri", "") or ""
+                                    if not uri and hasattr(annot, "info"):
+                                        uri = annot.info.get("uri", "") or ""
+                                    if uri:
+                                        page.delete_annot(annot)
+                                        changed = True
+                                except Exception:
+                                    pass
+
+                elif "cleanup_remove_all_links_bookmarks" in options:
                     doc.set_toc([])
                     for page in doc:
                         page_state = PDFProcessor._collect_page_state(page)

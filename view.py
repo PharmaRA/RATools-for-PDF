@@ -410,7 +410,7 @@ class MainWindow(QMainWindow):
                     {"id": "open_page_first", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
                     {"id": "page_layout_default", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
                     {"id": "zoom_default", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
-                    {"id": "initial_view_bookmarks_and_page", "title": "启用书签导览", "desc": "PDF 打开时：有书签则初始视图为 Bookmarks and Page，无书签则为 Page only"},
+                    {"id": "initial_view_bookmarks_and_page", "title": "设置导览标签", "desc": "包含书签的文档，导览标签设置为书签面板和页面；不包含书签的文档，导览标签设置为页面。"},
                     {"id": "collapse_all_bookmarks", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
                     {"id": "title_from_filename", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
                 ]
@@ -769,11 +769,15 @@ class MainWindow(QMainWindow):
 
         self.info_label = QLabel("0 个文件 · 0 条规则 · 中国 eCTD 预设")
         self.info_label.setObjectName("footerSummary")
+        self.processing_hint_label = QLabel("")
+        self.processing_hint_label.setObjectName("processingHint")
         self.risk_hint_label = QLabel("")
         self.risk_hint_label.setObjectName("footerHint")
         self.btn_start = QPushButton("▶ 开始批量处理")
         self.btn_start.setObjectName("startBtn")
         footer_layout.addWidget(self.info_label)
+        footer_layout.addSpacing(16)
+        footer_layout.addWidget(self.processing_hint_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.risk_hint_label)
         footer_layout.addSpacing(16)
@@ -835,9 +839,10 @@ class MainWindow(QMainWindow):
             if old_cn or old_en:
                 merged_font_opt.setChecked(True)
 
+        # 默认恢复上次会话的勾选状态（自定义），不自动套用预设
         self.custom_selection_before_preset = set(self.get_selected_options())
-        # 预设按钮默认使用“中国 eCTD”，不跟随上次会话持久化
-        self.apply_preset("china", persist=False)
+        self.active_preset_key = None
+        self._set_preset_button_state(None)
 
     def closeEvent(self, event):
         for opt_id, cb in self.all_checkboxes.items():
@@ -1113,9 +1118,13 @@ class MainWindow(QMainWindow):
         #presetBtn:checked { background-color: #E8F1FF; border-color: #93C5FD; color: #155EEF; }
         #presetBtn:focus { outline: none; }
         #footerSummary { color: #0F172A; font-weight: 700; }
+        #processingHint { color: #155EEF; min-width: 0px; }
         #footerHint { color: #64748B; min-width: 0px; }
         #footerHint[danger="true"] { color: #B42318; font-weight: 600; }
         #startBtn { padding: 10px 24px; background-color: #2563EB; color: white; border-radius: 10px; font-weight: bold; border: none; }
+        #startBtn[stopMode="true"] { background-color: #DC2626; }
+        #startBtn[stopMode="true"]:hover { background-color: #B91C1C; }
+        #startBtn[stopMode="true"]:pressed { background-color: #991B1B; }
         #startBtn:hover { background-color: #1D4ED8; }
         #startBtn:pressed { background-color: #1E40AF; }
         """

@@ -2,14 +2,29 @@ import os
 import re
 import platform
 import subprocess
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, TimeoutError
 from pathlib import Path
 from datetime import datetime
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem, QMenu
-from PySide6.QtCore import QObject, QThread, Signal, Qt
+from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor
 
 from pdf_processor import PDFProcessor
 from view import LogDialog
+
+
+def _process_document_task(file_path, out_path, options):
+    return PDFProcessor.process_document(file_path, out_path, options)
+
+
+def _process_document_task_pipe(file_path, out_path, options, conn):
+    try:
+        conn.send(PDFProcessor.process_document(file_path, out_path, options))
+    except Exception as e:
+        conn.send((False, f"处理进程异常: {str(e)}"))
+    finally:
+        conn.close()
 
 
 class ProcessWorker(QThread):
@@ -27,13 +42,22 @@ class ProcessWorker(QThread):
         self.output_dir = output_dir
         self.common_base = common_base
         self.overwrite_original = overwrite_original
+        self._stop_requested = False
+
+    def request_stop(self):
+        self._stop_requested = True
 
     def run(self):
         try:
             success_count = 0
             rename_ectd = "filename_ectd_format" in self.options
+            stopped = False
 
             for i, file_path in enumerate(self.files):
+                if self._stop_requested:
+                    stopped = True
+                    break
+
                 base_name = os.path.basename(file_path)
                 self.progress.emit(i, "正在处理...", f"[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {base_name}")
 
@@ -42,7 +66,8 @@ class ProcessWorker(QThread):
                     name, ext = os.path.splitext(base_name)
                     name = name.lower().replace(" ", "-")
                     name = re.sub(r'[^a-z0-9_-]', '', name)
-                    if not name: name = f"doc_{i + 1:03d}"
+                    if not name:
+                        name = f"doc_{i + 1:03d}"
                     base_name = f"{name}{ext.lower()}"
 
                 # 决定输出路径 (支持保留原有文件夹层级结构)
@@ -62,8 +87,47 @@ class ProcessWorker(QThread):
                     os.makedirs(target_dir, exist_ok=True)
                     out_path = os.path.join(target_dir, base_name)
 
-                # 调用核心引擎静态方法
-                success, msg = PDFProcessor.process_document(file_path, out_path, self.options)
+                parent_conn, child_conn = mp.Pipe(duplex=False)
+                proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, child_conn))
+                proc.start()
+                child_conn.close()
+
+                success, msg = False, "处理中断"
+                while proc.is_alive():
+                    if self._stop_requested:
+                        stopped = True
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+
+                    if parent_conn.poll(1.0):
+                        break
+
+                proc.join(timeout=2)
+                if proc.is_alive():
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    proc.join(timeout=1)
+
+                if stopped:
+                    if os.path.exists(out_path):
+                        try:
+                            os.remove(out_path)
+                        except Exception:
+                            pass
+                    self.progress.emit(i, "已停止", "   ↳ 结果: ⏹️ 用户手动停止处理")
+                    parent_conn.close()
+                    break
+
+                if parent_conn.poll():
+                    success, msg = parent_conn.recv()
+                else:
+                    success, msg = False, "处理进程无返回结果"
+                parent_conn.close()
 
                 if success and self.overwrite_original:
                     try:
@@ -83,7 +147,10 @@ class ProcessWorker(QThread):
 
                 self.progress.emit(i, status, f"   ↳ 结果: {msg}")
 
-            summary = f"处理结束。共成功处理 {success_count} / {len(self.files)} 个文件。"
+            if stopped:
+                summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
+            else:
+                summary = f"处理结束。共成功处理 {success_count} / {len(self.files)} 个文件。"
             self.finished_all.emit(summary)
 
         except Exception as e:
@@ -162,12 +229,22 @@ class MainController(QObject):
         self.loaded_files = []
         self.process_logs = ""
         self.last_output_dir = ""
+        self.processing_started_at = None
+        self.processing_total = 0
+        self.processing_done = 0
+        self.processing_done_paths = set()
+        self.processing_current_file = ""
+        self._last_processing_hint = ""
+        self.processing_timer = QTimer(self)
+        self.processing_timer.setInterval(1000)
+        self.processing_timer.timeout.connect(self._refresh_processing_hint)
 
         # 建立缓存字典，以便快速在文件树中更新和查找节点
         self.folder_nodes = {}
         self.file_nodes = {}
 
         self.setup_connections()
+        self.worker = None
 
     def setup_connections(self):
         self.view.drop_zone.files_dropped.connect(self.add_files)
@@ -560,6 +637,12 @@ class MainController(QObject):
             self.process_logs = ""
 
     def start_processing(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.request_stop()
+            self.view.btn_start.setEnabled(False)
+            self.view.btn_start.setText("正在停止...")
+            return
+
         if not self.loaded_files:
             self.view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
             return
@@ -593,8 +676,20 @@ class MainController(QObject):
             except ValueError:
                 common_base = ""
 
-        self.view.btn_start.setEnabled(False)
-        self.view.btn_start.setText("处理中...")
+        self.view.btn_start.setEnabled(True)
+        self.view.btn_start.setText("■ 停止处理")
+        self.view.btn_start.setProperty("stopMode", True)
+        self.view.style().unpolish(self.view.btn_start)
+        self.view.style().polish(self.view.btn_start)
+
+        self.processing_started_at = datetime.now()
+        self.processing_total = len(self.loaded_files)
+        self.processing_done = 0
+        self.processing_done_paths = set()
+        self.processing_current_file = ""
+        self._last_processing_hint = ""
+        self._refresh_processing_hint()
+        self.processing_timer.start()
 
         self.worker = ProcessWorker(self.loaded_files, selected_options, out_dir, common_base, overwrite_original)
         self.worker.progress.connect(self.update_progress)
@@ -636,6 +731,8 @@ class MainController(QObject):
             color = QColor(16, 185, 129)  # 绿色
         elif status_text in ["处理失败", "操作失败"]:
             color = QColor(239, 68, 68)  # 红色
+        elif status_text == "已停止":
+            color = QColor(245, 158, 11)  # 橙色
         elif status_text == "未匹配跳过":
             color = QColor(245, 158, 11)  # 橙黄色警告
         else:
@@ -648,14 +745,40 @@ class MainController(QObject):
             node.setToolTip(2, status_text)
             node.setForeground(2, color)
 
-        self.process_logs += f"{log_msg}\n"
+        if status_text in ["处理完成", "处理失败"] and file_path not in self.processing_done_paths:
+            self.processing_done_paths.add(file_path)
+            self.processing_done = len(self.processing_done_paths)
+
+        if status_text == "正在处理..." and file_path:
+            self.processing_current_file = os.path.basename(file_path)
+        elif status_text in ["处理完成", "处理失败", "已停止"]:
+            self.processing_current_file = ""
+
+        if log_msg:
+            self.process_logs += f"{log_msg}\n"
+
+        self._refresh_processing_hint(status_text=status_text, file_path=file_path)
 
     def processing_finished(self, summary):
         self.process_logs += f"\n=== 批量处理结束 ===\n{summary}\n"
+        self.processing_timer.stop()
+        self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
+        self.view.btn_start.setProperty("stopMode", False)
+        self.view.style().unpolish(self.view.btn_start)
+        self.view.style().polish(self.view.btn_start)
+        self.processing_started_at = None
+        self.processing_total = 0
+        self.processing_done = 0
+        self.processing_done_paths.clear()
+        self.processing_current_file = ""
+        self._last_processing_hint = ""
 
-        self.view.show_success_message("✅ 处理完成", "所有 PDF 文件的批量处理任务已结束！")
+        if "任务已停止" in summary:
+            self.view.show_info_message("⏹️ 已停止", summary)
+        else:
+            self.view.show_success_message("✅ 处理完成", "所有 PDF 文件的批量处理任务已结束！")
 
         auto_open_cb = self.view.all_checkboxes.get("处理完成后自动打开输出文件夹")
         if auto_open_cb and auto_open_cb.isChecked() and self.loaded_files:
@@ -666,9 +789,42 @@ class MainController(QObject):
 
     def processing_error(self, error_msg):
         self.process_logs += f"\n[致命错误] {error_msg}\n"
+        self.processing_timer.stop()
+        self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
+        self.view.btn_start.setProperty("stopMode", False)
+        self.view.style().unpolish(self.view.btn_start)
+        self.view.style().polish(self.view.btn_start)
+        self.processing_started_at = None
+        self.processing_total = 0
+        self.processing_done = 0
+        self.processing_done_paths.clear()
+        self.processing_current_file = ""
+        self._last_processing_hint = ""
         self.view.show_error_message("❌ 处理异常", f"处理过程中发生错误：\n{error_msg}")
+
+    def _refresh_processing_hint(self, status_text="", file_path=""):
+        if not self.processing_started_at:
+            self.view.processing_hint_label.setText("")
+            self._last_processing_hint = ""
+            return
+
+        elapsed = int((datetime.now() - self.processing_started_at).total_seconds())
+        total = max(self.processing_total, 1)
+        done = min(self.processing_done, total)
+        percent = int(done * 100 / total)
+        hint = f"处理中 {elapsed}s · {done}/{total} · {percent}%"
+
+        current_name = self.processing_current_file
+        if status_text == "正在处理..." and file_path:
+            current_name = os.path.basename(file_path)
+        if current_name:
+            hint += f" · {current_name}"
+
+        if hint != self._last_processing_hint:
+            self.view.processing_hint_label.setText(hint)
+            self._last_processing_hint = hint
 
     def on_io_action_finished(self, result_msg):
         self.process_logs += f"\n{result_msg}\n"
