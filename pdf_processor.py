@@ -13,10 +13,6 @@ from app_paths import get_resource_path
 
 
 class PDFProcessor:
-    """
-    专门负责 PDF 底层操作的处理引擎。
-    包含 PDF 合规处理与高级数据 IO(书签CSV导出导入、超链接JSON导出导入) 机制。
-    """
 
     @staticmethod
     def _get_gs_path():
@@ -30,15 +26,22 @@ class PDFProcessor:
 
     @staticmethod
     def _embed_fonts_with_gs(input_pdf, output_pdf):
+        PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=True, linearize=False)
+
+    @staticmethod
+    def _rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=False):
         gs_exe = PDFProcessor._get_gs_path()
         if sys.platform in ["win32", "darwin"] and not os.path.exists(gs_exe):
             raise FileNotFoundError(f"未找到 Ghostscript 引擎！\n请确保已将引擎文件放置在: {gs_exe}")
 
-        cmd = [
-            gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7", "-dPDFSETTINGS=/prepress",
-            "-dNOPAUSE", "-dQUIET", "-dBATCH", "-dSubsetFonts=true", "-dEmbedAllFonts=true",
-            f"-sOutputFile={output_pdf}", input_pdf
-        ]
+        cmd = [gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7", "-dNOPAUSE", "-dQUIET", "-dBATCH"]
+
+        if embed_fonts:
+            cmd.extend(["-dPDFSETTINGS=/prepress", "-dSubsetFonts=true", "-dEmbedAllFonts=true"])
+        if linearize:
+            cmd.append("-dFastWebView=true")
+
+        cmd.extend([f"-sOutputFile={output_pdf}", input_pdf])
 
         startupinfo = None
         if sys.platform == "win32":
@@ -51,28 +54,9 @@ class PDFProcessor:
 
     @staticmethod
     def _linearize_with_gs(input_pdf, output_pdf):
-        gs_exe = PDFProcessor._get_gs_path()
-        if sys.platform in ["win32", "darwin"] and not os.path.exists(gs_exe):
-            raise FileNotFoundError(f"未找到 Ghostscript 引擎！\n请确保已将引擎文件放置在: {gs_exe}")
+        PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=True)
 
-        cmd = [
-            gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7",
-            "-dNOPAUSE", "-dQUIET", "-dBATCH", "-dFastWebView=true",
-            f"-sOutputFile={output_pdf}", input_pdf
-        ]
-
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-        result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Ghostscript 执行失败: {result.stderr}")
-
-    # ====================================================
-    # 数据 IO：导出与导入书签 (CSV)
-    # ====================================================
+    # 导出与导入书签 (CSV)
     @staticmethod
     def export_bookmarks(pdf_path, csv_path):
         """将书签导出为 CSV (格式: 级别, 标题, 页码)"""
@@ -121,9 +105,8 @@ class PDFProcessor:
         doc.save(output_path, garbage=3, deflate=True)
         doc.close()
 
-    # ====================================================
-    # 数据 IO：导出与导入超链接 (JSON)
-    # ====================================================
+
+    # 导出与导入超链接 (JSON)
     @staticmethod
     def export_links(pdf_path, json_path):
         """将超链接的物理坐标与动作类型提取至 JSON 文件"""
@@ -1011,36 +994,36 @@ class PDFProcessor:
                     changed = True
 
             is_linear = "fast_web_view" in options
-            if changed or is_linear:
-                if needs_gs_engine:
+            needs_gs_rewrite = needs_gs_engine or is_linear
+            embed_fonts = "embed_nonstandard_fonts" in options
+
+            if changed:
+                if needs_gs_rewrite:
                     temp_pdf = str(output_path) + ".tmp.pdf"
                     doc.save(temp_pdf, garbage=3, deflate=True)
                     doc.close()
                     try:
-                        if is_linear:
-                            PDFProcessor._linearize_with_gs(temp_pdf, output_path)
-                        else:
-                            PDFProcessor._embed_fonts_with_gs(temp_pdf, output_path)
+                        PDFProcessor._rewrite_with_gs(
+                            temp_pdf,
+                            output_path,
+                            embed_fonts=embed_fonts,
+                            linearize=is_linear,
+                        )
                     finally:
-                        if os.path.exists(temp_pdf): os.remove(temp_pdf)
+                        if os.path.exists(temp_pdf):
+                            os.remove(temp_pdf)
                 else:
-                    if is_linear:
-                        temp_pdf = str(output_path) + ".tmp.pdf"
-                        doc.save(temp_pdf, garbage=3, deflate=True)
-                        doc.close()
-                        try:
-                            PDFProcessor._linearize_with_gs(temp_pdf, output_path)
-                        finally:
-                            if os.path.exists(temp_pdf): os.remove(temp_pdf)
-                    else:
-                        doc.save(output_path, garbage=3, deflate=True)
-                        doc.close()
+                    doc.save(output_path, garbage=3, deflate=True)
+                    doc.close()
             else:
                 doc.close()
-                if is_linear:
-                    PDFProcessor._linearize_with_gs(input_path, output_path)
-                elif needs_gs_engine:
-                    PDFProcessor._embed_fonts_with_gs(input_path, output_path)
+                if needs_gs_rewrite:
+                    PDFProcessor._rewrite_with_gs(
+                        input_path,
+                        output_path,
+                        embed_fonts=embed_fonts,
+                        linearize=is_linear,
+                    )
                 else:
                     shutil.copy2(input_path, output_path)
 
