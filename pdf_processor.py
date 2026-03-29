@@ -431,12 +431,34 @@ class PDFProcessor:
         return changed
 
     @staticmethod
-    def _apply_blue_text_via_content_stream(doc, page):
+    def _collect_page_state(page):
+        links = page.get_links()
+        annots = list(page.annots() or [])
+        link_objs = []
         link_rects = []
         link_obj = page.first_link
         while link_obj:
-            link_rects.append(link_obj.rect)
+            link_objs.append(link_obj)
+            try:
+                link_rects.append(link_obj.rect)
+            except Exception:
+                pass
             link_obj = link_obj.next
+        return {
+            "links": links,
+            "annots": annots,
+            "link_objs": link_objs,
+            "link_rects": link_rects,
+        }
+
+    @staticmethod
+    def _apply_blue_text_via_content_stream(doc, page, link_rects=None):
+        if link_rects is None:
+            link_rects = []
+            link_obj = page.first_link
+            while link_obj:
+                link_rects.append(link_obj.rect)
+                link_obj = link_obj.next
         return PDFProcessor._apply_text_color_via_content_stream(
             doc,
             page,
@@ -446,10 +468,11 @@ class PDFProcessor:
         )
 
     @staticmethod
-    def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
+    def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_links=None):
         changed = False
 
-        for link in page.get_links():
+        links = page_links if page_links is not None else page.get_links()
+        for link in links:
             link_modified = False
             kind = link.get("kind", fitz.LINK_NONE)
 
@@ -483,16 +506,21 @@ class PDFProcessor:
         return changed
 
     @staticmethod
-    def _apply_hyperlink_styles(doc, page, options):
+    def _apply_hyperlink_styles(doc, page, options, link_objs=None, link_rects=None):
         changed = False
 
         if "link_text_blue" in options:
-            if PDFProcessor._apply_blue_text_via_content_stream(doc, page):
+            if PDFProcessor._apply_blue_text_via_content_stream(doc, page, link_rects=link_rects):
                 changed = True
 
-        link_obj = page.first_link
+        iterable = link_objs if link_objs is not None else []
+        if link_objs is None:
+            tmp = page.first_link
+            while tmp:
+                iterable.append(tmp)
+                tmp = tmp.next
 
-        while link_obj:
+        for link_obj in iterable:
             link_changed = False
             has_border = PDFProcessor._link_has_visible_border(doc, link_obj)
 
@@ -517,8 +545,6 @@ class PDFProcessor:
 
             if link_changed:
                 changed = True
-
-            link_obj = link_obj.next
 
         return changed
 
@@ -761,9 +787,22 @@ class PDFProcessor:
                                  "link_remove_border"]
             if any(opt in options for opt in hyperlink_options):
                 for page in doc:
-                    if PDFProcessor._apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
+                    page_state = PDFProcessor._collect_page_state(page)
+                    if PDFProcessor._apply_hyperlink_actions(
+                        doc,
+                        page,
+                        options,
+                        file_like_link_kinds,
+                        page_links=page_state["links"],
+                    ):
                         changed = True
-                    if PDFProcessor._apply_hyperlink_styles(doc, page, options):
+                    if PDFProcessor._apply_hyperlink_styles(
+                        doc,
+                        page,
+                        options,
+                        link_objs=page_state["link_objs"],
+                        link_rects=page_state["link_rects"],
+                    ):
                         changed = True
 
             cleanup_options = ["cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black",
@@ -775,15 +814,16 @@ class PDFProcessor:
                 if "cleanup_remove_all_links_bookmarks" in options:
                     doc.set_toc([])
                     for page in doc:
+                        page_state = PDFProcessor._collect_page_state(page)
                         # 直接删除 Link 注释，避免部分 PDF 中 delete_link 命中不到
-                        for annot in page.annots() or []:
+                        for annot in page_state["annots"]:
                             try:
                                 if annot.type[0] == 8:  # 8 代表 LINK 注释
                                     page.delete_annot(annot)
                             except Exception:
                                 pass
                         # 兜底：再按 get_links 删除一遍
-                        for link in page.get_links():
+                        for link in page_state["links"]:
                             try:
                                 page.delete_link(link)
                             except Exception:
@@ -791,6 +831,7 @@ class PDFProcessor:
                     changed = True
                 else:
                     for page in doc:
+                        page_state = PDFProcessor._collect_page_state(page)
                         decolor_rects = []
 
                         def _is_span_blue(span_color_int: int) -> bool:
@@ -836,7 +877,7 @@ class PDFProcessor:
                             "cleanup_remove_external_uri" in options
                             or "cleanup_remove_external_uri_and_text_black" in options
                         ):
-                            for annot in page.annots() or []:
+                            for annot in page_state["annots"]:
                                 try:
                                     if annot.type[0] != 8:
                                         continue
@@ -854,7 +895,7 @@ class PDFProcessor:
                                 except Exception:
                                     pass
 
-                        for link in page.get_links():
+                        for link in page_state["links"]:
                             kind = link.get("kind", fitz.LINK_NONE)
                             delete_it = False
                             if kind == fitz.LINK_URI and (
