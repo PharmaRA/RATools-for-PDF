@@ -343,40 +343,40 @@ class MainWindow(QMainWindow):
         "china": {
             "title": "中国 eCTD",
             "options": {
-                "PDF版本转换",
-                "设置为快速网页浏览",
-                "设置导览标签",
-                "修改页面布局为默认",
-                "修改打开页面为第一页",
-                "修改书签设置为承前缩放",
-                "删除外部链接（网页、邮箱地址）",
-                "删除PDF注释",
-                "删除文档元数据",
-                "删除文档附件",
-                "删除JavaScript, 3D内容或者动态内容",
-                "修改超链接的设置为承前缩放",
-                "修改超链接的设置为在新窗口中打开",
-                "修改书签的设置为在新窗口中打开",
-                "折叠所有书签",
-                "文件名修改为符合电子申报/eCTD要求的格式",
+                "convert_pdf_version",
+                "fast_web_view",
+                "initial_view_bookmarks_and_page",
+                "page_layout_default",
+                "open_page_first",
+                "bookmark_inherit_zoom",
+                "cleanup_remove_external_uri",
+                "cleanup_remove_annotations",
+                "cleanup_remove_metadata",
+                "cleanup_remove_attachments",
+                "cleanup_remove_dynamic_content",
+                "link_inherit_zoom",
+                "link_open_new_window",
+                "bookmark_open_new_window",
+                "collapse_all_bookmarks",
+                "filename_ectd_format",
             },
         },
         "us": {
             "title": "美国 eCTD",
             "options": {
-                "PDF版本转换",
-                "设置为快速网页浏览",
-                "设置导览标签",
-                "修改页面布局为默认",
-                "修改打开页面为第一页",
-                "修改书签设置为承前缩放",
-                "删除PDF注释",
-                "删除文档元数据",
-                "删除文档附件",
-                "删除JavaScript, 3D内容或者动态内容",
-                "修改超链接的设置为承前缩放",
-                "修改超链接的设置为在新窗口中打开",
-                "修改书签的设置为在新窗口中打开",
+                "convert_pdf_version",
+                "fast_web_view",
+                "initial_view_bookmarks_and_page",
+                "page_layout_default",
+                "open_page_first",
+                "bookmark_inherit_zoom",
+                "cleanup_remove_annotations",
+                "cleanup_remove_metadata",
+                "cleanup_remove_attachments",
+                "cleanup_remove_dynamic_content",
+                "link_inherit_zoom",
+                "link_open_new_window",
+                "bookmark_open_new_window",
             },
         },
     }
@@ -407,72 +407,72 @@ class MainWindow(QMainWindow):
                 "icon": "👀",
                 "title": "初始视图与文档属性",
                 "options": [
-                    {"id": "修改打开页面为第一页", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
-                    {"id": "修改页面布局为默认", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
-                    {"id": "修改放大率为默认", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
-                    {"id": "设置导览标签", "title": "设置导览标签", "desc": "包含书签的文档，导览标签设置为书签面板和页面；不包含书签的文档，导览标签设置为页面。"},
-                    {"id": "折叠所有书签", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
-                    {"id": "根据文件名在PDF文档属性中自动添加文件标题", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
+                    {"id": "open_page_first", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
+                    {"id": "page_layout_default", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
+                    {"id": "zoom_default", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
+                    {"id": "initial_view_bookmarks_and_page", "title": "启用书签导览", "desc": "PDF 打开时：有书签则初始视图为 Bookmarks and Page，无书签则为 Page only"},
+                    {"id": "collapse_all_bookmarks", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
+                    {"id": "title_from_filename", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
                 ]
             },
             {
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    {"id": "一键批量将页面切换成A4", "title": "强制转为 A4 尺寸", "desc": "统一将所有页面裁切/调整为标准的 A4 纸张尺寸"},
-                    {"id": "一键批量将页面切换成Letter", "title": "强制转为 Letter 尺寸", "desc": "统一将所有页面裁切/调整为标准的 Letter (信纸) 尺寸"},
-                    {"id": "一键批量嵌入所有非标准字体", "title": "嵌入全部非标准字体", "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准字体完全嵌入"}
+                    {"id": "page_size_a4", "title": "强制转为 A4 尺寸", "desc": "统一将所有页面裁切/调整为标准的 A4 纸张尺寸"},
+                    {"id": "page_size_letter", "title": "强制转为 Letter 尺寸", "desc": "统一将所有页面裁切/调整为标准的 Letter (信纸) 尺寸"},
+                    {"id": "embed_nonstandard_fonts", "title": "嵌入全部非标准字体", "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准字体完全嵌入"}
                 ]
             },
             {
                 "icon": "🔖",
-                "title": "书签管理与优化",
+                "title": "书签管理",
                 "options": [
-                    {"id": "修改书签设置为承前缩放", "title": "书签设为承前缩放", "desc": "点击书签跳转时，保持当前页面的缩放比例不变 (Inherit Zoom)"},
-                    {"id": "修改书签的设置为在新窗口中打开", "title": "书签动作：新窗口打开", "desc": "配置书签的链接跳转默认在新的 PDF 浏览器窗口中打开"},
-                    {"id": "删除书签的外部链接", "title": "清理书签外部链接", "desc": "移除书签中指向网页或外部文件的 URI 动作"},
-                    {"id": "删除失效的书签（即未分配任何操作的书签）", "title": "清理失效书签", "desc": "自动检测并删除未指向任何有效页面或动作的空书签"},
-                    {"id": "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）", "title": "清理非标准动作书签", "desc": "仅保留内部跳转、外部文档和调用命令，删除其它未知动作"}
+                    {"id": "bookmark_inherit_zoom", "title": "书签设为承前缩放", "desc": "点击书签跳转时，保持当前页面的缩放比例不变 (Inherit Zoom)"},
+                    {"id": "bookmark_open_new_window", "title": "书签动作：新窗口打开", "desc": "配置书签的链接跳转默认在新的 PDF 浏览器窗口中打开"},
+                    {"id": "bookmark_remove_external_links", "title": "清理书签外部链接", "desc": "移除书签中指向网页或外部文件的 URI 动作"},
+                    {"id": "bookmark_remove_invalid", "title": "清理失效书签", "desc": "自动检测并删除未指向任何有效页面或动作的空书签"},
+                    {"id": "bookmark_remove_unknown_actions", "title": "清理非标准动作书签", "desc": "仅保留内部跳转、外部文档和调用命令，删除其它未知动作"}
                 ]
             },
             {
                 "icon": "🔗",
-                "title": "超链接处理与外观控制",
+                "title": "超链接处理",
                 "options": [
-                    {"id": "将外链接中的绝对路径转相对路径", "title": "绝对路径转相对路径", "desc": "将外部文件链接的绝对路径自动转换为相对路径"},
-                    {"id": "修改超链接的设置为承前缩放", "title": "超链接设为承前缩放", "desc": "点击链接跳转时，保持当前屏幕的视图缩放比例 (Inherit Zoom)"},
-                    {"id": "修改超链接的设置为在新窗口中打开", "title": "链接动作：新窗口打开", "desc": "强制外部文档或网页链接在独立的新窗口中打开"},
-                    {"id": "修改超链接文本至蓝色字体", "title": "链接文本设为蓝色", "desc": "自动识别超链接区域并将其文本颜色变更为标准蓝色"},
-                    {"id": "修改超链接文本至黑色边框", "title": "链接区域加黑框", "desc": "为所有的有效超链接区域添加 1px 的黑色实线边框"},
-                    {"id": "超链接有边框则蓝框黑字", "title": "标准化有框链接", "desc": "若超链接已存在边框，则统一转为蓝框黑字样式"},
-                    {"id": "超链接无边框且蓝字则蓝框黑字", "title": "标准化无框蓝字链接", "desc": "若超链接无边框且文字为蓝色，则统一转为蓝框黑字样式"},
-                    {"id": "删除超链接边框", "title": "清除所有链接边框", "desc": "移除文档内所有超链接的可见边框，保持页面排版干净"}
+                    {"id": "link_abs_to_rel_path", "title": "绝对路径转相对路径", "desc": "将外部文件链接的绝对路径自动转换为相对路径"},
+                    {"id": "link_inherit_zoom", "title": "超链接设为承前缩放", "desc": "点击链接跳转时，保持当前屏幕的视图缩放比例 (Inherit Zoom)"},
+                    {"id": "link_open_new_window", "title": "链接动作：新窗口打开", "desc": "强制外部文档或网页链接在独立的新窗口中打开"},
+                    {"id": "link_text_blue", "title": "链接文本设为蓝色", "desc": "自动识别超链接区域并将其文本颜色变更为标准蓝色"},
+                    {"id": "link_black_border", "title": "链接区域加黑框", "desc": "为所有的有效超链接区域添加 1px 的黑色实线边框"},
+                    {"id": "link_bordered_to_blue_border", "title": "标准化有框链接", "desc": "若超链接已存在边框，则统一转为蓝框黑字样式"},
+                    {"id": "link_unbordered_blue_to_blue_border", "title": "标准化无框蓝字链接", "desc": "若超链接无边框且文字为蓝色，则统一转为蓝框黑字样式"},
+                    {"id": "link_remove_border", "title": "清除所有链接边框", "desc": "移除文档内所有超链接的可见边框，保持页面排版干净"}
                 ]
             },
             {
                 "icon": "🛡️",
-                "title": "违规内容清理与安全性",
+                "title": "内容合规与安全性",
                 "options": [
-                    {"id": "删除外部链接（网页、邮箱地址）", "title": "删除外部 URI 链接", "desc": "清理指向外部网站、邮箱等所有 URI 类型的超链接"},
-                    {"id": "删除外部链接（网页、邮箱地址）且将文字改成黑色", "title": "删除外部 URI 链接并去色", "desc": "清理 URI 链接的同时，将该链接对应的文本颜色重置为黑色"},
-                    {"id": "删除失效的链接（即未分配任何操作的链接）", "title": "清理失效超链接", "desc": "自动扫描并移除所有未分配有效动作 (Action) 的空链接"},
-                    {"id": "删除无效的超链接，且将文字改成黑色", "title": "清理失效链接并去色", "desc": "移除空链接，并将该区域相关的文本颜色恢复为普通黑色"},
-                    {"id": "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）", "title": "清理非标准动作链接", "desc": "仅保留内部/外部跳转和执行动作，移除其它所有的特殊行为"},
-                    {"id": "删除JavaScript, 3D内容或者动态内容", "title": "彻底清除动态内容 (JS/3D)", "desc": "删除文档内所有的 JavaScript 脚本、3D 模型等交互元素以满足安全合规"},
-                    {"id": "删除文档附件", "title": "移除所有内嵌附件", "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
-                    {"id": "删除文档标签", "title": "移除结构化标签", "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
-                    {"id": "删除PDF注释", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
-                    {"id": "删除文档元数据", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
-                    {"id": "删除所有链接和书签", "title": "暴力净化 (移除全部链接和书签)", "desc": "一键清除文档内所有的导航书签与页面超链接"}
+                    {"id": "cleanup_remove_external_uri", "title": "删除外部 URI 链接", "desc": "清理指向外部网站、邮箱等所有 URI 类型的超链接"},
+                    {"id": "cleanup_remove_external_uri_and_text_black", "title": "删除外部 URI 链接并去色", "desc": "清理 URI 链接的同时，将该链接对应的文本颜色重置为黑色"},
+                    {"id": "cleanup_remove_invalid_links", "title": "清理失效超链接", "desc": "自动扫描并移除所有未分配有效动作 (Action) 的空链接"},
+                    {"id": "cleanup_remove_invalid_links_and_text_black", "title": "清理失效链接并去色", "desc": "移除空链接，并将该区域相关的文本颜色恢复为普通黑色"},
+                    {"id": "cleanup_remove_unknown_action_links", "title": "清理非标准动作链接", "desc": "仅保留内部/外部跳转和执行动作，移除其它所有的特殊行为"},
+                    {"id": "cleanup_remove_dynamic_content", "title": "彻底清除动态内容 (JS/3D)", "desc": "删除文档内所有的 JavaScript 脚本、3D 模型等交互元素以满足安全合规"},
+                    {"id": "cleanup_remove_attachments", "title": "移除所有内嵌附件", "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
+                    {"id": "cleanup_remove_tags", "title": "移除结构化标签", "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
+                    {"id": "cleanup_remove_annotations", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
+                    {"id": "cleanup_remove_metadata", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
+                    {"id": "cleanup_remove_all_links_bookmarks", "title": "移除全部链接和书签", "desc": "一键清除文档内所有的导航书签与页面超链接"}
                 ]
             },
             {
                 "icon": "📦",
                 "title": "文件级优化与输出",
                 "options": [
-                    {"id": "PDF版本转换", "title": "PDF 版本转换", "desc": "将PDF版本修改为1.7版本"},
-                    {"id": "设置为快速网页浏览", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
-                    {"id": "文件名修改为符合电子申报/eCTD要求的格式", "title": "eCTD 文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
+                    {"id": "convert_pdf_version", "title": "PDF 版本转换", "desc": "将PDF版本修改为1.7版本"},
+                    {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
+                    {"id": "filename_ectd_format", "title": "eCTD 文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]
             }
         ]
@@ -828,7 +828,7 @@ class MainWindow(QMainWindow):
                     cb.setChecked(is_checked)
 
         # 兼容旧版本：如果用户之前勾选过“中文/英文字体嵌入”，迁移到新的统一选项
-        merged_font_opt = self.all_checkboxes.get("一键批量嵌入所有非标准字体")
+        merged_font_opt = self.all_checkboxes.get("embed_nonstandard_fonts")
         if merged_font_opt and not merged_font_opt.isChecked():
             old_cn = str(self.app_settings.value("Modules/Mod_1_Opt_2", "false")).lower() == 'true'
             old_en = str(self.app_settings.value("Modules/Mod_1_Opt_3", "false")).lower() == 'true'

@@ -31,7 +31,7 @@ class ProcessWorker(QThread):
     def run(self):
         try:
             success_count = 0
-            rename_ectd = "文件名修改为符合电子申报/eCTD要求的格式" in self.options
+            rename_ectd = "filename_ectd_format" in self.options
 
             for i, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
@@ -421,8 +421,8 @@ class MainController(QObject):
                 changed = True
 
     def setup_exclusive_options(self):
-        cb_a4 = self.view.all_checkboxes.get("一键批量将页面切换成A4")
-        cb_letter = self.view.all_checkboxes.get("一键批量将页面切换成Letter")
+        cb_a4 = self.view.all_checkboxes.get("page_size_a4")
+        cb_letter = self.view.all_checkboxes.get("page_size_letter")
         if cb_a4 and cb_letter:
             cb_a4.toggled.connect(lambda checked: cb_letter.setChecked(False) if checked else None)
             cb_letter.toggled.connect(lambda checked: cb_a4.setChecked(False) if checked else None)

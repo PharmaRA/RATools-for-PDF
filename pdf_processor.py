@@ -453,7 +453,7 @@ class PDFProcessor:
             link_modified = False
             kind = link.get("kind", fitz.LINK_NONE)
 
-            if "将外链接中的绝对路径转相对路径" in options and kind in file_like_link_kinds:
+            if "link_abs_to_rel_path" in options and kind in file_like_link_kinds:
                 file_path = link.get("file", "")
                 decoded_file_path = unquote(file_path) if file_path else ""
                 if decoded_file_path and (
@@ -462,12 +462,12 @@ class PDFProcessor:
                     link["file"] = os.path.basename(decoded_file_path.replace("\\", "/"))
                     link_modified = True
 
-            if "修改超链接的设置为承前缩放" in options and kind == fitz.LINK_GOTO:
+            if "link_inherit_zoom" in options and kind == fitz.LINK_GOTO:
                 if link.get("zoom") != 0.0:
                     link["zoom"] = 0.0
                     link_modified = True
 
-            if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+            if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
                 if not link.get("newWindow"):
                     link["newWindow"] = True
                     link_modified = True
@@ -476,7 +476,7 @@ class PDFProcessor:
                 continue
 
             page.update_link(link)
-            if "修改超链接的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+            if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
                 PDFProcessor._force_link_new_window(doc, link.get("xref", 0))
             changed = True
 
@@ -486,7 +486,7 @@ class PDFProcessor:
     def _apply_hyperlink_styles(doc, page, options):
         changed = False
 
-        if "修改超链接文本至蓝色字体" in options:
+        if "link_text_blue" in options:
             if PDFProcessor._apply_blue_text_via_content_stream(doc, page):
                 changed = True
 
@@ -496,20 +496,20 @@ class PDFProcessor:
             link_changed = False
             has_border = PDFProcessor._link_has_visible_border(doc, link_obj)
 
-            if "删除超链接边框" in options:
+            if "link_remove_border" in options:
                 if has_border:
                     link_obj.set_border(width=0)
                     link_changed = True
-            elif "修改超链接文本至黑色边框" in options:
+            elif "link_black_border" in options:
                 link_obj.set_border(width=1.0)
                 link_obj.set_colors(stroke=(0, 0, 0))
                 link_changed = True
-            elif "超链接有边框则蓝框黑字" in options:
+            elif "link_bordered_to_blue_border" in options:
                 if has_border:
                     link_obj.set_border(width=1.0)
                     link_obj.set_colors(stroke=(0, 0, 1))
                     link_changed = True
-            elif "超链接无边框且蓝字则蓝框黑字" in options:
+            elif "link_unbordered_blue_to_blue_border" in options:
                 if not has_border and PDFProcessor._is_text_blue(page, link_obj.rect):
                     link_obj.set_border(width=1.0)
                     link_obj.set_colors(stroke=(0, 0, 1))
@@ -539,13 +539,11 @@ class PDFProcessor:
             catalog_xref = doc.pdf_catalog()
 
             needs_gs_engine = any(opt in options for opt in [
-                "一键批量嵌入所有非标准字体",
-                "一键批量嵌入所有非标准字体（中文）",
-                "一键批量嵌入所有非标准字体（英文）",
-                "PDF版本转换"
+                "embed_nonstandard_fonts",
+                "convert_pdf_version"
             ])
 
-            if "根据文件名在PDF文档属性中自动添加文件标题" in options:
+            if "title_from_filename" in options:
                 base_name = Path(input_path).stem
                 meta = doc.metadata
                 if meta.get("title") != base_name:
@@ -553,7 +551,7 @@ class PDFProcessor:
                     doc.set_metadata(meta);
                     changed = True
 
-            if "修改打开页面为第一页" in options or "修改放大率为默认" in options:
+            if "open_page_first" in options or "zoom_default" in options:
                 if doc.page_count > 0:
                     page0_xref = doc[0].xref
                     # /XYZ null null null 表示使用阅读器默认缩放，不强制 Fit/固定倍率
@@ -561,18 +559,18 @@ class PDFProcessor:
                     doc.xref_set_key(catalog_xref, "OpenAction", action_str);
                     changed = True
 
-            if "修改页面布局为默认" in options:
+            if "page_layout_default" in options:
                 # 恢复为 PDF 阅读器默认行为：移除显式 PageLayout 设置
                 doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
 
-            if "设置导览标签" in options:
+            if "initial_view_bookmarks_and_page" in options:
                 has_bookmarks = len(doc.get_toc(simple=False)) > 0
                 page_mode = "/UseOutlines" if has_bookmarks else "/UseNone"
                 doc.xref_set_key(catalog_xref, "PageMode", page_mode)
                 changed = True
 
-            if "折叠所有书签" in options:
+            if "collapse_all_bookmarks" in options:
                 toc = doc.get_toc(simple=False)
                 if toc:
                     for item in toc:
@@ -580,8 +578,8 @@ class PDFProcessor:
                     doc.set_toc(toc);
                     changed = True
 
-            if "一键批量将页面切换成A4" in options or "一键批量将页面切换成Letter" in options:
-                target_rect = fitz.paper_rect("a4") if "一键批量将页面切换成A4" in options else fitz.paper_rect(
+            if "page_size_a4" in options or "page_size_letter" in options:
+                target_rect = fitz.paper_rect("a4") if "page_size_a4" in options else fitz.paper_rect(
                     "letter")
                 for page in doc:
                     if abs(page.rect.width - target_rect.width) > 1 or abs(page.rect.height - target_rect.height) > 1:
@@ -670,9 +668,9 @@ class PDFProcessor:
 
                 return {"kind": fitz.LINK_NONE}
 
-            bookmark_options = ["修改书签设置为承前缩放", "修改书签的设置为在新窗口中打开", "删除书签的外部链接",
-                                 "删除失效的书签（即未分配任何操作的书签）",
-                                 "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）"]
+            bookmark_options = ["bookmark_inherit_zoom", "bookmark_open_new_window", "bookmark_remove_external_links",
+                                 "bookmark_remove_invalid",
+                                 "bookmark_remove_unknown_actions"]
             if any(opt in options for opt in bookmark_options):
                 toc = doc.get_toc(simple=False)
                 if toc:
@@ -698,20 +696,20 @@ class PDFProcessor:
                         dest = _normalize_bookmark_dest(dest, kind)
                         delete_it = False
 
-                        if "删除书签的外部链接" in options and kind == fitz.LINK_URI: delete_it = True
-                        if "删除失效的书签（即未分配任何操作的书签）" in options:
+                        if "bookmark_remove_external_links" in options and kind == fitz.LINK_URI: delete_it = True
+                        if "bookmark_remove_invalid" in options:
                             if kind == fitz.LINK_NONE or (
                                     kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count)): delete_it = True
-                        if "删除未知动作的书签（即GoTo, GoToR和Launch之外的书签）" in options:
+                        if "bookmark_remove_unknown_actions" in options:
                             if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]: delete_it = True
 
                         if delete_it:
                             toc_modified = True;
                             continue
 
-                        if "修改书签设置为承前缩放" in options and kind == fitz.LINK_GOTO:
+                        if "bookmark_inherit_zoom" in options and kind == fitz.LINK_GOTO:
                             if dest.get("zoom") != 0.0: dest["zoom"] = 0.0; toc_modified = True
-                        if "修改书签的设置为在新窗口中打开" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                        if "bookmark_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
                             if not dest.get("newWindow"): dest["newWindow"] = True; toc_modified = True
 
                         if kind == fitz.LINK_GOTO:
@@ -757,10 +755,10 @@ class PDFProcessor:
                             doc.set_toc(fallback_toc)
                         changed = True
 
-            hyperlink_options = ["将外链接中的绝对路径转相对路径", "修改超链接的设置为承前缩放",
-                                 "修改超链接的设置为在新窗口中打开", "修改超链接文本至蓝色字体",
-                                 "修改超链接文本至黑色边框", "超链接有边框则蓝框黑字", "超链接无边框且蓝字则蓝框黑字",
-                                 "删除超链接边框"]
+            hyperlink_options = ["link_abs_to_rel_path", "link_inherit_zoom",
+                                 "link_open_new_window", "link_text_blue",
+                                 "link_black_border", "link_bordered_to_blue_border", "link_unbordered_blue_to_blue_border",
+                                 "link_remove_border"]
             if any(opt in options for opt in hyperlink_options):
                 for page in doc:
                     if PDFProcessor._apply_hyperlink_actions(doc, page, options, file_like_link_kinds):
@@ -768,13 +766,13 @@ class PDFProcessor:
                     if PDFProcessor._apply_hyperlink_styles(doc, page, options):
                         changed = True
 
-            cleanup_options = ["删除外部链接（网页、邮箱地址）", "删除外部链接（网页、邮箱地址）且将文字改成黑色",
-                               "删除失效的链接（即未分配任何操作的链接）", "删除无效的超链接，且将文字改成黑色",
-                               "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）",
-                               "删除JavaScript, 3D内容或者动态内容", "删除文档附件", "删除文档标签", "删除PDF注释",
-                               "删除文档元数据", "删除所有链接和书签"]
+            cleanup_options = ["cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black",
+                               "cleanup_remove_invalid_links", "cleanup_remove_invalid_links_and_text_black",
+                               "cleanup_remove_unknown_action_links",
+                               "cleanup_remove_dynamic_content", "cleanup_remove_attachments", "cleanup_remove_tags", "cleanup_remove_annotations",
+                               "cleanup_remove_metadata", "cleanup_remove_all_links_bookmarks"]
             if any(opt in options for opt in cleanup_options):
-                if "删除所有链接和书签" in options:
+                if "cleanup_remove_all_links_bookmarks" in options:
                     doc.set_toc([])
                     for page in doc:
                         # 直接删除 Link 注释，避免部分 PDF 中 delete_link 命中不到
@@ -835,8 +833,8 @@ class PDFProcessor:
 
                         # 外部 URI 链接：优先用 delete_annot 方式确保真的移除可点击行为
                         if (
-                            "删除外部链接（网页、邮箱地址）" in options
-                            or "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options
+                            "cleanup_remove_external_uri" in options
+                            or "cleanup_remove_external_uri_and_text_black" in options
                         ):
                             for annot in page.annots() or []:
                                 try:
@@ -849,7 +847,7 @@ class PDFProcessor:
                                     if not uri and hasattr(annot, "info"):
                                         uri = annot.info.get("uri", "") or ""
                                     if uri:
-                                        if "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                                        if "cleanup_remove_external_uri_and_text_black" in options:
                                             decolor_rects.append(annot.rect)
                                         page.delete_annot(annot)
                                         changed = True
@@ -860,18 +858,18 @@ class PDFProcessor:
                             kind = link.get("kind", fitz.LINK_NONE)
                             delete_it = False
                             if kind == fitz.LINK_URI and (
-                                    "删除外部链接（网页、邮箱地址）" in options or "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options): delete_it = True
+                                    "cleanup_remove_external_uri" in options or "cleanup_remove_external_uri_and_text_black" in options): delete_it = True
                             if kind == fitz.LINK_NONE and (
-                                    "删除失效的链接（即未分配任何操作的链接）" in options or "删除无效的超链接，且将文字改成黑色" in options): delete_it = True
-                            if "删除未知动作的链接（即GoTo, GoToRi和Launch之外的书签之外的链接）" in options and kind not in [
+                                    "cleanup_remove_invalid_links" in options or "cleanup_remove_invalid_links_and_text_black" in options): delete_it = True
+                            if "cleanup_remove_unknown_action_links" in options and kind not in [
                                 fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]: delete_it = True
                             if delete_it:
-                                if kind == fitz.LINK_URI and "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options:
+                                if kind == fitz.LINK_URI and "cleanup_remove_external_uri_and_text_black" in options:
                                     try:
                                         decolor_rects.append(fitz.Rect(link.get("from")))
                                     except Exception:
                                         pass
-                                if kind == fitz.LINK_NONE and "删除无效的超链接，且将文字改成黑色" in options:
+                                if kind == fitz.LINK_NONE and "cleanup_remove_invalid_links_and_text_black" in options:
                                     try:
                                         decolor_rects.append(fitz.Rect(link.get("from")))
                                     except Exception:
@@ -881,8 +879,8 @@ class PDFProcessor:
 
                         # 去色：对刚刚删除的外部 URI 区域叠加黑色文字
                         if decolor_rects and (
-                            "删除外部链接（网页、邮箱地址）且将文字改成黑色" in options
-                            or "删除无效的超链接，且将文字改成黑色" in options
+                            "cleanup_remove_external_uri_and_text_black" in options
+                            or "cleanup_remove_invalid_links_and_text_black" in options
                         ):
                             if PDFProcessor._apply_text_color_via_content_stream(
                                 doc,
@@ -893,7 +891,7 @@ class PDFProcessor:
                             ):
                                 changed = True
 
-                if "删除PDF注释" in options:
+                if "cleanup_remove_annotations" in options:
                     for page in doc:
                         annots = list(page.annots() or [])
                         for annot in annots:
@@ -903,23 +901,23 @@ class PDFProcessor:
                             except Exception:
                                 pass
 
-                if "删除JavaScript, 3D内容或者动态内容" in options:
+                if "cleanup_remove_dynamic_content" in options:
                     doc.xref_set_key(catalog_xref, "Names", "null");
                     changed = True
-                if "删除文档附件" in options:
+                if "cleanup_remove_attachments" in options:
                     if doc.embfile_count() > 0:
                         for emb in doc.embfile_names(): doc.embfile_del(emb)
                         changed = True
-                if "删除文档标签" in options:
+                if "cleanup_remove_tags" in options:
                     doc.xref_set_key(catalog_xref, "StructTreeRoot", "null")
                     doc.xref_set_key(catalog_xref, "MarkInfo", "null");
                     changed = True
-                if "删除文档元数据" in options:
+                if "cleanup_remove_metadata" in options:
                     doc.set_metadata({});
                     doc.xref_set_key(catalog_xref, "PieceInfo", "null");
                     changed = True
 
-            is_linear = "设置为快速网页浏览" in options
+            is_linear = "fast_web_view" in options
             if changed or is_linear:
                 if needs_gs_engine:
                     temp_pdf = str(output_path) + ".tmp.pdf"
