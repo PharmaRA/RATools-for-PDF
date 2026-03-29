@@ -3,7 +3,6 @@ import re
 import platform
 import subprocess
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
 from pathlib import Path
 from datetime import datetime
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem, QMenu
@@ -43,12 +42,19 @@ class ProcessWorker(QThread):
         self.common_base = common_base
         self.overwrite_original = overwrite_original
         self._stop_requested = False
+        self._skip_requested = False
+        self._can_skip_current = False
 
     def request_stop(self):
         self._stop_requested = True
 
+    def request_skip_current(self):
+        if self._can_skip_current:
+            self._skip_requested = True
+
     def run(self):
         try:
+            started_at = datetime.now()
             success_count = 0
             rename_ectd = "filename_ectd_format" in self.options
             stopped = False
@@ -93,9 +99,20 @@ class ProcessWorker(QThread):
                 child_conn.close()
 
                 success, msg = False, "处理中断"
+                skipped_current = False
+                self._can_skip_current = True
                 while proc.is_alive():
                     if self._stop_requested:
                         stopped = True
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+
+                    if self._skip_requested:
+                        skipped_current = True
+                        self._skip_requested = False
                         try:
                             proc.terminate()
                         except Exception:
@@ -112,6 +129,7 @@ class ProcessWorker(QThread):
                     except Exception:
                         pass
                     proc.join(timeout=1)
+                self._can_skip_current = False
 
                 if stopped:
                     if os.path.exists(out_path):
@@ -122,6 +140,16 @@ class ProcessWorker(QThread):
                     self.progress.emit(i, "已停止", "   ↳ 结果: ⏹️ 用户手动停止处理")
                     parent_conn.close()
                     break
+
+                if skipped_current:
+                    if os.path.exists(out_path):
+                        try:
+                            os.remove(out_path)
+                        except Exception:
+                            pass
+                    self.progress.emit(i, "已跳过", "   ↳ 结果: ⏭ 已跳过当前文件")
+                    parent_conn.close()
+                    continue
 
                 if parent_conn.poll():
                     success, msg = parent_conn.recv()
@@ -151,6 +179,8 @@ class ProcessWorker(QThread):
                 summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
             else:
                 summary = f"处理结束。共成功处理 {success_count} / {len(self.files)} 个文件。"
+            elapsed_sec = int((datetime.now() - started_at).total_seconds())
+            summary += f" 总耗时 {elapsed_sec}s。"
             self.finished_all.emit(summary)
 
         except Exception as e:
@@ -255,6 +285,7 @@ class MainController(QObject):
         self.view.btn_preset_china.clicked.connect(lambda: self.view.toggle_preset("china"))
         self.view.btn_preset_us.clicked.connect(lambda: self.view.toggle_preset("us"))
         self.view.btn_clear_selected_options.clicked.connect(self.view.clear_selected_options)
+        self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
@@ -641,6 +672,7 @@ class MainController(QObject):
             self.worker.request_stop()
             self.view.btn_start.setEnabled(False)
             self.view.btn_start.setText("正在停止...")
+            self.view.btn_skip_current.setEnabled(False)
             return
 
         if not self.loaded_files:
@@ -679,6 +711,8 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("■ 停止处理")
         self.view.btn_start.setProperty("stopMode", True)
+        self.view.btn_skip_current.show()
+        self.view.btn_skip_current.setEnabled(True)
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
 
@@ -733,6 +767,8 @@ class MainController(QObject):
             color = QColor(239, 68, 68)  # 红色
         elif status_text == "已停止":
             color = QColor(245, 158, 11)  # 橙色
+        elif status_text == "已跳过":
+            color = QColor(245, 158, 11)  # 橙色
         elif status_text == "未匹配跳过":
             color = QColor(245, 158, 11)  # 橙黄色警告
         else:
@@ -745,7 +781,7 @@ class MainController(QObject):
             node.setToolTip(2, status_text)
             node.setForeground(2, color)
 
-        if status_text in ["处理完成", "处理失败"] and file_path not in self.processing_done_paths:
+        if status_text in ["处理完成", "处理失败", "已跳过"] and file_path not in self.processing_done_paths:
             self.processing_done_paths.add(file_path)
             self.processing_done = len(self.processing_done_paths)
 
@@ -766,6 +802,8 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
+        self.view.btn_skip_current.setEnabled(False)
+        self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
         self.processing_started_at = None
@@ -794,6 +832,8 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
+        self.view.btn_skip_current.setEnabled(False)
+        self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
         self.processing_started_at = None
@@ -825,6 +865,10 @@ class MainController(QObject):
         if hint != self._last_processing_hint:
             self.view.processing_hint_label.setText(hint)
             self._last_processing_hint = hint
+
+    def skip_current_file(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.request_skip_current()
 
     def on_io_action_finished(self, result_msg):
         self.process_logs += f"\n{result_msg}\n"

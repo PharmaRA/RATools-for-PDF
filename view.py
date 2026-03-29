@@ -18,55 +18,170 @@ class FramelessDraggableDialog(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)  # 支持圆角透明背景
 
+        self.setStyleSheet("""
+            #dialogBg {
+                background-color: white;
+                border: 1px solid #DCE3EA;
+                border-radius: 10px;
+            }
+            #dialogTitleBar {
+                background-color: #F8FAFC;
+                border: none;
+                border-bottom: 1px solid #E5E7EB;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+            }
+            #dialogTitle {
+                font-weight: 700;
+                color: #1F2937;
+                font-size: 13px;
+                border: none;
+            }
+            #dialogCloseBtn {
+                background: transparent;
+                border: none;
+                font-size: 14px;
+                color: #9CA3AF;
+                border-radius: 6px;
+            }
+            #dialogCloseBtn:hover {
+                background-color: #E5E7EB;
+                color: #EF4444;
+            }
+            #dialogContent {
+                border: none;
+                background-color: transparent;
+            }
+            #dialogPrimaryBtn {
+                background-color: #2563EB;
+                color: white;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: 700;
+                border: none;
+            }
+            #dialogPrimaryBtn:hover {
+                background-color: #1D4ED8;
+            }
+            #dialogPrimaryBtn:pressed {
+                background-color: #1E40AF;
+            }
+            #dialogSecondaryBtn {
+                background-color: white;
+                color: #475569;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-weight: 700;
+                border: 1px solid #D1D5DB;
+            }
+            #dialogSecondaryBtn:hover {
+                background-color: #F8FAFC;
+                border-color: #9CA3AF;
+                color: #334155;
+            }
+            #dialogSecondaryBtn:pressed {
+                background-color: #F1F5F9;
+            }
+            #dialogSectionTitle {
+                color: #94A3B8;
+                font-size: 12px;
+                font-weight: 700;
+                border: none;
+            }
+            #logTextEdit {
+                background-color: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
+                padding: 12px;
+                color: #374151;
+                font-family: Consolas, 'Courier New', monospace;
+                font-size: 12px;
+            }
+            #aboutHeroCard {
+                background-color: #F8FBFF;
+                border: 1px solid #D7E7F8;
+                border-radius: 10px;
+            }
+            #aboutInfoCard {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 10px;
+            }
+            #aboutBrandTitle {
+                font-size: 22px;
+                font-weight: 700;
+                color: #1D4ED8;
+                border: none;
+            }
+            #aboutBadge {
+                background-color: white;
+                color: #2563EB;
+                border: 1px solid #BFDBFE;
+                border-radius: 999px;
+                padding: 4px 10px;
+                font-weight: 600;
+            }
+            #aboutTitle {
+                color: #111827;
+                font-size: 13px;
+                font-weight: 700;
+                border: none;
+            }
+            #aboutText {
+                color: #475569;
+                font-size: 12px;
+                line-height: 1.8;
+                border: none;
+            }
+            #aboutIntro {
+                color: #374151;
+                font-size: 13px;
+                line-height: 1.7;
+                border: none;
+            }
+            #dangerHint {
+                color: #B42318;
+                background-color: #FEF3F2;
+                border: 1px solid #FECACA;
+                border-radius: 8px;
+                padding: 8px 10px;
+            }
+        """)
+
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
         # 整体圆角和边框容器
         self.bg_frame = QFrame()
-        self.bg_frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #D1D5DB;
-                border-radius: 8px;
-            }
-        """)
+        self.bg_frame.setObjectName("dialogBg")
         bg_layout = QVBoxLayout(self.bg_frame)
         bg_layout.setContentsMargins(0, 0, 0, 0)
         bg_layout.setSpacing(0)
 
         # 顶部自定义标题栏
         self.title_bar = QFrame()
+        self.title_bar.setObjectName("dialogTitleBar")
         self.title_bar.setFixedHeight(40)
-        self.title_bar.setStyleSheet("""
-            background-color: #F9FAFB; 
-            border: none;
-            border-bottom: 1px solid #E5E7EB; 
-            border-top-left-radius: 8px; 
-            border-top-right-radius: 8px;
-        """)
         tb_layout = QHBoxLayout(self.title_bar)
         tb_layout.setContentsMargins(16, 0, 8, 0)
 
-        title_lbl = QLabel(title_text)
-        title_lbl.setStyleSheet("font-weight: bold; color: #374151; font-size: 13px; border: none;")
-        tb_layout.addWidget(title_lbl)
+        self.title_lbl = QLabel(title_text)
+        self.title_lbl.setObjectName("dialogTitle")
+        tb_layout.addWidget(self.title_lbl)
         tb_layout.addStretch()
 
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(30, 30)
-        btn_close.setStyleSheet("""
-            QPushButton { background: transparent; border: none; font-size: 14px; color: #9CA3AF; border-radius: 4px; } 
-            QPushButton:hover { background-color: #E5E7EB; color: #EF4444; }
-        """)
-        btn_close.clicked.connect(self.reject)
-        tb_layout.addWidget(btn_close)
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("dialogCloseBtn")
+        self.btn_close.setFixedSize(30, 30)
+        self.btn_close.clicked.connect(self.reject)
+        tb_layout.addWidget(self.btn_close)
 
         bg_layout.addWidget(self.title_bar)
 
         # 内部内容区
         self.content_widget = QWidget()
-        self.content_widget.setStyleSheet("border: none; background-color: transparent;")
+        self.content_widget.setObjectName("dialogContent")
         self.content_layout = QVBoxLayout(self.content_widget)
         self.content_layout.setContentsMargins(24, 24, 24, 24)
         bg_layout.addWidget(self.content_widget)
@@ -160,18 +275,15 @@ class LogDialog(FramelessDraggableDialog):
         self.resize(650, 480)
 
         self.text_edit = QTextEdit()
+        self.text_edit.setObjectName("logTextEdit")
         self.text_edit.setReadOnly(True)
-        self.text_edit.setStyleSheet(
-            "background-color: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; color: #374151; font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
         self.content_layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
         self.btn_export = QPushButton("⬇️ 导出为 CSV")
-        self.btn_export.setStyleSheet(
-            "background-color: #2563EB; color: white; border-radius: 6px; padding: 8px 16px; font-weight: bold; border: none;")
+        self.btn_export.setObjectName("dialogPrimaryBtn")
         self.btn_close = QPushButton("关闭")
-        self.btn_close.setStyleSheet(
-            "background-color: #E5E7EB; color: #374151; border-radius: 6px; padding: 8px 16px; font-weight: bold; border: none;")
+        self.btn_close.setObjectName("dialogSecondaryBtn")
         self.btn_close.clicked.connect(self.accept)
 
         btn_layout.addStretch()
@@ -188,7 +300,7 @@ class SettingsDialog(FramelessDraggableDialog):
         self.content_layout.setSpacing(16)
 
         title = QLabel("常规选项")
-        title.setStyleSheet("color: #9CA3AF; font-size: 12px; font-weight: bold; border: none;")
+        title.setObjectName("dialogSectionTitle")
         self.content_layout.addWidget(title)
 
         cb_style = """
@@ -216,9 +328,8 @@ class SettingsDialog(FramelessDraggableDialog):
         self.content_layout.addStretch()
 
         btn_close = QPushButton("确 定")
+        btn_close.setObjectName("dialogPrimaryBtn")
         btn_close.setFixedHeight(36)
-        btn_close.setStyleSheet(
-            "background-color: #2563EB; color: white; border-radius: 6px; font-weight: bold; border: none;")
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
 
@@ -230,24 +341,15 @@ class AboutDialog(FramelessDraggableDialog):
         self.content_layout.setSpacing(16)
 
         hero_card = QFrame()
-        hero_card.setStyleSheet(
-            "QFrame {"
-            "background-color: #F8FBFF;"
-            "border: 1px solid #D7E7F8;"
-            "border-radius: 10px;"
-            "}"
-        )
+        hero_card.setObjectName("aboutHeroCard")
         hero_layout = QVBoxLayout(hero_card)
         hero_layout.setContentsMargins(18, 16, 18, 16)
         hero_layout.setSpacing(6)
 
         brand_title = QLabel("RATools for PDF")
-        brand_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #1D4ED8; border: none;")
+        brand_title.setObjectName("aboutBrandTitle")
         version_badge = QLabel("Version 1.0.0")
-        version_badge.setStyleSheet(
-            "background-color: white; color: #2563EB; border: 1px solid #BFDBFE;"
-            "border-radius: 999px; padding: 4px 10px; font-weight: 600;"
-        )
+        version_badge.setObjectName("aboutBadge")
         version_badge.setAlignment(Qt.AlignCenter)
         version_badge.setMaximumWidth(110)
 
@@ -260,11 +362,11 @@ class AboutDialog(FramelessDraggableDialog):
             "帮助用户以更稳定的方式完成eCTD场景下常见的批量标准化操作。"
         )
         intro_text.setWordWrap(True)
-        intro_text.setStyleSheet("color: #374151; font-size: 13px; line-height: 1.7; border: none;")
+        intro_text.setObjectName("aboutIntro")
         self.content_layout.addWidget(intro_text)
 
         features_title = QLabel("核心功能")
-        features_title.setStyleSheet("color: #111827; font-size: 13px; font-weight: bold; border: none;")
+        features_title.setObjectName("aboutTitle")
         self.content_layout.addWidget(features_title)
 
         features_text = QLabel(
@@ -274,29 +376,23 @@ class AboutDialog(FramelessDraggableDialog):
             "• 输出处理日志，便于复核与追踪"
         )
         features_text.setWordWrap(True)
-        features_text.setStyleSheet("color: #475569; font-size: 12px; line-height: 1.8; border: none;")
+        features_text.setObjectName("aboutText")
         self.content_layout.addWidget(features_text)
 
         tech_card = QFrame()
-        tech_card.setStyleSheet(
-            "QFrame {"
-            "background-color: #F8FAFC;"
-            "border: 1px solid #E2E8F0;"
-            "border-radius: 10px;"
-            "}"
-        )
+        tech_card.setObjectName("aboutInfoCard")
         tech_layout = QVBoxLayout(tech_card)
         tech_layout.setContentsMargins(16, 14, 16, 14)
         tech_layout.setSpacing(4)
 
         tech_title = QLabel("技术与许可")
-        tech_title.setStyleSheet("color: #111827; font-size: 13px; font-weight: bold; border: none;")
+        tech_title.setObjectName("aboutTitle")
         tech_detail = QLabel(
             "基于PySide6、PyMuPDF及Ghostscript等项目构建\n"
             "遵循GNU GPL v3开源协议"
         )
         tech_detail.setWordWrap(True)
-        tech_detail.setStyleSheet("color: #64748B; font-size: 12px; line-height: 1.7; border: none;")
+        tech_detail.setObjectName("aboutText")
         tech_layout.addWidget(tech_title)
         tech_layout.addWidget(tech_detail)
         self.content_layout.addWidget(tech_card)
@@ -304,9 +400,8 @@ class AboutDialog(FramelessDraggableDialog):
         self.content_layout.addStretch()
 
         btn_close = QPushButton("关 闭")
+        btn_close.setObjectName("dialogSecondaryBtn")
         btn_close.setFixedHeight(36)
-        btn_close.setStyleSheet(
-            "background-color: #E5E7EB; color: #374151; border-radius: 6px; font-weight: bold; border: none;")
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
 
@@ -773,7 +868,11 @@ class MainWindow(QMainWindow):
         self.processing_hint_label.setObjectName("processingHint")
         self.risk_hint_label = QLabel("")
         self.risk_hint_label.setObjectName("footerHint")
-        self.btn_start = QPushButton("▶ 开始批量处理")
+        self.btn_skip_current = QPushButton("⏭ 跳过当前文件")
+        self.btn_skip_current.setObjectName("actionBtn")
+        self.btn_skip_current.setEnabled(False)
+        self.btn_skip_current.hide()
+        self.btn_start = QPushButton("▶ 开始处理")
         self.btn_start.setObjectName("startBtn")
         footer_layout.addWidget(self.info_label)
         footer_layout.addSpacing(16)
@@ -781,6 +880,8 @@ class MainWindow(QMainWindow):
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.risk_hint_label)
         footer_layout.addSpacing(16)
+        footer_layout.addWidget(self.btn_skip_current)
+        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
 
