@@ -2,3 +2,7 @@
 /.idea
 settings.ini
 /ra_test
+/build
+/dist
+/build_pyinstaller
+/*.spec

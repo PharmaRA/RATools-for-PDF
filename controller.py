@@ -477,6 +477,8 @@ class MainController(QObject):
                     root_name = os.path.basename(common_base) or common_base
                     root_node.setText(0, f"📁 {root_name}")
                     root_node.setText(1, common_base)
+                    root_node.setToolTip(0, root_name)
+                    root_node.setToolTip(1, common_base)
                     root_node.setExpanded(True)
                     self.folder_nodes[common_base] = root_node
 
@@ -493,6 +495,8 @@ class MainController(QObject):
                             node = QTreeWidgetItem(parent_item)
                             node.setText(0, f"📁 {part}")
                             node.setText(1, current_path_str)
+                            node.setToolTip(0, part)
+                            node.setToolTip(1, current_path_str)
                             node.setExpanded(True)
                             self.folder_nodes[current_path_str] = node
                         parent_item = self.folder_nodes[current_path_str]
@@ -504,6 +508,8 @@ class MainController(QObject):
                     node = QTreeWidgetItem(parent_item)
                     node.setText(0, f"💽 {root_str}")
                     node.setText(1, root_str)
+                    node.setToolTip(0, root_str)
+                    node.setToolTip(1, root_str)
                     node.setExpanded(True)
                     self.folder_nodes[root_str] = node
                 parent_item = self.folder_nodes[root_str]
@@ -515,6 +521,8 @@ class MainController(QObject):
                         node = QTreeWidgetItem(parent_item)
                         node.setText(0, f"📁 {part}")
                         node.setText(1, current_path_str)
+                        node.setToolTip(0, part)
+                        node.setToolTip(1, current_path_str)
                         node.setExpanded(True)
                         self.folder_nodes[current_path_str] = node
                     parent_item = self.folder_nodes[current_path_str]
@@ -524,6 +532,9 @@ class MainController(QObject):
             file_node.setText(0, f"📄 {p.name}")
             file_node.setText(1, path)
             file_node.setText(2, "等待处理")
+            file_node.setToolTip(0, p.name)
+            file_node.setToolTip(1, path)
+            file_node.setToolTip(2, "等待处理")
             file_node.setForeground(2, Qt.darkGray)
 
             # 将创建的文件节点加入字典中进行状态管理
@@ -634,6 +645,7 @@ class MainController(QObject):
         if file_path in self.file_nodes:
             node = self.file_nodes[file_path]
             node.setText(2, status_text)
+            node.setToolTip(2, status_text)
             node.setForeground(2, color)
 
         self.process_logs += f"{log_msg}\n"

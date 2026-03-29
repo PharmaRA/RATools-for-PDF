@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon  # 引入 QIcon
 
+from app_paths import get_app_dir, get_resource_path
+
 
 # ================== 自定义无边框拖拽对话框基类 ==================
 class FramelessDraggableDialog(QDialog):
@@ -337,20 +339,13 @@ class DropZoneLabel(QLabel):
 
 
 class MainWindow(QMainWindow):
-    PRESET_OPTION_ALIASES = {
-        "默认启用书签导航": "修改导览标签",
-        "折叠所有书签": "PDF若存在书签则收起",
-        "设置为快速网页浏览": "修改文件为快速网页浏览",
-        "删除文档元数据": "删除文档说明",
-    }
-
     PRESET_OPTIONS = {
         "china": {
             "title": "中国 eCTD",
             "options": {
                 "PDF版本转换",
                 "设置为快速网页浏览",
-                "默认启用书签导航",
+                "设置导览标签",
                 "修改页面布局为默认",
                 "修改打开页面为第一页",
                 "修改书签设置为承前缩放",
@@ -371,7 +366,7 @@ class MainWindow(QMainWindow):
             "options": {
                 "PDF版本转换",
                 "设置为快速网页浏览",
-                "默认启用书签导航",
+                "设置导览标签",
                 "修改页面布局为默认",
                 "修改打开页面为第一页",
                 "修改书签设置为承前缩放",
@@ -394,7 +389,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("RATools for PDF")
 
         # === 添加原生窗口图标 ===
-        self.setWindowIcon(QIcon("icon.png"))
+        self.setWindowIcon(QIcon(get_resource_path("icon.png")))
 
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
@@ -415,7 +410,7 @@ class MainWindow(QMainWindow):
                     {"id": "修改打开页面为第一页", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
                     {"id": "修改页面布局为默认", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
                     {"id": "修改放大率为默认", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
-                    {"id": "默认启用书签导航", "title": "启用书签导航", "desc": "强制PDF打开时自动展开左侧的书签/导览面板"},
+                    {"id": "设置导览标签", "title": "设置导览标签", "desc": "包含书签的文档，导览标签设置为书签面板和页面；不包含书签的文档，导览标签设置为页面。"},
                     {"id": "折叠所有书签", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
                     {"id": "根据文件名在PDF文档属性中自动添加文件标题", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
                 ]
@@ -620,6 +615,7 @@ class MainWindow(QMainWindow):
         self.tree.setSelectionBehavior(QTreeWidget.SelectRows)
         self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.setIndentation(14)
         self.tree.header().setMinimumSectionSize(90)
         self.tree.header().resizeSection(1, 380)
 
@@ -707,28 +703,6 @@ class MainWindow(QMainWindow):
                 btn_layout.addWidget(self.btn_import_links)
                 page_layout.addLayout(btn_layout)
 
-            if mod["title"] == "初始视图与属性":
-                for alias, target in [
-                    ("默认启用书签导航", "修改导览标签"),
-                    ("折叠所有书签", "PDF若存在书签则收起"),
-                ]:
-                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
-                        self.all_checkboxes[alias] = self.all_checkboxes[target]
-
-            if mod["title"] == "文件级优化与输出":
-                for alias, target in [
-                    ("设置为快速网页浏览", "修改文件为快速网页浏览"),
-                ]:
-                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
-                        self.all_checkboxes[alias] = self.all_checkboxes[target]
-
-            if mod["title"] == "违规内容清理与安全性":
-                for alias, target in [
-                    ("删除文档元数据", "删除文档说明"),
-                ]:
-                    if target in self.all_checkboxes and alias not in self.all_checkboxes:
-                        self.all_checkboxes[alias] = self.all_checkboxes[target]
-
             page_layout.addStretch()
 
             # 将每个页面按顺序加入核心布局并暂时隐藏
@@ -813,7 +787,7 @@ class MainWindow(QMainWindow):
         self.apply_stylesheet()
 
         # ================= 初始化 QSettings 持久化存储 =================
-        current_dir = os.path.dirname(os.path.abspath(__file__))
+        current_dir = get_app_dir()
         ini_path = os.path.join(current_dir, "settings.ini")
         self.app_settings = QSettings(ini_path, QSettings.IniFormat)
 
@@ -935,9 +909,6 @@ class MainWindow(QMainWindow):
             return
 
         target_options = set(preset["options"])
-        for alias, actual in self.PRESET_OPTION_ALIASES.items():
-            if alias in target_options:
-                target_options.add(actual)
 
         checkbox_groups = {}
         for opt_id, cb in self.all_checkboxes.items():
@@ -1094,7 +1065,7 @@ class MainWindow(QMainWindow):
         #navBtn:hover { background-color: #F8FAFC; border-color: #E2E8F0; }
         #navBtn:checked { background-color: #E8F1FF; color: #155EEF; font-weight: 700; border-color: #BFDBFE; }
         #mainView { background-color: #F4F6F8; }
-        #importCard, #listContainer { background-color: white; border: 1px solid #E5E7EB; border-radius: 16px; }
+        #importCard, #listContainer { background-color: white; border: 1px solid #DCE3EA; border-radius: 16px; }
         #sectionTitle { font-size: 14px; font-weight: 700; color: #0F172A; }
         #sectionHint { color: #64748B; font-size: 12px; }
         #dropZone { border: 2px dashed #B8C6DB; border-radius: 14px; background-color: #F8FBFF; color: #52606D; font-weight: 600; }
@@ -1107,6 +1078,8 @@ class MainWindow(QMainWindow):
         QTreeWidget { border: none; background-color: white; color: #334155; outline: none; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; alternate-background-color: #FBFDFF; }
         QTreeWidget::item { padding: 7px; border-bottom: 1px solid #F1F5F9; }
         QTreeWidget::item:selected { background-color: #E8F1FF; color: #155EEF; }
+        QTreeWidget::branch:selected { background: transparent; }
+        QTreeWidget::branch:hover { background: transparent; }
         QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #64748B; font-weight: 600; text-align: left; }
 
         #rightHeader { border-bottom: 1px solid #E5E7EB; }
@@ -1123,11 +1096,11 @@ class MainWindow(QMainWindow):
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 
-        QScrollBar:horizontal { border: none; background: transparent; height: 8px; margin: 0px; }
-        QScrollBar::handle:horizontal { background: #CBD5E1; min-width: 30px; border-radius: 4px; }
-        QScrollBar::handle:horizontal:hover { background: #94A3B8; }
+        QScrollBar:horizontal { border: none; background: #EAF0F6; height: 14px; margin: 2px 8px 4px 8px; border-radius: 7px; }
+        QScrollBar::handle:horizontal { background: #94A3B8; min-width: 44px; border-radius: 7px; margin: 1px; }
+        QScrollBar::handle:horizontal:hover { background: #64748B; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; background: none; }
-        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: #EAF0F6; border-radius: 7px; }
 
         QCheckBox { outline: none; }
         QCheckBox:focus { outline: none; }

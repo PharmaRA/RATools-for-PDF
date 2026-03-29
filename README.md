@@ -145,6 +145,48 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## PyInstaller 打包（Windows 推荐）
+
+如果你希望更快完成 Windows 桌面分发，推荐使用 `PyInstaller` 的 `onedir` 模式。
+
+### 1. 一键打包
+
+项目根目录已提供 Windows 打包脚本：
+
+```bat
+build_pyinstaller.bat
+```
+
+脚本会自动：
+
+- 检查 `python` 是否可用
+- 检查并安装 `PyInstaller`
+- 使用 `onedir` 模式打包 `main.py`
+- 一并带上 `icon.png`
+- 一并带上 `plugins/ghostscript/` 目录
+
+### 2. 输出位置
+
+打包完成后，程序输出在：
+
+```text
+dist/RATools-for-PDF/RATools-for-PDF.exe
+```
+
+说明：
+
+- 请直接分发整个 `dist/RATools-for-PDF` 目录，不要只单独拷贝 `.exe`
+- `settings.ini` 会在程序运行后自动生成到可执行文件所在目录
+- 当前打包方案针对 Windows 桌面环境设计
+
+### 3. 为什么推荐 `onedir`
+
+虽然单文件 `onefile` 分发更方便，但它通常需要在启动时先解包，启动速度反而更慢。对于本项目这种包含 `PySide6`、`PyMuPDF` 和 `Ghostscript` 资源的桌面工具，`onedir` 模式通常更合适。
+
+### 4. Nuitka 说明
+
+仓库中仍保留 `build_nuitka.bat` 作为可选方案。如果你更看重正式发布时的启动效率，可以再尝试 `Nuitka`；如果你更看重打包速度和成功率，优先使用 `PyInstaller onedir`。
+
 ## Ghostscript 说明
 
 程序会在不同平台按如下方式查找 Ghostscript：

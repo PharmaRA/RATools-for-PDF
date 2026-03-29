@@ -9,6 +9,8 @@ import re
 from urllib.parse import unquote
 from pathlib import Path
 
+from app_paths import get_resource_path
+
 
 class PDFProcessor:
     """
@@ -18,15 +20,10 @@ class PDFProcessor:
 
     @staticmethod
     def _get_gs_path():
-        if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS
-        else:
-            base_path = os.path.abspath(".")
-
         if sys.platform == "win32":
-            gs_exe = os.path.join(base_path, "plugins", "ghostscript", "bin", "gswin64c.exe")
+            gs_exe = get_resource_path("plugins", "ghostscript", "bin", "gswin64c.exe")
         elif sys.platform == "darwin":
-            gs_exe = os.path.join(base_path, "plugins", "ghostscript", "bin", "gs")
+            gs_exe = get_resource_path("plugins", "ghostscript", "bin", "gs")
         else:
             gs_exe = "gs"
         return gs_exe
@@ -569,8 +566,10 @@ class PDFProcessor:
                 doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
 
-            if "默认启用书签导航" in options:
-                doc.xref_set_key(catalog_xref, "PageMode", "/UseOutlines");
+            if "设置导览标签" in options:
+                has_bookmarks = len(doc.get_toc(simple=False)) > 0
+                page_mode = "/UseOutlines" if has_bookmarks else "/UseNone"
+                doc.xref_set_key(catalog_xref, "PageMode", page_mode)
                 changed = True
 
             if "折叠所有书签" in options:
