@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
-    QDialog, QTextEdit, QSizePolicy
+    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon  # 引入 QIcon
@@ -89,13 +89,15 @@ class FramelessDraggableDialog(QDialog):
                 border: none;
             }
             #logTextEdit {
-                background-color: white;
-                border: 1px solid #E5E7EB;
+                background-color: #0F172A;
+                border: 1px solid #1E293B;
                 border-radius: 10px;
                 padding: 12px;
-                color: #374151;
+                color: #E2E8F0;
                 font-family: Consolas, 'Courier New', monospace;
                 font-size: 12px;
+                selection-background-color: #1D4ED8;
+                selection-color: white;
             }
             #aboutHeroCard {
                 background-color: #F8FBFF;
@@ -145,6 +147,25 @@ class FramelessDraggableDialog(QDialog):
                 border: 1px solid #FECACA;
                 border-radius: 8px;
                 padding: 8px 10px;
+            }
+            #settingsPathCard {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 10px;
+            }
+            #settingsPathHint {
+                color: #64748B;
+                font-size: 12px;
+                border: none;
+            }
+            #settingsPathEdit {
+                background-color: white;
+                border: 1px solid #DCE3EA;
+                border-radius: 8px;
+                padding: 8px 10px;
+                color: #334155;
+                selection-background-color: #DBEAFE;
+                selection-color: #1E3A8A;
             }
         """)
 
@@ -277,10 +298,11 @@ class LogDialog(FramelessDraggableDialog):
         self.text_edit = QTextEdit()
         self.text_edit.setObjectName("logTextEdit")
         self.text_edit.setReadOnly(True)
+        self.text_edit.setLineWrapMode(QTextEdit.NoWrap)
         self.content_layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
-        self.btn_export = QPushButton("⬇️ 导出为 CSV")
+        self.btn_export = QPushButton("⬇️ 导出日志")
         self.btn_export.setObjectName("dialogPrimaryBtn")
         self.btn_close = QPushButton("关闭")
         self.btn_close.setObjectName("dialogSecondaryBtn")
@@ -295,13 +317,9 @@ class LogDialog(FramelessDraggableDialog):
 class SettingsDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("⚙️ 全局设置", parent)
-        self.resize(400, 240)
+        self.resize(520, 320)
 
         self.content_layout.setSpacing(16)
-
-        title = QLabel("常规选项")
-        title.setObjectName("dialogSectionTitle")
-        self.content_layout.addWidget(title)
 
         cb_style = """
             QCheckBox { font-size: 13px; color: #374151; spacing: 8px; border: none; }
@@ -317,10 +335,45 @@ class SettingsDialog(FramelessDraggableDialog):
         self.cb_overwrite.setChecked(False)
         self.cb_overwrite.setStyleSheet(cb_style.replace("color: #374151;", "color: #EF4444;"))
 
+        title = QLabel("默认保存位置")
+        title.setObjectName("dialogSectionTitle")
+        self.content_layout.addWidget(title)
+
+        path_card = QFrame()
+        path_card.setObjectName("settingsPathCard")
+        path_layout = QVBoxLayout(path_card)
+        path_layout.setContentsMargins(12, 12, 12, 12)
+        path_layout.setSpacing(10)
+
+        path_hint = QLabel("用于处理输出目录选择和日志导出默认位置")
+        path_hint.setObjectName("settingsPathHint")
+        path_layout.addWidget(path_hint)
+
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(8)
+        self.default_output_edit = QLineEdit()
+        self.default_output_edit.setPlaceholderText("未设置时，处理输出目录选择将使用系统默认位置")
+        self.default_output_edit.setReadOnly(True)
+        self.default_output_edit.setObjectName("settingsPathEdit")
+        self.btn_browse_output = QPushButton("浏览...")
+        self.btn_browse_output.setObjectName("dialogSecondaryBtn")
+        self.btn_clear_output = QPushButton("清除")
+        self.btn_clear_output.setObjectName("dialogSecondaryBtn")
+        path_row.addWidget(self.default_output_edit, 1)
+        path_row.addWidget(self.btn_browse_output)
+        path_row.addWidget(self.btn_clear_output)
+        path_layout.addLayout(path_row)
+
+        self.content_layout.addWidget(path_card)
+
+        title = QLabel("常规选项")
+        title.setObjectName("dialogSectionTitle")
+        self.content_layout.addWidget(title)
         self.content_layout.addWidget(self.cb_auto_open)
         self.content_layout.addWidget(self.cb_overwrite)
 
-        danger_hint = QLabel("危险操作：直接覆盖源 PDF。建议仅在已有备份且确认规则无误后使用。")
+        danger_hint = QLabel("危险操作：直接覆盖源PDF。建议仅在已有备份且确认规则无误后使用。")
         danger_hint.setWordWrap(True)
         danger_hint.setObjectName("dangerHint")
         self.content_layout.addWidget(danger_hint)
@@ -332,6 +385,15 @@ class SettingsDialog(FramelessDraggableDialog):
         btn_close.setFixedHeight(36)
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
+
+        self.btn_browse_output.clicked.connect(self.choose_default_output_dir)
+        self.btn_clear_output.clicked.connect(lambda: self.default_output_edit.setText(""))
+
+    def choose_default_output_dir(self):
+        start_dir = self.default_output_edit.text().strip() or os.path.expanduser("~")
+        selected_dir = QFileDialog.getExistingDirectory(self, "选择默认保存位置", start_dir)
+        if selected_dir:
+            self.default_output_edit.setText(selected_dir)
 
 
 class AboutDialog(FramelessDraggableDialog):
@@ -496,6 +558,7 @@ class MainWindow(QMainWindow):
         self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
         self.all_checkboxes["覆盖原始文件 (不推荐)"] = self.settings_dialog.cb_overwrite
         self.settings_dialog.cb_overwrite.toggled.connect(lambda _checked: self.refresh_selection_summary())
+        self.settings_dialog.default_output_edit.textChanged.connect(lambda _text: self.refresh_selection_summary())
 
         self.MODULES_DATA = [
             {
@@ -514,9 +577,9 @@ class MainWindow(QMainWindow):
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    {"id": "page_size_a4", "title": "强制转为 A4 尺寸", "desc": "统一将所有页面裁切/调整为标准的 A4 纸张尺寸"},
-                    {"id": "page_size_letter", "title": "强制转为 Letter 尺寸", "desc": "统一将所有页面裁切/调整为标准的 Letter (信纸) 尺寸"},
-                    {"id": "embed_nonstandard_fonts", "title": "嵌入全部非标准字体", "desc": "利用 Ghostscript 引擎将文档中使用的所有非标准字体完全嵌入"}
+                    {"id": "page_size_a4", "title": "强制转为A4尺寸", "desc": "统一将所有页面裁切/调整为标准的A4纸张尺寸"},
+                    {"id": "page_size_letter", "title": "强制转为Letter尺寸", "desc": "统一将所有页面裁切/调整为标准的Letter (信纸) 尺寸"},
+                    {"id": "embed_nonstandard_fonts", "title": "嵌入全部非标准字体", "desc": "利用Ghostscript引擎将文档中使用的所有非标准字体完全嵌入"}
                 ]
             },
             {
@@ -524,8 +587,8 @@ class MainWindow(QMainWindow):
                 "title": "书签管理",
                 "options": [
                     {"id": "bookmark_inherit_zoom", "title": "书签设为承前缩放", "desc": "点击书签跳转时，保持当前页面的缩放比例不变 (Inherit Zoom)"},
-                    {"id": "bookmark_open_new_window", "title": "书签动作：新窗口打开", "desc": "配置书签的链接跳转默认在新的 PDF 浏览器窗口中打开"},
-                    {"id": "bookmark_remove_external_links", "title": "清理书签外部链接", "desc": "移除书签中指向网页或外部文件的 URI 动作"},
+                    {"id": "bookmark_open_new_window", "title": "书签动作：新窗口打开", "desc": "配置书签的链接跳转默认在新的PDF浏览器窗口中打开"},
+                    {"id": "bookmark_remove_external_links", "title": "清理书签外部链接", "desc": "移除书签中指向网页或外部文件的URI动作"},
                     {"id": "bookmark_remove_invalid", "title": "清理失效书签", "desc": "自动检测并删除未指向任何有效页面或动作的空书签"},
                     {"id": "bookmark_remove_unknown_actions", "title": "清理非标准动作书签", "desc": "仅保留内部跳转、外部文档和调用命令，删除其它未知动作"}
                 ]
@@ -538,7 +601,7 @@ class MainWindow(QMainWindow):
                     {"id": "link_inherit_zoom", "title": "超链接设为承前缩放", "desc": "点击链接跳转时，保持当前屏幕的视图缩放比例 (Inherit Zoom)"},
                     {"id": "link_open_new_window", "title": "链接动作：新窗口打开", "desc": "强制外部文档或网页链接在独立的新窗口中打开"},
                     {"id": "link_text_blue", "title": "链接文本设为蓝色", "desc": "自动识别超链接区域并将其文本颜色变更为标准蓝色"},
-                    {"id": "link_black_border", "title": "链接区域加黑框", "desc": "为所有的有效超链接区域添加 1px 的黑色实线边框"},
+                    {"id": "link_black_border", "title": "链接区域加黑框", "desc": "为所有的有效超链接区域添加1px的黑色实线边框"},
                     {"id": "link_bordered_to_blue_border", "title": "标准化有框链接", "desc": "若超链接已存在边框，则统一转为蓝框黑字样式"},
                     {"id": "link_unbordered_blue_to_blue_border", "title": "标准化无框蓝字链接", "desc": "若超链接无边框且文字为蓝色，则统一转为蓝框黑字样式"},
                     {"id": "link_remove_border", "title": "清除所有链接边框", "desc": "移除文档内所有超链接的可见边框，保持页面排版干净"}
@@ -548,16 +611,16 @@ class MainWindow(QMainWindow):
                 "icon": "🛡️",
                 "title": "内容合规与安全性",
                 "options": [
-                    {"id": "cleanup_remove_external_uri", "title": "删除外部 URI 链接", "desc": "清理指向外部网站、邮箱等所有 URI 类型的超链接"},
-                    {"id": "cleanup_remove_external_uri_and_text_black", "title": "删除外部 URI 链接并去色", "desc": "清理 URI 链接的同时，将该链接对应的文本颜色重置为黑色"},
+                    {"id": "cleanup_remove_external_uri", "title": "删除外部URI链接", "desc": "清理指向外部网站、邮箱等所有URI类型的超链接"},
+                    {"id": "cleanup_remove_external_uri_and_text_black", "title": "删除外部URI链接并去色", "desc": "清理URI链接的同时，将该链接对应的文本颜色重置为黑色"},
                     {"id": "cleanup_remove_invalid_links", "title": "清理失效超链接", "desc": "自动扫描并移除所有未分配有效动作 (Action) 的空链接"},
                     {"id": "cleanup_remove_invalid_links_and_text_black", "title": "清理失效链接并去色", "desc": "移除空链接，并将该区域相关的文本颜色恢复为普通黑色"},
                     {"id": "cleanup_remove_unknown_action_links", "title": "清理非标准动作链接", "desc": "仅保留内部/外部跳转和执行动作，移除其它所有的特殊行为"},
-                    {"id": "cleanup_remove_dynamic_content", "title": "彻底清除动态内容 (JS/3D)", "desc": "删除文档内所有的 JavaScript 脚本、3D 模型等交互元素以满足安全合规"},
-                    {"id": "cleanup_remove_attachments", "title": "移除所有内嵌附件", "desc": "清理 PDF 内部打包的所有附加文件 (.zip, .xml 等)"},
-                    {"id": "cleanup_remove_tags", "title": "移除结构化标签", "desc": "删除 PDF 结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
+                    {"id": "cleanup_remove_dynamic_content", "title": "彻底清除动态内容 (JS/3D)", "desc": "删除文档内所有的JavaScript脚本、3D模型等交互元素以满足安全合规"},
+                    {"id": "cleanup_remove_attachments", "title": "移除所有内嵌附件", "desc": "清理PDF内部打包的所有附加文件 (.zip, .xml 等)"},
+                    {"id": "cleanup_remove_tags", "title": "移除结构化标签", "desc": "删除PDF结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
                     {"id": "cleanup_remove_annotations", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
-                    {"id": "cleanup_remove_metadata", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等 PieceInfo 和 Metadata"},
+                    {"id": "cleanup_remove_metadata", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等PieceInfo和Metadata"},
                     {"id": "cleanup_remove_all_links_bookmarks", "title": "移除全部链接和书签", "desc": "一键清除文档内所有的导航书签与页面超链接"}
                 ]
             },
@@ -565,9 +628,9 @@ class MainWindow(QMainWindow):
                 "icon": "📦",
                 "title": "文件级优化与输出",
                 "options": [
-                    {"id": "convert_pdf_version", "title": "PDF 版本转换", "desc": "将PDF版本修改为1.7版本"},
-                    {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持 Web 环境下的流式加载和边下边看"},
-                    {"id": "filename_ectd_format", "title": "eCTD 文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
+                    {"id": "convert_pdf_version", "title": "PDF版本转换", "desc": "将PDF版本修改为1.7版本"},
+                    {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
+                    {"id": "filename_ectd_format", "title": "eCTD文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]
             }
         ]
@@ -932,6 +995,9 @@ class MainWindow(QMainWindow):
                     is_checked = str(val).lower() == 'true'
                     cb.setChecked(is_checked)
 
+        default_output_dir = str(self.app_settings.value("Settings/DefaultOutputDir", "") or "")
+        self.settings_dialog.default_output_edit.setText(default_output_dir)
+
         # 兼容旧版本：如果用户之前勾选过“中文/英文字体嵌入”，迁移到新的统一选项
         merged_font_opt = self.all_checkboxes.get("embed_nonstandard_fonts")
         if merged_font_opt and not merged_font_opt.isChecked():
@@ -950,6 +1016,7 @@ class MainWindow(QMainWindow):
             key = self.settings_key_map.get(opt_id)
             if key:
                 self.app_settings.setValue(key, cb.isChecked())
+        self.app_settings.setValue("Settings/DefaultOutputDir", self.settings_dialog.default_output_edit.text().strip())
         super().closeEvent(event)
 
     def get_selected_preset(self):

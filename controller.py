@@ -1,5 +1,6 @@
 import os
 import re
+import csv
 import platform
 import subprocess
 import multiprocessing as mp
@@ -24,6 +25,70 @@ def _process_document_task_pipe(file_path, out_path, options, conn):
         conn.send((False, f"处理进程异常: {str(e)}"))
     finally:
         conn.close()
+
+
+def _render_logs_as_csv_rows(log_text):
+    rows = []
+    current_original_file = ""
+    current_output_file = ""
+    current_time = ""
+    current_start_seconds = None
+
+    def _time_to_seconds(value):
+        try:
+            hh, mm, ss = value.split(":")
+            return int(hh) * 3600 + int(mm) * 60 + int(ss)
+        except Exception:
+            return None
+
+    for raw_line in log_text.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            continue
+
+        start_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]\s+开始处理:\s+(.+)$", line)
+        if start_match:
+            current_time = start_match.group(1)
+            current_start_seconds = _time_to_seconds(current_time)
+            current_original_file = start_match.group(2)
+            current_output_file = ""
+            continue
+
+        result_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]\s+(.+)$", line)
+        if result_match and "开始处理:" not in line and current_original_file:
+            current_time = result_match.group(1)
+            current_output_file = result_match.group(2)
+            continue
+
+        status_match = re.match(r"^\s+状态:\s+(.+)$", line)
+        if status_match:
+            status_value = status_match.group(1)
+            end_seconds = _time_to_seconds(current_time)
+            duration_sec = ""
+            if current_start_seconds is not None and end_seconds is not None:
+                delta = end_seconds - current_start_seconds
+                if delta < 0:
+                    delta += 24 * 3600
+                duration_sec = delta
+
+            rows.append({
+                "time": current_time,
+                "file_original": current_original_file,
+                "file_output": current_output_file or current_original_file,
+                "status": status_value,
+                "success": "true" if status_value == "处理完成" else "false",
+                "duration_sec": duration_sec,
+                "changes": "",
+            })
+            continue
+
+        result_line_match = re.match(r"^\s+结果:\s+(.+)$", line)
+        if result_line_match and rows:
+            result_text = result_line_match.group(1)
+            if "修改项：" in result_text:
+                rows[-1]["changes"] = result_text.split("修改项：", 1)[1].strip()
+
+    return rows
 
 
 class ProcessWorker(QThread):
@@ -65,7 +130,7 @@ class ProcessWorker(QThread):
                     break
 
                 base_name = os.path.basename(file_path)
-                self.progress.emit(i, "正在处理...", f"[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {base_name}")
+                self.progress.emit(i, "正在处理...", f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {base_name}")
 
                 # eCTD 命名合规处理
                 if rename_ectd:
@@ -137,7 +202,7 @@ class ProcessWorker(QThread):
                             os.remove(out_path)
                         except Exception:
                             pass
-                    self.progress.emit(i, "已停止", "   ↳ 结果: ⏹️ 用户手动停止处理")
+                    self.progress.emit(i, "已停止", f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: ⏹️ 用户手动停止处理")
                     parent_conn.close()
                     break
 
@@ -147,7 +212,7 @@ class ProcessWorker(QThread):
                             os.remove(out_path)
                         except Exception:
                             pass
-                    self.progress.emit(i, "已跳过", "   ↳ 结果: ⏭ 已跳过当前文件")
+                    self.progress.emit(i, "已跳过", f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: ⏭ 已跳过当前文件")
                     parent_conn.close()
                     continue
 
@@ -173,7 +238,7 @@ class ProcessWorker(QThread):
                 else:
                     status = "处理失败"
 
-                self.progress.emit(i, status, f"   ↳ 结果: {msg}")
+                self.progress.emit(i, status, f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    结果: {msg}")
 
             if stopped:
                 summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
@@ -695,7 +760,14 @@ class MainController(QObject):
                                                   "您勾选了【覆盖原始文件】。\n此操作不可逆，强烈建议您在操作前备份文件！\n\n是否继续？"):
                 return
         else:
-            user_selected_dir = QFileDialog.getExistingDirectory(self.view, "选择输出文件保存的根目录")
+            default_output_dir = self.view.settings_dialog.default_output_edit.text().strip()
+            start_dir = default_output_dir if default_output_dir and os.path.isdir(default_output_dir) else os.path.expanduser("~")
+
+            user_selected_dir = QFileDialog.getExistingDirectory(
+                self.view,
+                "选择输出文件保存的根目录",
+                start_dir
+            )
             if not user_selected_dir:
                 return
 
@@ -796,7 +868,7 @@ class MainController(QObject):
         self._refresh_processing_hint(status_text=status_text, file_path=file_path)
 
     def processing_finished(self, summary):
-        self.process_logs += f"\n=== 批量处理结束 ===\n{summary}\n"
+        self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{summary}\n{'=' * 56}\n"
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
@@ -826,7 +898,7 @@ class MainController(QObject):
                     self._open_directory(self.last_output_dir)
 
     def processing_error(self, error_msg):
-        self.process_logs += f"\n[致命错误] {error_msg}\n"
+        self.process_logs += f"\n{'!' * 56}\n[致命错误] {error_msg}\n{'!' * 56}\n"
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
@@ -871,11 +943,11 @@ class MainController(QObject):
             self.worker.request_skip_current()
 
     def on_io_action_finished(self, result_msg):
-        self.process_logs += f"\n{result_msg}\n"
+        self.process_logs += f"\n{'-' * 56}\n{result_msg}\n{'-' * 56}\n"
         self.view.show_success_message("✅ 操作成功", result_msg)
 
     def on_io_action_error(self, error_msg):
-        self.process_logs += f"\n[IO错误] {error_msg}\n"
+        self.process_logs += f"\n{'!' * 56}\n[IO错误] {error_msg}\n{'!' * 56}\n"
         self.view.show_error_message("❌ 操作失败", error_msg)
 
     def show_log_dialog(self):
@@ -893,12 +965,45 @@ class MainController(QObject):
             self.view.show_warning_message("⚠️ 提示", "目前暂无任何日志可供导出！")
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(self.view, "导出处理日志", "process_logs.txt",
-                                                   "Text Files (*.txt);;All Files (*)")
+        default_dir = ""
+        if hasattr(self, 'last_output_dir') and self.last_output_dir and os.path.isdir(self.last_output_dir):
+            default_dir = self.last_output_dir
+        elif self.view.settings_dialog.default_output_edit.text().strip() and os.path.isdir(self.view.settings_dialog.default_output_edit.text().strip()):
+            default_dir = self.view.settings_dialog.default_output_edit.text().strip()
+        elif self.loaded_files:
+            try:
+                file_dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+                default_dir = os.path.commonpath(file_dirs)
+            except ValueError:
+                default_dir = os.path.dirname(os.path.abspath(self.loaded_files[0]))
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"RATools_process_logs_{timestamp}.csv"
+        default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
+
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self.view,
+            "导出处理日志",
+            default_path,
+            "CSV Summary (*.csv);;Text Files (*.txt);;All Files (*)"
+        )
         if file_path:
             try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(self.process_logs)
+                export_csv = file_path.lower().endswith('.csv') or selected_filter.startswith("CSV")
+
+                if export_csv and not file_path.lower().endswith('.csv'):
+                    file_path += '.csv'
+                if not export_csv and selected_filter.startswith("Text") and not file_path.lower().endswith('.txt'):
+                    file_path += '.txt'
+
+                if export_csv:
+                    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+                        writer = csv.DictWriter(f, fieldnames=["time", "file_original", "file_output", "status", "success", "duration_sec", "changes"])
+                        writer.writeheader()
+                        writer.writerows(_render_logs_as_csv_rows(self.process_logs))
+                else:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(self.process_logs)
                 self.view.show_success_message("✅ 导出成功", "处理日志已成功保存！")
             except Exception as e:
                 self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")

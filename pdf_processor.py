@@ -56,6 +56,31 @@ class PDFProcessor:
     def _linearize_with_gs(input_pdf, output_pdf):
         PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=True)
 
+    @staticmethod
+    def _mark_change(change_list, label):
+        if label not in change_list:
+            change_list.append(label)
+
+    @staticmethod
+    def _increase_change_count(change_counts, label, amount=1):
+        if amount <= 0:
+            return
+        change_counts[label] = change_counts.get(label, 0) + amount
+
+    @staticmethod
+    def _format_change_summary(change_counts, ordered_labels):
+        parts = []
+        for label in ordered_labels:
+            if label in change_counts:
+                count = change_counts[label]
+                if count > 1:
+                    parts.append(f"{label}({count}处)")
+                else:
+                    parts.append(label)
+            else:
+                parts.append(label)
+        return "、".join(parts)
+
     # 导出与导入书签 (CSV)
     @staticmethod
     def export_bookmarks(pdf_path, csv_path):
@@ -538,6 +563,8 @@ class PDFProcessor:
     def process_document(input_path, output_path, options):
         try:
             doc = fitz.open(input_path)
+            applied_changes = []
+            change_counts = {}
             link_file_kind = getattr(fitz, "LINK_FILE", None)
             file_like_link_kinds = {fitz.LINK_GOTOR}
             if link_file_kind is not None:
@@ -559,6 +586,7 @@ class PDFProcessor:
                     meta["title"] = base_name;
                     doc.set_metadata(meta);
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "标题同步为文件名")
 
             if "open_page_first" in options or "zoom_default" in options:
                 if doc.page_count > 0:
@@ -567,17 +595,23 @@ class PDFProcessor:
                     action_str = f"[{page0_xref} 0 R /XYZ null null null]"
                     doc.xref_set_key(catalog_xref, "OpenAction", action_str);
                     changed = True
+                    if "open_page_first" in options:
+                        PDFProcessor._mark_change(applied_changes, "打开页设为第一页")
+                    if "zoom_default" in options:
+                        PDFProcessor._mark_change(applied_changes, "打开缩放设为默认")
 
             if "page_layout_default" in options:
                 # 恢复为 PDF 阅读器默认行为：移除显式 PageLayout 设置
                 doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
+                PDFProcessor._mark_change(applied_changes, "页面布局恢复默认")
 
             if "initial_view_bookmarks_and_page" in options:
                 has_bookmarks = len(doc.get_toc(simple=False)) > 0
                 page_mode = "/UseOutlines" if has_bookmarks else "/UseNone"
                 doc.xref_set_key(catalog_xref, "PageMode", page_mode)
                 changed = True
+                PDFProcessor._mark_change(applied_changes, "初始视图设为书签/页面")
 
             if "collapse_all_bookmarks" in options:
                 toc = doc.get_toc(simple=False)
@@ -586,6 +620,7 @@ class PDFProcessor:
                         if isinstance(item[-1], dict): item[-1]["collapse"] = True
                     doc.set_toc(toc);
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "折叠全部书签")
 
             if "page_size_a4" in options or "page_size_letter" in options:
                 target_rect = fitz.paper_rect("a4") if "page_size_a4" in options else fitz.paper_rect(
@@ -594,7 +629,9 @@ class PDFProcessor:
                     if abs(page.rect.width - target_rect.width) > 1 or abs(page.rect.height - target_rect.height) > 1:
                         page.set_mediabox(target_rect);
                         page.set_cropbox(target_rect);
-                        changed = True
+                    changed = True
+                    PDFProcessor._mark_change(applied_changes, "页面尺寸标准化")
+                    PDFProcessor._increase_change_count(change_counts, "页面尺寸标准化")
 
             def _to_point(value):
                 if hasattr(value, "x") and hasattr(value, "y"):
@@ -763,6 +800,7 @@ class PDFProcessor:
 
                             doc.set_toc(fallback_toc)
                         changed = True
+                        PDFProcessor._mark_change(applied_changes, "书签规则已更新")
 
             hyperlink_options = ["link_abs_to_rel_path", "link_inherit_zoom",
                                  "link_open_new_window", "link_text_blue",
@@ -779,6 +817,7 @@ class PDFProcessor:
                         page_links=page_state["links"],
                     ):
                         changed = True
+                        PDFProcessor._mark_change(applied_changes, "超链接动作已更新")
                     if PDFProcessor._apply_hyperlink_styles(
                         doc,
                         page,
@@ -787,6 +826,7 @@ class PDFProcessor:
                         link_rects=page_state["link_rects"],
                     ):
                         changed = True
+                        PDFProcessor._mark_change(applied_changes, "超链接外观已更新")
 
             cleanup_options = ["cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black",
                                "cleanup_remove_invalid_links", "cleanup_remove_invalid_links_and_text_black",
@@ -815,6 +855,8 @@ class PDFProcessor:
                                 page.delete_link(link)
                                 removed_count += 1
                                 changed = True
+                                PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
+                                PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
                             except Exception:
                                 pass
 
@@ -828,6 +870,7 @@ class PDFProcessor:
                                 only_if_blue=True,
                             ):
                                 changed = True
+                                PDFProcessor._mark_change(applied_changes, "已将链接文本恢复为黑色")
 
                         # 兼容兜底：若仍有 URI 链接残留，再做一次注释级删除
                         if removed_count > 0 and any(
@@ -843,6 +886,8 @@ class PDFProcessor:
                                     if uri:
                                         page.delete_annot(annot)
                                         changed = True
+                                        PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
+                                        PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
                                 except Exception:
                                     pass
 
@@ -864,6 +909,7 @@ class PDFProcessor:
                             except Exception:
                                 pass
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "已删除全部链接和书签")
                 else:
                     for page in doc:
                         page_state = PDFProcessor._collect_page_state(page)
@@ -927,6 +973,8 @@ class PDFProcessor:
                                             decolor_rects.append(annot.rect)
                                         page.delete_annot(annot)
                                         changed = True
+                                        PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
+                                        PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
                                 except Exception:
                                     pass
 
@@ -952,6 +1000,15 @@ class PDFProcessor:
                                         pass
                                 page.delete_link(link)
                                 changed = True
+                                if kind == fitz.LINK_URI:
+                                    PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
+                                    PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
+                                elif kind == fitz.LINK_NONE:
+                                    PDFProcessor._mark_change(applied_changes, "已删除失效链接")
+                                    PDFProcessor._increase_change_count(change_counts, "已删除失效链接")
+                                else:
+                                    PDFProcessor._mark_change(applied_changes, "已删除未知动作链接")
+                                    PDFProcessor._increase_change_count(change_counts, "已删除未知动作链接")
 
                         # 去色：对刚刚删除的外部 URI 区域叠加黑色文字
                         if decolor_rects and (
@@ -966,6 +1023,7 @@ class PDFProcessor:
                                 only_if_blue=True,
                             ):
                                 changed = True
+                                PDFProcessor._mark_change(applied_changes, "已将链接文本恢复为黑色")
 
                 if "cleanup_remove_annotations" in options:
                     for page in doc:
@@ -974,24 +1032,32 @@ class PDFProcessor:
                             try:
                                 page.delete_annot(annot)
                                 changed = True
+                                PDFProcessor._mark_change(applied_changes, "已删除PDF注释")
+                                PDFProcessor._increase_change_count(change_counts, "已删除PDF注释")
                             except Exception:
                                 pass
 
                 if "cleanup_remove_dynamic_content" in options:
                     doc.xref_set_key(catalog_xref, "Names", "null");
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "已删除动态内容/JavaScript")
                 if "cleanup_remove_attachments" in options:
                     if doc.embfile_count() > 0:
+                        attachment_count = doc.embfile_count()
                         for emb in doc.embfile_names(): doc.embfile_del(emb)
                         changed = True
+                        PDFProcessor._mark_change(applied_changes, "已删除文档附件")
+                        PDFProcessor._increase_change_count(change_counts, "已删除文档附件", attachment_count)
                 if "cleanup_remove_tags" in options:
                     doc.xref_set_key(catalog_xref, "StructTreeRoot", "null")
                     doc.xref_set_key(catalog_xref, "MarkInfo", "null");
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "已删除文档标签")
                 if "cleanup_remove_metadata" in options:
                     doc.set_metadata({});
                     doc.xref_set_key(catalog_xref, "PieceInfo", "null");
                     changed = True
+                    PDFProcessor._mark_change(applied_changes, "已删除文档元数据")
 
             is_linear = "fast_web_view" in options
             needs_gs_rewrite = needs_gs_engine or is_linear
@@ -1009,6 +1075,12 @@ class PDFProcessor:
                             embed_fonts=embed_fonts,
                             linearize=is_linear,
                         )
+                        if embed_fonts:
+                            PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
+                        if "convert_pdf_version" in options:
+                            PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
+                        if is_linear:
+                            PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
                     finally:
                         if os.path.exists(temp_pdf):
                             os.remove(temp_pdf)
@@ -1024,10 +1096,18 @@ class PDFProcessor:
                         embed_fonts=embed_fonts,
                         linearize=is_linear,
                     )
+                    if embed_fonts:
+                        PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
+                    if "convert_pdf_version" in options:
+                        PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
+                    if is_linear:
+                        PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
                 else:
                     shutil.copy2(input_path, output_path)
 
-            return True, "✅ 处理成功"
+            if applied_changes:
+                return True, f"✅ 处理成功；修改项：{PDFProcessor._format_change_summary(change_counts, applied_changes)}"
+            return True, "✅ 处理成功；无实际修改"
 
         except FileNotFoundError as e:
             return False, f"⚠️ 缺少引擎组件: {str(e)}"
