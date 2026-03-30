@@ -600,6 +600,26 @@ class MainController(QObject):
             cb_a4.toggled.connect(lambda checked: cb_letter.setChecked(False) if checked else None)
             cb_letter.toggled.connect(lambda checked: cb_a4.setChecked(False) if checked else None)
 
+        cb_remove_external = self.view.all_checkboxes.get("cleanup_remove_external_uri")
+        cb_remove_external_black = self.view.all_checkboxes.get("cleanup_remove_external_uri_and_text_black")
+        if cb_remove_external and cb_remove_external_black:
+            cb_remove_external.toggled.connect(
+                lambda checked: cb_remove_external_black.setChecked(False) if checked else None
+            )
+            cb_remove_external_black.toggled.connect(
+                lambda checked: cb_remove_external.setChecked(False) if checked else None
+            )
+
+        cb_remove_invalid = self.view.all_checkboxes.get("cleanup_remove_invalid_links")
+        cb_remove_invalid_black = self.view.all_checkboxes.get("cleanup_remove_invalid_links_and_text_black")
+        if cb_remove_invalid and cb_remove_invalid_black:
+            cb_remove_invalid.toggled.connect(
+                lambda checked: cb_remove_invalid_black.setChecked(False) if checked else None
+            )
+            cb_remove_invalid_black.toggled.connect(
+                lambda checked: cb_remove_invalid.setChecked(False) if checked else None
+            )
+
     def open_file_dialog(self, event):
         if event.button() == Qt.LeftButton:
             self.open_file_picker()

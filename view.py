@@ -6,7 +6,8 @@ from PySide6.QtWidgets import (
     QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
-from PySide6.QtGui import QIcon  # 引入 QIcon
+from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
+from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
 from app_paths import get_app_dir, get_resource_path
 
@@ -167,15 +168,30 @@ class FramelessDraggableDialog(QDialog):
                 selection-background-color: #DBEAFE;
                 selection-color: #1E3A8A;
             }
+            #settingsPathStatus {
+                font-size: 12px;
+                border: none;
+                padding: 0 2px;
+            }
+            #settingsPathStatus[state="empty"] { color: #94A3B8; }
+            #settingsPathStatus[state="valid"] { color: #2563EB; }
+            #settingsPathStatus[state="invalid"] { color: #DC2626; font-weight: 600; }
         """)
 
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(18, 18, 18, 18)
         self.main_layout.setSpacing(0)
 
         # 整体圆角和边框容器
         self.bg_frame = QFrame()
         self.bg_frame.setObjectName("dialogBg")
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(36)
+        shadow.setOffset(0, 8)
+        shadow.setColor(QColor(15, 23, 42, 60))
+        self.bg_frame.setGraphicsEffect(shadow)
+
         bg_layout = QVBoxLayout(self.bg_frame)
         bg_layout.setContentsMargins(0, 0, 0, 0)
         bg_layout.setSpacing(0)
@@ -210,8 +226,12 @@ class FramelessDraggableDialog(QDialog):
         self.main_layout.addWidget(self.bg_frame)
 
     def mousePressEvent(self, event):
-        """接管鼠标按下事件：若点击在高度 40px 以内的标题栏区域，则记录起始坐标"""
-        if event.button() == Qt.LeftButton and event.position().y() < 40:
+        """接管鼠标按下事件：若点击在实际标题栏区域内，则记录起始坐标"""
+        title_top = self.bg_frame.y() + self.title_bar.y()
+        title_bottom = title_top + self.title_bar.height()
+        mouse_y = event.position().y()
+
+        if event.button() == Qt.LeftButton and title_top <= mouse_y <= title_bottom:
             self.drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
@@ -356,6 +376,8 @@ class SettingsDialog(FramelessDraggableDialog):
         self.default_output_edit.setPlaceholderText("未设置时，处理输出目录选择将使用系统默认位置")
         self.default_output_edit.setReadOnly(True)
         self.default_output_edit.setObjectName("settingsPathEdit")
+        self.default_output_status = QLabel()
+        self.default_output_status.setObjectName("settingsPathStatus")
         self.btn_browse_output = QPushButton("浏览...")
         self.btn_browse_output.setObjectName("dialogSecondaryBtn")
         self.btn_clear_output = QPushButton("清除")
@@ -364,6 +386,7 @@ class SettingsDialog(FramelessDraggableDialog):
         path_row.addWidget(self.btn_browse_output)
         path_row.addWidget(self.btn_clear_output)
         path_layout.addLayout(path_row)
+        path_layout.addWidget(self.default_output_status)
 
         self.content_layout.addWidget(path_card)
 
@@ -388,12 +411,29 @@ class SettingsDialog(FramelessDraggableDialog):
 
         self.btn_browse_output.clicked.connect(self.choose_default_output_dir)
         self.btn_clear_output.clicked.connect(lambda: self.default_output_edit.setText(""))
+        self.default_output_edit.textChanged.connect(self.update_default_output_status)
+        self.update_default_output_status()
 
     def choose_default_output_dir(self):
         start_dir = self.default_output_edit.text().strip() or os.path.expanduser("~")
         selected_dir = QFileDialog.getExistingDirectory(self, "选择默认保存位置", start_dir)
         if selected_dir:
             self.default_output_edit.setText(selected_dir)
+
+    def update_default_output_status(self):
+        path = self.default_output_edit.text().strip()
+        if not path:
+            self.default_output_status.setText("未设置，处理输出目录选择将使用系统默认位置。")
+            self.default_output_status.setProperty("state", "empty")
+        elif os.path.isdir(path):
+            self.default_output_status.setText("路径有效，将优先作为处理输出和日志导出的默认位置。")
+            self.default_output_status.setProperty("state", "valid")
+        else:
+            self.default_output_status.setText("路径不存在，请重新选择有效目录。")
+            self.default_output_status.setProperty("state", "invalid")
+
+        self.style().unpolish(self.default_output_status)
+        self.style().polish(self.default_output_status)
 
 
 class AboutDialog(FramelessDraggableDialog):
