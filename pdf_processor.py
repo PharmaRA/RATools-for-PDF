@@ -627,11 +627,11 @@ class PDFProcessor:
                     "letter")
                 for page in doc:
                     if abs(page.rect.width - target_rect.width) > 1 or abs(page.rect.height - target_rect.height) > 1:
-                        page.set_mediabox(target_rect);
-                        page.set_cropbox(target_rect);
-                    changed = True
-                    PDFProcessor._mark_change(applied_changes, "页面尺寸标准化")
-                    PDFProcessor._increase_change_count(change_counts, "页面尺寸标准化")
+                        page.set_mediabox(target_rect)
+                        page.set_cropbox(target_rect)
+                        changed = True
+                        PDFProcessor._mark_change(applied_changes, "页面尺寸标准化")
+                        PDFProcessor._increase_change_count(change_counts, "页面尺寸标准化")
 
             def _to_point(value):
                 if hasattr(value, "x") and hasattr(value, "y"):

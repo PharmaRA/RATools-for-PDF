@@ -27,6 +27,31 @@ def _process_document_task_pipe(file_path, out_path, options, conn):
         conn.close()
 
 
+def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, common_base=""):
+    base_name = os.path.basename(file_path)
+    name_no_ext, _ = os.path.splitext(base_name)
+    suffix = "bookmarks.csv" if data_kind == "bookmarks" else "links.json"
+
+    rel_dir = ""
+    if common_base:
+        try:
+            rel_dir = os.path.relpath(os.path.dirname(os.path.abspath(file_path)), common_base)
+        except ValueError:
+            rel_dir = ""
+        if rel_dir == ".":
+            rel_dir = ""
+
+    data_parent = os.path.join(target_dir, rel_dir) if rel_dir else target_dir
+    data_path = os.path.join(data_parent, f"{name_no_ext}_{suffix}")
+
+    output_path = None
+    if output_dir:
+        output_parent = os.path.join(output_dir, rel_dir) if rel_dir else output_dir
+        output_path = os.path.join(output_parent, base_name)
+
+    return data_path, output_path
+
+
 def _render_logs_as_csv_rows(log_text):
     rows = []
     current_original_file = ""
@@ -260,49 +285,65 @@ class IOActionWorker(QThread):
     finished_action = Signal(str)
     error_action = Signal(str)
 
-    def __init__(self, action_type, files, target_dir, output_dir=None):
+    def __init__(self, action_type, files, target_dir, output_dir=None, common_base=""):
         super().__init__()
         self.action_type = action_type
-        self.files = files
+        self.files = list(files)
         self.target_dir = target_dir
         self.output_dir = output_dir
+        self.common_base = common_base
 
     def run(self):
         try:
             for row_idx, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
-                name_no_ext, _ = os.path.splitext(base_name)
 
                 self.progress.emit(row_idx, "正在执行...",
                                    f"[{datetime.now().strftime('%H:%M:%S')}] 正在处理: {base_name}")
                 success, msg = False, ""
 
                 if self.action_type == 'export_bookmarks':
-                    csv_path = os.path.join(self.target_dir, f"{name_no_ext}_bookmarks.csv")
+                    csv_path, _ = _build_io_paths_for_file(
+                        file_path, "bookmarks", self.target_dir, common_base=self.common_base
+                    )
+                    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
                     PDFProcessor.export_bookmarks(file_path, csv_path)
                     success, msg = True, "✅ 导出书签成功"
 
                 elif self.action_type == 'import_bookmarks':
-                    csv_path = os.path.join(self.target_dir, f"{name_no_ext}_bookmarks.csv")
+                    csv_path, out_pdf = _build_io_paths_for_file(
+                        file_path, "bookmarks", self.target_dir, self.output_dir, self.common_base
+                    )
                     if not os.path.exists(csv_path):
                         success, msg = False, "⚠️ 未找到匹配的CSV文件"
                     else:
-                        out_pdf = os.path.join(self.output_dir, base_name)
-                        PDFProcessor.import_bookmarks(file_path, csv_path, out_pdf)
+                        if not out_pdf:
+                            raise ValueError("导入书签时缺少输出目录")
+                        out_pdf_path = out_pdf
+                        os.makedirs(os.path.dirname(out_pdf_path), exist_ok=True)
+                        PDFProcessor.import_bookmarks(file_path, csv_path, out_pdf_path)
                         success, msg = True, "✅ 导入书签成功"
 
                 elif self.action_type == 'export_links':
-                    json_path = os.path.join(self.target_dir, f"{name_no_ext}_links.json")
+                    json_path, _ = _build_io_paths_for_file(
+                        file_path, "links", self.target_dir, common_base=self.common_base
+                    )
+                    os.makedirs(os.path.dirname(json_path), exist_ok=True)
                     PDFProcessor.export_links(file_path, json_path)
                     success, msg = True, "✅ 导出链接成功"
 
                 elif self.action_type == 'import_links':
-                    json_path = os.path.join(self.target_dir, f"{name_no_ext}_links.json")
+                    json_path, out_pdf = _build_io_paths_for_file(
+                        file_path, "links", self.target_dir, self.output_dir, self.common_base
+                    )
                     if not os.path.exists(json_path):
                         success, msg = False, "⚠️ 未找到匹配的JSON文件"
                     else:
-                        out_pdf = os.path.join(self.output_dir, base_name)
-                        PDFProcessor.import_links(file_path, json_path, out_pdf)
+                        if not out_pdf:
+                            raise ValueError("导入链接时缺少输出目录")
+                        out_pdf_path = out_pdf
+                        os.makedirs(os.path.dirname(out_pdf_path), exist_ok=True)
+                        PDFProcessor.import_links(file_path, json_path, out_pdf_path)
                         success, msg = True, "✅ 导入链接成功"
 
                 status = "操作成功" if success else "操作失败"
@@ -328,6 +369,7 @@ class MainController(QObject):
         self.processing_total = 0
         self.processing_done = 0
         self.processing_done_paths = set()
+        self.processing_files = []
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self.processing_timer = QTimer(self)
@@ -527,6 +569,10 @@ class MainController(QObject):
         处理树节点的移除操作。
         逻辑：递归收集所有选中的文件路径 -> 更新后台数据 -> 删除 UI 节点 -> 自动清理空文件夹
         """
+        if self.worker and self.worker.isRunning():
+            self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再移除队列项。")
+            return
+
         paths_to_remove = set()
 
         # 1. 内部递归函数：若选中的是文件夹，自动把下面的文件全部圈中
@@ -741,6 +787,10 @@ class MainController(QObject):
             self.add_files([folder_path])
 
     def clear_list(self):
+        if self.worker and self.worker.isRunning():
+            self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再清空待处理队列。")
+            return
+
         if not self.loaded_files:
             return
 
@@ -771,6 +821,7 @@ class MainController(QObject):
 
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
+        processing_files = list(self.loaded_files)
 
         out_dir = ""
         common_base = ""
@@ -795,7 +846,7 @@ class MainController(QObject):
             self.last_output_dir = out_dir
 
             try:
-                dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+                dirs = [os.path.dirname(os.path.abspath(f)) for f in processing_files]
                 common_base = os.path.commonpath(dirs)
             except ValueError:
                 common_base = ""
@@ -809,7 +860,8 @@ class MainController(QObject):
         self.view.style().polish(self.view.btn_start)
 
         self.processing_started_at = datetime.now()
-        self.processing_total = len(self.loaded_files)
+        self.processing_files = processing_files
+        self.processing_total = len(processing_files)
         self.processing_done = 0
         self.processing_done_paths = set()
         self.processing_current_file = ""
@@ -817,7 +869,7 @@ class MainController(QObject):
         self._refresh_processing_hint()
         self.processing_timer.start()
 
-        self.worker = ProcessWorker(self.loaded_files, selected_options, out_dir, common_base, overwrite_original)
+        self.worker = ProcessWorker(processing_files, selected_options, out_dir, common_base, overwrite_original)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
@@ -831,6 +883,13 @@ class MainController(QObject):
         is_export = "export" in action_type
         data_type = "CSV" if "bookmarks" in action_type else "JSON"
         action_name = "导出" if is_export else "导入"
+        common_base = ""
+
+        try:
+            dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+            common_base = os.path.commonpath(dirs)
+        except ValueError:
+            common_base = ""
 
         dir_path = QFileDialog.getExistingDirectory(self.view, f"请选择 {data_type} 数据{action_name}的目录")
         if not dir_path:
@@ -843,7 +902,7 @@ class MainController(QObject):
             out_dir_path.mkdir(exist_ok=True)
             out_dir = str(out_dir_path)
 
-        self.io_worker = IOActionWorker(action_type, self.loaded_files, dir_path, out_dir)
+        self.io_worker = IOActionWorker(action_type, self.loaded_files, dir_path, out_dir, common_base)
         self.io_worker.progress.connect(self.update_progress)
         self.io_worker.finished_action.connect(self.on_io_action_finished)
         self.io_worker.error_action.connect(self.on_io_action_error)
@@ -851,7 +910,10 @@ class MainController(QObject):
 
     def update_progress(self, row_index, status_text, log_msg):
         # 获取与该行对应的精确文件路径，用于树节点的映射更新
-        file_path = self.loaded_files[row_index]
+        processing_files = self.processing_files or self.loaded_files
+        if row_index < 0 or row_index >= len(processing_files):
+            return
+        file_path = processing_files[row_index]
 
         if status_text in ["处理完成", "操作成功"]:
             color = QColor(16, 185, 129)  # 绿色
@@ -902,6 +964,7 @@ class MainController(QObject):
         self.processing_total = 0
         self.processing_done = 0
         self.processing_done_paths.clear()
+        self.processing_files = []
         self.processing_current_file = ""
         self._last_processing_hint = ""
 
@@ -932,6 +995,7 @@ class MainController(QObject):
         self.processing_total = 0
         self.processing_done = 0
         self.processing_done_paths.clear()
+        self.processing_files = []
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self.view.show_error_message("❌ 处理异常", f"处理过程中发生错误：\n{error_msg}")

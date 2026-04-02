@@ -6,3 +6,4 @@ settings.ini
 /dist
 /build_pyinstaller
 /*.spec
+/tests/

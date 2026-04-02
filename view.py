@@ -883,7 +883,7 @@ class MainWindow(QMainWindow):
             for opt in mod["options"]:
                 page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
-            if mod["title"] == "书签管理与优化":
+            if mod["title"] == "书签管理":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("导出/导入书签"))
                 btn_layout = QVBoxLayout()
@@ -892,7 +892,7 @@ class MainWindow(QMainWindow):
                 btn_layout.addWidget(self.btn_import_bookmarks)
                 page_layout.addLayout(btn_layout)
 
-            elif mod["title"] == "超链接处理与外观控制":
+            elif mod["title"] == "超链接处理":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("导出/导入链接"))
                 btn_layout = QVBoxLayout()
