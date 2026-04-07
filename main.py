@@ -1,4 +1,5 @@
 import sys
+import multiprocessing as mp
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
@@ -6,9 +7,15 @@ from PySide6.QtCore import Qt
 from view import MainWindow
 from controller import MainController
 
-if __name__ == '__main__':
-    # 支持高分辨率屏幕缩放
+
+def configure_runtime():
+    # PyInstaller 冻结后，multiprocessing 子进程需要先经过 freeze_support，
+    # 否则点击处理时会再次拉起整个 GUI 程序。
+    mp.freeze_support()
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
+if __name__ == '__main__':
+    configure_runtime()
 
     app = QApplication(sys.argv)
 
