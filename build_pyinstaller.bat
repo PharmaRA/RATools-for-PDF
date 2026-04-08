@@ -35,8 +35,7 @@ echo [INFO] Building RATools for PDF with PyInstaller onedir...
 python -m PyInstaller "%MAIN_FILE%" ^
   --noconfirm ^
   --clean ^
-  --console ^
-  --hide-console hide-early ^
+  --windowed ^
   --onedir ^
   --name RATools-for-PDF ^
   --distpath "%DIST_DIR%" ^
