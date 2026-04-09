@@ -35,12 +35,15 @@ echo [INFO] Building RATools for PDF with PyInstaller onedir...
 python -m PyInstaller "%MAIN_FILE%" ^
   --noconfirm ^
   --clean ^
-  --windowed ^
+  --console ^
   --onedir ^
   --name RATools-for-PDF ^
   --distpath "%DIST_DIR%" ^
   --workpath "%BUILD_DIR%" ^
   --specpath "%SPEC_DIR%" ^
+  --noupx ^
+  --icon "%ROOT_DIR%icon.png" ^
+  --version-file "%ROOT_DIR%build_version_info.txt" ^
   --exclude-module torch ^
   --exclude-module torchvision ^
   --exclude-module easyocr ^
@@ -57,6 +60,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "OUTPUT_EXE=%DIST_DIR%\RATools-for-PDF\RATools-for-PDF.exe"
+python "%ROOT_DIR%patch_pe_subsystem.py" "%OUTPUT_EXE%" --windows-gui
+if errorlevel 1 (
+    echo [ERROR] Failed to patch PE subsystem.
+    exit /b 1
+)
+
 set "OPENSSL_PLUGIN=%DIST_DIR%\RATools-for-PDF\_internal\PySide6\plugins\tls\qopensslbackend.dll"
 if exist "%OPENSSL_PLUGIN%" (
     echo [INFO] Removing Qt OpenSSL TLS plugin to avoid startup DLL conflicts...
@@ -66,5 +76,5 @@ if exist "%OPENSSL_PLUGIN%" (
 echo.
 echo [OK] Build completed.
 echo [OK] Output folder: %DIST_DIR%\RATools-for-PDF
-echo [OK] Run: %DIST_DIR%\RATools-for-PDF\RATools-for-PDF.exe
+echo [OK] Run: %OUTPUT_EXE%
 endlocal

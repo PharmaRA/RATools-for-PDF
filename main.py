@@ -1,3 +1,4 @@
+import ctypes
 import sys
 import multiprocessing as mp
 from PySide6.QtWidgets import QApplication
@@ -8,10 +9,23 @@ from view import MainWindow
 from controller import MainController
 
 
+def detach_console_if_needed():
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return
+
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if kernel32.GetConsoleWindow():
+            kernel32.FreeConsole()
+    except Exception:
+        pass
+
+
 def configure_runtime():
     # PyInstaller 冻结后，multiprocessing 子进程需要先经过 freeze_support，
     # 否则点击处理时会再次拉起整个 GUI 程序。
     mp.freeze_support()
+    detach_console_if_needed()
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
 if __name__ == '__main__':
