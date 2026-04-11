@@ -36,6 +36,8 @@ python -m nuitka "%MAIN_FILE%" ^
   --windows-console-mode=disable ^
   --include-module=fitz ^
   --include-module=app_paths ^
+  --include-data-files="%ROOT_DIR%LICENSE=LICENSE" ^
+  --include-data-files="%ROOT_DIR%THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md" ^
   --include-data-files="%ROOT_DIR%icon.png=icon.png" ^
   --include-data-dir="%ROOT_DIR%plugins=plugins" ^
   --output-dir="%OUT_DIR%" ^

@@ -2,7 +2,7 @@
 
 专为 RA 递交场景开发的桌面端 PDF 批量处理工具，适用于 eCTD 资料整理、合规清理和结构标准化。
 
-项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并在部分文件级优化能力中调用 `Ghostscript`。当前仓库已内置 Windows 所需的 Ghostscript 运行文件。
+项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并在部分文件级优化能力中调用 `Ghostscript`。当前仓库已内置 Windows 所需的 Ghostscript 运行文件。项目源码采用 `GNU AGPL v3`，第三方组件声明见 `THIRD_PARTY_NOTICES.md`。
 
 ## 项目特性
 
@@ -256,6 +256,12 @@ dist/RATools-for-PDF/RATools-for-PDF.exe
 - 若在 macOS 或 Linux 环境运行，仍需按上述路径或系统环境提供可用的 Ghostscript 可执行文件
 - 如果启用了依赖 Ghostscript 的功能，但程序未找到对应可执行文件，相关处理会失败
 - 冻结打包后，资源文件会优先通过运行时资源目录解析，以适配 PyInstaller 的 `_MEIPASS` 结构
+- 仓库当前附带的 Windows Ghostscript 版本为 `10.06.0`，其授权遵循 `AGPL v3` 或 Artifex 商业许可；重新分发包含该二进制的构建产物时，应同时附带 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`
+- 如需向接收方提供对应源码，请参考 `THIRD_PARTY_NOTICES.md` 中列出的上游源码入口，并确保你分发的确切版本及本地修改可被获取
+
+## Third-Party Notices
+
+本项目使用并可能在分发产物中包含第三方组件。各第三方组件仍分别受其自身许可证约束，详见 `THIRD_PARTY_NOTICES.md`。
 
 ## 配置说明
 
@@ -291,4 +297,6 @@ dist/RATools-for-PDF/RATools-for-PDF.exe
 
 ## License
 
-本项目采用 `GNU GPL v3` 许可证，详见 `LICENSE`。
+本项目源码采用 `GNU AGPL v3` 许可证，详见 `LICENSE`。
+
+第三方组件的授权、上游项目地址及源码获取说明见 `THIRD_PARTY_NOTICES.md`。

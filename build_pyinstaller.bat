@@ -52,6 +52,8 @@ python -m PyInstaller "%MAIN_FILE%" ^
   --exclude-module numpy ^
   --exclude-module scipy ^
   --exclude-module PIL ^
+  --add-data "%ROOT_DIR%LICENSE;." ^
+  --add-data "%ROOT_DIR%THIRD_PARTY_NOTICES.md;." ^
   --add-data "%ROOT_DIR%icon.png;." ^
   --add-data "%ROOT_DIR%plugins;plugins"
 

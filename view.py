@@ -491,7 +491,8 @@ class AboutDialog(FramelessDraggableDialog):
         tech_title.setObjectName("aboutTitle")
         tech_detail = QLabel(
             "基于PySide6、PyMuPDF及Ghostscript等项目构建\n"
-            "遵循GNU GPL v3开源协议"
+            "项目源码遵循GNU AGPL v3开源协议\n"
+            "第三方组件许可与源码说明见 THIRD_PARTY_NOTICES.md"
         )
         tech_detail.setWordWrap(True)
         tech_detail.setObjectName("aboutText")
