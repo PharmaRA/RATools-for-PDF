@@ -618,8 +618,8 @@ class MainWindow(QMainWindow):
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    {"id": "page_size_a4", "title": "强制转为A4尺寸", "desc": "统一将所有页面裁切/调整为标准的A4纸张尺寸"},
-                    {"id": "page_size_letter", "title": "强制转为Letter尺寸", "desc": "统一将所有页面裁切/调整为标准的Letter (信纸) 尺寸"},
+                    {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到A4纸张尺寸，尽量保留全部内容"},
+                    {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"},
                     {"id": "embed_nonstandard_fonts", "title": "嵌入全部非标准字体", "desc": "利用Ghostscript引擎将文档中使用的所有非标准字体完全嵌入"}
                 ]
             },
