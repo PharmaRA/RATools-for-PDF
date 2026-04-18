@@ -960,6 +960,7 @@ class MainController(QObject):
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
+        self.view.refresh_selection_summary()
         self.processing_started_at = None
         self.processing_total = 0
         self.processing_done = 0
@@ -991,6 +992,7 @@ class MainController(QObject):
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
+        self.view.refresh_selection_summary()
         self.processing_started_at = None
         self.processing_total = 0
         self.processing_done = 0

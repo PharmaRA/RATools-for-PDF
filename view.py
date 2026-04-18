@@ -598,8 +598,11 @@ class MainWindow(QMainWindow):
         self.settings_dialog = SettingsDialog(self)
         self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
         self.all_checkboxes["覆盖原始文件 (不推荐)"] = self.settings_dialog.cb_overwrite
+        self.settings_dialog.cb_auto_open.toggled.connect(self.on_checkbox_toggled)
+        self.settings_dialog.cb_overwrite.toggled.connect(self.on_checkbox_toggled)
         self.settings_dialog.cb_overwrite.toggled.connect(lambda _checked: self.refresh_selection_summary())
         self.settings_dialog.default_output_edit.textChanged.connect(lambda _text: self.refresh_selection_summary())
+        self.settings_dialog.default_output_edit.textChanged.connect(lambda _text: self.persist_default_output_dir())
 
         self.MODULES_DATA = [
             {
@@ -1028,6 +1031,7 @@ class MainWindow(QMainWindow):
         return dlg.exec() == QDialog.Accepted
 
     def load_all_settings(self):
+        self.is_applying_preset = True
         for opt_id, cb in self.all_checkboxes.items():
             key = self.settings_key_map.get(opt_id)
             if key:
@@ -1046,6 +1050,7 @@ class MainWindow(QMainWindow):
             old_en = str(self.app_settings.value("Modules/Mod_1_Opt_3", "false")).lower() == 'true'
             if old_cn or old_en:
                 merged_font_opt.setChecked(True)
+        self.is_applying_preset = False
 
         # 默认恢复上次会话的勾选状态（自定义），不自动套用预设
         self.custom_selection_before_preset = set(self.get_selected_options())
@@ -1053,12 +1058,32 @@ class MainWindow(QMainWindow):
         self._set_preset_button_state(None)
 
     def closeEvent(self, event):
+        self.persist_all_settings()
+        super().closeEvent(event)
+
+    def persist_all_settings(self):
+        if not hasattr(self, "app_settings"):
+            return
         for opt_id, cb in self.all_checkboxes.items():
             key = self.settings_key_map.get(opt_id)
             if key:
                 self.app_settings.setValue(key, cb.isChecked())
         self.app_settings.setValue("Settings/DefaultOutputDir", self.settings_dialog.default_output_edit.text().strip())
-        super().closeEvent(event)
+
+    def persist_current_checkbox(self, checkbox):
+        if not hasattr(self, "app_settings"):
+            return
+        for opt_id, cb in self.all_checkboxes.items():
+            if cb is checkbox:
+                key = self.settings_key_map.get(opt_id)
+                if key:
+                    self.app_settings.setValue(key, checkbox.isChecked())
+                    return
+
+    def persist_default_output_dir(self):
+        if not hasattr(self, "app_settings"):
+            return
+        self.app_settings.setValue("Settings/DefaultOutputDir", self.settings_dialog.default_output_edit.text().strip())
 
     def get_selected_preset(self):
         return self.active_preset_key
@@ -1086,6 +1111,7 @@ class MainWindow(QMainWindow):
 
         self.active_preset_key = None
         self._set_preset_button_state(None)
+        self.persist_all_settings()
         self.refresh_selection_summary()
 
     def toggle_preset(self, preset_key):
@@ -1115,6 +1141,7 @@ class MainWindow(QMainWindow):
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.custom_selection_before_preset = set()
+        self.persist_all_settings()
         self.refresh_selection_summary()
 
     def apply_preset(self, preset_key, persist=True):
@@ -1140,11 +1167,16 @@ class MainWindow(QMainWindow):
 
         self.active_preset_key = preset_key
         self._set_preset_button_state(preset_key)
+        self.persist_all_settings()
         self.refresh_selection_summary()
 
     def on_checkbox_toggled(self, _checked):
         if self.is_applying_preset:
             return
+
+        sender_cb = self.sender()
+        if isinstance(sender_cb, QCheckBox):
+            self.persist_current_checkbox(sender_cb)
 
         if self.active_preset_key is not None:
             self.active_preset_key = None
@@ -1208,6 +1240,16 @@ class MainWindow(QMainWindow):
             self.preset_summary_label.setText("当前为自定义规则组合，可随时切换到 eCTD 预设。")
 
         self.info_label.setText(f"{total_files} 个文件 · {selected_count} 条规则 · {preset_text}")
+
+        if self.btn_start.property("stopMode") is not True:
+            can_start = (total_files > 0 and selected_count > 0)
+            self.btn_start.setEnabled(can_start)
+            if total_files == 0:
+                self.btn_start.setToolTip("请先添加至少一个 PDF 文件")
+            elif selected_count == 0:
+                self.btn_start.setToolTip("请至少勾选一条处理规则")
+            else:
+                self.btn_start.setToolTip("")
 
         overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
         if overwrite_cb and overwrite_cb.isChecked():
@@ -1336,5 +1378,6 @@ class MainWindow(QMainWindow):
         #startBtn[stopMode="true"]:pressed { background-color: #991B1B; }
         #startBtn:hover { background-color: #1D4ED8; }
         #startBtn:pressed { background-color: #1E40AF; }
+        #startBtn:disabled { background-color: #BFDBFE; color: #EFF6FF; }
         """
         self.setStyleSheet(qss)
