@@ -57,30 +57,6 @@ class PDFProcessor:
         PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=True)
 
     @staticmethod
-    def _sanitize_metadata(metadata):
-        allowed_keys = ["title", "author", "subject", "keywords", "creator", "producer", "creationDate", "modDate"]
-        clean = {}
-        metadata = metadata or {}
-        for key in allowed_keys:
-            value = metadata.get(key, "")
-            clean[key] = "" if value is None else str(value)
-        return clean
-
-    @staticmethod
-    def _restore_metadata_after_gs(output_pdf, metadata_to_restore, clear_metadata=False):
-        out_doc = fitz.open(output_pdf)
-        try:
-            if clear_metadata:
-                out_doc.set_metadata({})
-                catalog_xref = out_doc.pdf_catalog()
-                out_doc.xref_set_key(catalog_xref, "PieceInfo", "null")
-            elif metadata_to_restore is not None:
-                out_doc.set_metadata(PDFProcessor._sanitize_metadata(metadata_to_restore))
-            out_doc.saveIncr()
-        finally:
-            out_doc.close()
-
-    @staticmethod
     def _mark_change(change_list, label):
         if label not in change_list:
             change_list.append(label)
@@ -1220,8 +1196,6 @@ class PDFProcessor:
             is_linear = "fast_web_view" in options
             needs_gs_rewrite = needs_gs_engine or is_linear
             embed_fonts = "embed_nonstandard_fonts" in options
-            clear_metadata_after_gs = "cleanup_remove_metadata" in options
-            metadata_to_restore = None if clear_metadata_after_gs else PDFProcessor._sanitize_metadata(doc.metadata)
 
             if changed:
                 if needs_gs_rewrite:
@@ -1234,11 +1208,6 @@ class PDFProcessor:
                             output_path,
                             embed_fonts=embed_fonts,
                             linearize=is_linear,
-                        )
-                        PDFProcessor._restore_metadata_after_gs(
-                            output_path,
-                            metadata_to_restore,
-                            clear_metadata=clear_metadata_after_gs,
                         )
                         if embed_fonts:
                             PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
@@ -1260,11 +1229,6 @@ class PDFProcessor:
                         output_path,
                         embed_fonts=embed_fonts,
                         linearize=is_linear,
-                    )
-                    PDFProcessor._restore_metadata_after_gs(
-                        output_path,
-                        metadata_to_restore,
-                        clear_metadata=clear_metadata_after_gs,
                     )
                     if embed_fonts:
                         PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
