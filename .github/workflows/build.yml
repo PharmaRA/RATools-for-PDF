@@ -1,0 +1,44 @@
+name: Build RATools-for-PDF
+
+on:
+  push:
+    branches: [ "main" ] # 当推送到 main 分支时触发
+  workflow_dispatch:     # 允许在 GitHub Actions 页面手动触发构建
+
+jobs:
+  build-windows:
+    runs-on: windows-latest # 必须使用 Windows 运行器，因为使用的是 .bat 脚本和特定于 Windows 的 PE 修改
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14' # 建议指定与你本地开发环境一致的 Python 版本
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        # 你的 requirements.txt 包含了 PySide6 和 PyMuPDF。
+        # PyInstaller 虽会在 bat 脚本中自动安装，但这里确保业务依赖就绪。
+
+    - name: Run Build Script
+      shell: cmd
+      run: |
+        build_pyinstaller.bat
+
+    - name: Upload Artifact (Update-enabled)
+      uses: actions/upload-artifact@v4
+      with:
+        name: RATools-for-PDF
+        path: dist\RATools-for-PDF\
+
+    - name: Upload Artifact (NoUpdate)
+      uses: actions/upload-artifact@v4
+      with:
+        name: RATools-for-PDF-NoUpdate
+        path: dist\RATools-for-PDF-NoUpdate\
