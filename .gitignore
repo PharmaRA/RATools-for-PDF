@@ -6,5 +6,6 @@ settings.ini
 /dist
 /build_pyinstaller
 /*.spec
-/tests/
-test_*.py
+/.worktrees
+test_*
+/docs

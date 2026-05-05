@@ -28,6 +28,10 @@ if errorlevel 1 (
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 
+for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
+for /f "delims=" %%A in ('python -c "from app_version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
+for /f "delims=" %%A in ('python -c "from app_version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
+
 echo [INFO] Building RATools for PDF with Nuitka...
 python -m nuitka "%MAIN_FILE%" ^
   --standalone ^
@@ -41,10 +45,10 @@ python -m nuitka "%MAIN_FILE%" ^
   --include-data-files="%ROOT_DIR%icon.png=icon.png" ^
   --include-data-dir="%ROOT_DIR%plugins=plugins" ^
   --output-dir="%OUT_DIR%" ^
-  --company-name="RATools" ^
-  --product-name="RATools for PDF" ^
+  --company-name="%APP_COMPANY%" ^
+  --product-name="%APP_NAME%" ^
   --file-description="RA PDF batch processing tool" ^
-  --file-version="0.1.0"
+  --file-version="%APP_VERSION_STR%"
 
 if errorlevel 1 (
     echo [ERROR] Nuitka build failed.

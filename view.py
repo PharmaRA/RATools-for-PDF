@@ -9,6 +9,8 @@ from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
+from app_features import ENABLE_UPDATE_CHECK
+from app_version import get_display_version
 from app_paths import get_app_dir, get_resource_path
 
 
@@ -439,8 +441,9 @@ class SettingsDialog(FramelessDraggableDialog):
 class AboutDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("ℹ️ 关于软件", parent)
-        self.resize(520, 360)
+        self.resize(520, 460)
         self.content_layout.setSpacing(16)
+        self.latest_release_url = ""
 
         hero_card = QFrame()
         hero_card.setObjectName("aboutHeroCard")
@@ -450,7 +453,7 @@ class AboutDialog(FramelessDraggableDialog):
 
         brand_title = QLabel("RATools for PDF")
         brand_title.setObjectName("aboutBrandTitle")
-        version_badge = QLabel("Version 1.0.0")
+        version_badge = QLabel(get_display_version())
         version_badge.setObjectName("aboutBadge")
         version_badge.setAlignment(Qt.AlignCenter)
         version_badge.setMaximumWidth(110)
@@ -500,6 +503,36 @@ class AboutDialog(FramelessDraggableDialog):
         tech_layout.addWidget(tech_detail)
         self.content_layout.addWidget(tech_card)
 
+        if ENABLE_UPDATE_CHECK:
+            update_card = QFrame()
+            update_card.setObjectName("aboutInfoCard")
+            update_layout = QVBoxLayout(update_card)
+            update_layout.setContentsMargins(16, 14, 16, 14)
+            update_layout.setSpacing(8)
+
+            update_title = QLabel("更新")
+            update_title.setObjectName("aboutTitle")
+            self.update_status_label = QLabel("可手动检查 GitHub Releases 中的最新版本。")
+            self.update_status_label.setWordWrap(True)
+            self.update_status_label.setObjectName("aboutText")
+
+            update_button_layout = QHBoxLayout()
+            update_button_layout.setContentsMargins(0, 4, 0, 0)
+            update_button_layout.setSpacing(8)
+            self.btn_check_updates = QPushButton("检查更新")
+            self.btn_check_updates.setObjectName("dialogPrimaryBtn")
+            self.btn_open_release = QPushButton("打开发布页")
+            self.btn_open_release.setObjectName("dialogSecondaryBtn")
+            self.btn_open_release.hide()
+            update_button_layout.addWidget(self.btn_check_updates)
+            update_button_layout.addWidget(self.btn_open_release)
+            update_button_layout.addStretch()
+
+            update_layout.addWidget(update_title)
+            update_layout.addWidget(self.update_status_label)
+            update_layout.addLayout(update_button_layout)
+            self.content_layout.addWidget(update_card)
+
         self.content_layout.addStretch()
 
         btn_close = QPushButton("关 闭")
@@ -507,6 +540,17 @@ class AboutDialog(FramelessDraggableDialog):
         btn_close.setFixedHeight(36)
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
+
+    def set_update_checking(self):
+        self.btn_check_updates.setEnabled(False)
+        self.update_status_label.setText("正在检查更新...")
+        self.btn_open_release.hide()
+
+    def set_update_result(self, message, release_url=""):
+        self.btn_check_updates.setEnabled(True)
+        self.update_status_label.setText(message)
+        self.latest_release_url = release_url
+        self.btn_open_release.setVisible(bool(release_url))
 
 
 # ================== 自定义组件与主窗口 ==================
@@ -1030,6 +1074,50 @@ class MainWindow(QMainWindow):
     def show_confirm_message(self, title, message):
         dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
         return dlg.exec() == QDialog.Accepted
+
+    def show_major_update_prompt(self, current_version, release):
+        dlg = FramelessDraggableDialog("重要更新可用", self)
+        dlg.resize(460, 300)
+        dlg.update_action = "later"
+        dlg.content_layout.setSpacing(14)
+
+        message = QLabel(
+            f"发现重要更新：{release.version_text}\n"
+            f"当前版本：{current_version}\n"
+            f"发布标题：{release.title}\n"
+            f"发布时间：{release.published_at or '未知'}"
+        )
+        message.setWordWrap(True)
+        message.setObjectName("aboutText")
+        dlg.content_layout.addWidget(message)
+        dlg.content_layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        btn_layout.addStretch()
+
+        btn_ignore = QPushButton("忽略此版本")
+        btn_ignore.setObjectName("dialogSecondaryBtn")
+        btn_later = QPushButton("稍后提醒")
+        btn_later.setObjectName("dialogSecondaryBtn")
+        btn_open = QPushButton("查看更新")
+        btn_open.setObjectName("dialogPrimaryBtn")
+
+        def finish(action):
+            dlg.update_action = action
+            dlg.accept()
+
+        btn_open.clicked.connect(lambda: finish("open"))
+        btn_later.clicked.connect(lambda: finish("later"))
+        btn_ignore.clicked.connect(lambda: finish("ignore"))
+
+        btn_layout.addWidget(btn_ignore)
+        btn_layout.addWidget(btn_later)
+        btn_layout.addWidget(btn_open)
+        dlg.content_layout.addLayout(btn_layout)
+
+        dlg.exec()
+        return dlg.update_action
 
     def load_all_settings(self):
         self.is_applying_preset = True
