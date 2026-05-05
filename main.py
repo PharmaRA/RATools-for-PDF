@@ -2,9 +2,10 @@ import ctypes
 import sys
 import multiprocessing as mp
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 # 导入分离出来的 View (界面) 和 Controller (逻辑) 模块
+from app_features import ENABLE_UPDATE_CHECK
 from view import MainWindow
 from controller import MainController
 
@@ -28,7 +29,7 @@ def configure_runtime():
     detach_console_if_needed()
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
-if __name__ == '__main__':
+def run():
     configure_runtime()
 
     app = QApplication(sys.argv)
@@ -41,4 +42,10 @@ if __name__ == '__main__':
 
     # 3. 显示主窗口并进入应用循环
     view.show()
+    if ENABLE_UPDATE_CHECK:
+        QTimer.singleShot(0, controller.check_updates_on_startup)
     sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    run()

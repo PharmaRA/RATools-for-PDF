@@ -4,12 +4,18 @@ import csv
 import platform
 import subprocess
 import multiprocessing as mp
+import webbrowser
 from pathlib import Path
-from datetime import datetime
+from datetime import date, datetime
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem, QMenu
-from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer
+from PySide6.QtCore import QObject, QThread, Signal, Qt, QTimer, QCoreApplication
 from PySide6.QtGui import QColor
 
+from app_features import ENABLE_UPDATE_CHECK
+if ENABLE_UPDATE_CHECK:
+    import update_checker
+else:
+    update_checker = None
 from pdf_processor import PDFProcessor
 from view import LogDialog
 
@@ -358,6 +364,20 @@ class IOActionWorker(QThread):
             self.error_action.emit(str(e))
 
 
+class UpdateCheckWorker(QThread):
+    finished_check = Signal(object, bool)
+
+    def __init__(self, silent=False, parent=None):
+        super().__init__(parent)
+        self.silent = silent
+
+    def run(self):
+        if not ENABLE_UPDATE_CHECK or update_checker is None:
+            return
+        result = update_checker.check_for_updates()
+        self.finished_check.emit(result, self.silent)
+
+
 class MainController(QObject):
     def __init__(self, view):
         super().__init__()
@@ -382,6 +402,10 @@ class MainController(QObject):
 
         self.setup_connections()
         self.worker = None
+        self.update_worker = None
+        app = QCoreApplication.instance()
+        if app:
+            app.aboutToQuit.connect(self.shutdown_update_worker)
 
     def setup_connections(self):
         self.view.drop_zone.files_dropped.connect(self.add_files)
@@ -396,6 +420,8 @@ class MainController(QObject):
 
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
+        if ENABLE_UPDATE_CHECK:
+            self.view.btn_top_about.clicked.connect(self._wire_about_dialog_updates)
 
         self.view.btn_export_bookmarks.clicked.connect(lambda: self.handle_io_action('export_bookmarks'))
         self.view.btn_import_bookmarks.clicked.connect(lambda: self.handle_io_action('import_bookmarks'))
@@ -408,6 +434,136 @@ class MainController(QObject):
         self.view.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         # 绑定树形图双击事件
         self.view.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+    def _wire_about_dialog_updates(self):
+        if not ENABLE_UPDATE_CHECK:
+            return
+        dialog = getattr(self.view, "about_dialog", None)
+        if not dialog or getattr(dialog, "_update_buttons_wired", False):
+            return
+
+        dialog.btn_check_updates.clicked.connect(self.check_updates_manually)
+        dialog.btn_open_release.clicked.connect(self.open_release_url)
+        dialog._update_buttons_wired = True
+
+    def check_updates_manually(self):
+        if not ENABLE_UPDATE_CHECK:
+            return
+        self._wire_about_dialog_updates()
+        dialog = getattr(self.view, "about_dialog", None)
+        started = self._start_update_check(silent=False)
+        if dialog and started:
+            dialog.set_update_checking()
+        elif dialog:
+            dialog.set_update_result("已有更新检查正在进行，请稍后再试。")
+
+    def check_updates_on_startup(self):
+        if not ENABLE_UPDATE_CHECK:
+            return
+        settings = getattr(self.view, "app_settings", None)
+        if not settings:
+            return
+
+        today = date.today().isoformat()
+        if settings.value("Update/LastSilentCheckDate") == today:
+            return
+
+        if self._start_update_check(silent=True):
+            settings.setValue("Update/LastSilentCheckDate", today)
+
+    def _start_update_check(self, silent=False):
+        if not ENABLE_UPDATE_CHECK:
+            return False
+        worker = getattr(self, "update_worker", None)
+        if worker and worker.isRunning():
+            return False
+
+        worker = UpdateCheckWorker(silent=silent, parent=self)
+        worker.finished_check.connect(self._handle_update_result)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(lambda checked_worker=worker: self._clear_update_worker(checked_worker))
+        self.update_worker = worker
+        worker.start()
+        return True
+
+    def _clear_update_worker(self, worker):
+        if getattr(self, "update_worker", None) is worker:
+            self.update_worker = None
+
+    def shutdown_update_worker(self):
+        worker = getattr(self, "update_worker", None)
+        if worker and worker.isRunning():
+            worker.wait(9000)
+
+    def open_release_url(self, release_url=""):
+        if not release_url:
+            dialog = getattr(self.view, "about_dialog", None)
+            release_url = getattr(dialog, "latest_release_url", "") if dialog else ""
+        if not release_url:
+            return
+
+        try:
+            opened = webbrowser.open(release_url)
+        except Exception as exc:
+            self.view.show_error_message("打开失败", f"无法打开发布页：{exc}")
+            return
+
+        if not opened:
+            self.view.show_error_message("打开失败", "无法打开发布页：浏览器拒绝打开链接")
+
+    def _handle_silent_update_result(self, result):
+        if not result.ok or not result.has_update or not result.is_major or not result.latest_release:
+            return
+
+        settings = getattr(self.view, "app_settings", None)
+        if not settings:
+            return
+
+        release = result.latest_release
+        if settings.value("Update/IgnoredVersion", "") == release.version_text:
+            return
+
+        today = date.today().isoformat()
+        prompt_marker = f"{today}:{release.version_text}"
+        if settings.value("Update/LastPromptedVersion", "") == prompt_marker:
+            return
+
+        settings.setValue("Update/LastPromptedVersion", prompt_marker)
+        action = self.view.show_major_update_prompt(result.current_version, release)
+
+        if action == "open":
+            self.open_release_url(release.html_url)
+        elif action == "ignore":
+            settings.setValue("Update/IgnoredVersion", release.version_text)
+
+    def _handle_update_result(self, result, silent):
+        if silent:
+            handler = getattr(self, "_handle_silent_update_result", None)
+            if handler:
+                handler(result)
+            return
+
+        dialog = getattr(self.view, "about_dialog", None)
+        if not dialog:
+            return
+
+        if not result.ok:
+            dialog.set_update_result(f"检查更新失败：{result.error}")
+            return
+
+        if not result.has_update or not result.latest_release:
+            dialog.set_update_result(f"当前已是最新版本：{result.current_version}")
+            return
+
+        release = result.latest_release
+        published_at = release.published_at or "未知"
+        message = (
+            f"发现新版本：{release.version_text}\n"
+            f"当前版本：{result.current_version}\n"
+            f"发布标题：{release.title}\n"
+            f"发布时间：{published_at}"
+        )
+        dialog.set_update_result(message, release.html_url)
 
     # ================= 核心：右键菜单生成与分发 =================
     def show_tree_context_menu(self, pos):
