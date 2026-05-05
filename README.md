@@ -15,6 +15,8 @@
 - 支持书签、超链接的批量导出与批量导入
 - 书签与超链接导入导出时可保留相对目录层级，避免同名 PDF 数据互相覆盖
 - 支持默认输出目录、自动打开输出目录与覆盖原文件风险控制
+- 支持在“关于”中手动检查 GitHub Releases 更新
+- 支持对重大更新进行启动提醒，并提供无更新能力的 `NoUpdate` 发布变体
 
 ## 当前支持的核心能力
 
@@ -130,14 +132,17 @@
 ```text
 RATools-for-PDF/
 ├─ main.py            # 程序入口
+├─ main_no_update.py  # 无更新版程序入口
+├─ app_features.py    # 功能开关（如更新能力）
+├─ app_version.py     # 应用版本与发布元数据
 ├─ app_paths.py       # 运行目录/资源目录解析
 ├─ view.py            # 界面层，负责 UI、预设、设置加载
 ├─ controller.py      # 控制层，负责事件绑定、任务调度、线程处理
 ├─ pdf_processor.py   # PDF 核心处理引擎
+├─ update_checker.py  # GitHub Releases 更新检查逻辑
 ├─ build_pyinstaller.bat
 ├─ build_nuitka.bat
 ├─ patch_pe_subsystem.py
-├─ build_version_info.txt
 ├─ icon.png           # 程序图标
 └─ README.md
 ```
@@ -151,14 +156,16 @@ RATools-for-PDF/
 使用方式：
 
 1. 从 GitHub Releases 下载最新的 Windows 发布包。
-2. 将整个发布包完整解压到本地目录。
-3. 运行 `RATools-for-PDF.exe`。
+2. 根据使用场景选择带更新提醒版或 `NoUpdate` 无更新版。
+3. 将整个发布包完整解压到本地目录。
+4. 运行对应目录中的 `RATools-for-PDF.exe` 或 `RATools-for-PDF-NoUpdate.exe`。
 
 说明：
 
 - 请保留发布包中的完整目录结构，不要只单独拷贝 `.exe`
 - Windows 发布包已包含运行所需的界面依赖和 Ghostscript 相关资源，通常无需额外安装 Python 或 Ghostscript
 - 首次运行后，程序会在可执行文件所在目录生成 `settings.ini`
+- `NoUpdate` 变体不会显示检查更新入口，也不会在启动时访问 GitHub 检查更新
 
 ### 2. 从源码运行
 
@@ -182,6 +189,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
+如需以无更新能力模式启动源码程序，可使用：
+
+```bash
+python main_no_update.py
+```
+
 说明：
 
 - 程序入口已内置 `multiprocessing.freeze_support()`，用于兼容冻结打包后的批处理子进程启动
@@ -203,9 +216,9 @@ build_pyinstaller.bat
 
 - 检查 `python` 是否可用
 - 检查并安装 `PyInstaller`
-- 使用 `onedir` 模式打包 `main.py`
+- 使用 `onedir` 模式分别打包带更新版和 `NoUpdate` 无更新版
 - 自动将生成的 exe 修正为 GUI 子系统
-- 嵌入 Windows 版本信息
+- 从 `app_version.py` 动态生成临时 Windows 版本信息并写入 exe
 - 一并带上 `icon.png`
 - 一并带上 `plugins/ghostscript/` 目录
 - 移除 `qopensslbackend.dll` 以减少部分环境下的启动 DLL 冲突
@@ -222,13 +235,15 @@ pip install pefile
 
 ```text
 dist/RATools-for-PDF/RATools-for-PDF.exe
+dist/RATools-for-PDF-NoUpdate/RATools-for-PDF-NoUpdate.exe
 ```
 
 说明：
 
-- 请直接分发整个 `dist/RATools-for-PDF` 目录，不要只单独拷贝 `.exe`
+- 请直接分发整个对应目录，不要只单独拷贝 `.exe`
 - `settings.ini` 会在程序运行后自动生成到可执行文件所在目录
 - 当前打包方案针对 Windows 桌面环境设计，默认不显示控制台窗口
+- `RATools-for-PDF-NoUpdate` 会在打包时排除 `update_checker` 模块，用于对联网更敏感的分发场景
 
 ### 3. 为什么推荐 `onedir`
 
