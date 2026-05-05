@@ -127,7 +127,7 @@ python -m PyInstaller "%ENTRY_FILE%" ^
   --workpath "%BUILD_DIR%" ^
   --specpath "%SPEC_DIR%" ^
   --noupx ^
-  --icon "%ROOT_DIR%icon.png" ^
+  --icon "%ROOT_DIR%icon.ico" ^
   --version-file "%VERSION_INFO_FILE%" ^
   --exclude-module torch ^
   --exclude-module torchvision ^

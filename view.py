@@ -631,7 +631,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("RATools for PDF")
 
         # === 添加原生窗口图标 ===
-        self.setWindowIcon(QIcon(get_resource_path("icon.png")))
+        self.setWindowIcon(QIcon(get_resource_path("icon.ico")))
 
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
