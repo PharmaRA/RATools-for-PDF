@@ -140,7 +140,7 @@ python -m PyInstaller "%ENTRY_FILE%" ^
   %VARIANT_EXTRA_ARGS% ^
   --add-data "%ROOT_DIR%LICENSE;." ^
   --add-data "%ROOT_DIR%THIRD_PARTY_NOTICES.md;." ^
-  --add-data "%ROOT_DIR%icon.png;." ^
+  --add-data "%ROOT_DIR%icon.ico;." ^
   --add-data "%ROOT_DIR%plugins;plugins"
 
 if errorlevel 1 (
