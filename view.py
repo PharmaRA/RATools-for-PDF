@@ -1,4 +1,6 @@
 import os
+import platform
+import sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -12,6 +14,11 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from app_features import ENABLE_UPDATE_CHECK
 from app_version import get_display_version
 from app_paths import get_app_dir, get_resource_path
+
+
+def should_use_manual_dialog_shadow():
+    """Win11 自带窗口阴影明显，关闭手工阴影以避免双层叠加。"""
+    return not (sys.platform == "win32" and platform.release() == "11")
 
 
 # ================== 自定义无边框拖拽对话框基类 ==================
@@ -188,11 +195,12 @@ class FramelessDraggableDialog(QDialog):
         self.bg_frame = QFrame()
         self.bg_frame.setObjectName("dialogBg")
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(36)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QColor(15, 23, 42, 60))
-        self.bg_frame.setGraphicsEffect(shadow)
+        if should_use_manual_dialog_shadow():
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(36)
+            shadow.setOffset(0, 8)
+            shadow.setColor(QColor(15, 23, 42, 60))
+            self.bg_frame.setGraphicsEffect(shadow)
 
         bg_layout = QVBoxLayout(self.bg_frame)
         bg_layout.setContentsMargins(0, 0, 0, 0)

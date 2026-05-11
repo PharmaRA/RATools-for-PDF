@@ -41,7 +41,7 @@ set "VERSION_INFO_FILE=%BUILD_DIR%\build_version_info_generated.txt"
 for /f "delims=" %%A in ('python -c "from app_version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
 for /f "delims=" %%A in ('python -c "from app_version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
 for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION; print(*APP_VERSION, sep=chr(44)+chr(32))"') do set "APP_VERSION=%%A"
+for /f "delims=" %%A in ('python -c "from app_version import APP_WINDOWS_VERSION; print(*APP_WINDOWS_VERSION, sep=chr(44)+chr(32))"') do set "APP_WINDOWS_VERSION=%%A"
 
 if not defined APP_COMPANY (
     echo [ERROR] Failed to read APP_COMPANY from app_version.py.
@@ -55,15 +55,15 @@ if not defined APP_VERSION_STR (
     echo [ERROR] Failed to read APP_VERSION_STR from app_version.py.
     exit /b 1
 )
-if not defined APP_VERSION (
-    echo [ERROR] Failed to read APP_VERSION from app_version.py.
+if not defined APP_WINDOWS_VERSION (
+    echo [ERROR] Failed to read APP_WINDOWS_VERSION from app_version.py.
     exit /b 1
 )
 
 > "%VERSION_INFO_FILE%" echo VSVersionInfo(
 >> "%VERSION_INFO_FILE%" echo   ffi=FixedFileInfo(
->> "%VERSION_INFO_FILE%" echo     filevers=(%APP_VERSION%),
->> "%VERSION_INFO_FILE%" echo     prodvers=(%APP_VERSION%),
+>> "%VERSION_INFO_FILE%" echo     filevers=(%APP_WINDOWS_VERSION%),
+>> "%VERSION_INFO_FILE%" echo     prodvers=(%APP_WINDOWS_VERSION%),
 >> "%VERSION_INFO_FILE%" echo     mask=0x3f,
 >> "%VERSION_INFO_FILE%" echo     flags=0x0,
 >> "%VERSION_INFO_FILE%" echo     OS=0x40004,
