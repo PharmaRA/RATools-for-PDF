@@ -31,6 +31,9 @@ if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
 for /f "delims=" %%A in ('python -c "from app_version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
 for /f "delims=" %%A in ('python -c "from app_version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
+set "VERSIONED_DIR_NAME=main_v%APP_VERSION_STR%.dist"
+set "RAW_OUTPUT_DIR=%OUT_DIR%\main.dist"
+set "VERSIONED_OUTPUT_DIR=%OUT_DIR%\%VERSIONED_DIR_NAME%"
 
 echo [INFO] Building RATools for PDF with Nuitka...
 python -m nuitka "%MAIN_FILE%" ^
@@ -55,8 +58,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if exist "%VERSIONED_OUTPUT_DIR%" rmdir /s /q "%VERSIONED_OUTPUT_DIR%"
+ren "%RAW_OUTPUT_DIR%" "%VERSIONED_DIR_NAME%"
+if errorlevel 1 (
+    echo [ERROR] Failed to rename Nuitka output folder to %VERSIONED_DIR_NAME%.
+    exit /b 1
+)
+
 echo.
 echo [OK] Build completed.
-echo [OK] Output folder: %OUT_DIR%\main.dist
-echo [OK] Run: %OUT_DIR%\main.dist\main.exe
+echo [OK] Output folder: %VERSIONED_OUTPUT_DIR%
+echo [OK] Run: %OUT_DIR%\main_v%APP_VERSION_STR%.dist\main.exe
 endlocal

@@ -106,8 +106,8 @@ call :cleanup_version_info
 
 echo.
 echo [OK] Build completed.
-echo [OK] Update-enabled output folder: %DIST_DIR%\RATools-for-PDF
-echo [OK] No-update output folder: %DIST_DIR%\RATools-for-PDF-NoUpdate
+echo [OK] Update-enabled output folder: %DIST_DIR%\RATools-for-PDF_v%APP_VERSION_STR%
+echo [OK] No-update output folder: %DIST_DIR%\RATools-for-PDF-NoUpdate_v%APP_VERSION_STR%
 endlocal
 exit /b 0
 
@@ -115,8 +115,11 @@ exit /b 0
 set "ENTRY_FILE=%~1"
 set "EXE_NAME=%~2"
 set "VARIANT_EXTRA_ARGS=%~3"
+set "VERSIONED_DIR_NAME=%EXE_NAME%_v%APP_VERSION_STR%"
+set "RAW_OUTPUT_DIR=%DIST_DIR%\%EXE_NAME%"
+set "VERSIONED_OUTPUT_DIR=%DIST_DIR%\%VERSIONED_DIR_NAME%"
 
-echo [INFO] Building %EXE_NAME% with PyInstaller onedir...
+echo [INFO] Building %VERSIONED_DIR_NAME% with PyInstaller onedir...
 python -m PyInstaller "%ENTRY_FILE%" ^
   --noconfirm ^
   --clean ^
@@ -148,20 +151,27 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "OUTPUT_EXE=%DIST_DIR%\%EXE_NAME%\%EXE_NAME%.exe"
+if exist "%VERSIONED_OUTPUT_DIR%" rmdir /s /q "%VERSIONED_OUTPUT_DIR%"
+ren "%RAW_OUTPUT_DIR%" "%VERSIONED_DIR_NAME%"
+if errorlevel 1 (
+    echo [ERROR] Failed to rename output folder to %VERSIONED_DIR_NAME%.
+    exit /b 1
+)
+
+set "OUTPUT_EXE=%VERSIONED_OUTPUT_DIR%\%EXE_NAME%.exe"
 python "%ROOT_DIR%patch_pe_subsystem.py" "%OUTPUT_EXE%" --windows-gui
 if errorlevel 1 (
     echo [ERROR] Failed to patch PE subsystem for %EXE_NAME%.
     exit /b 1
 )
 
-set "OPENSSL_PLUGIN=%DIST_DIR%\%EXE_NAME%\_internal\PySide6\plugins\tls\qopensslbackend.dll"
+set "OPENSSL_PLUGIN=%VERSIONED_OUTPUT_DIR%\_internal\PySide6\plugins\tls\qopensslbackend.dll"
 if exist "%OPENSSL_PLUGIN%" (
     echo [INFO] Removing Qt OpenSSL TLS plugin for %EXE_NAME% to avoid startup DLL conflicts...
     del /q "%OPENSSL_PLUGIN%"
 )
 
-echo [OK] %EXE_NAME% output folder: %DIST_DIR%\%EXE_NAME%
+echo [OK] %EXE_NAME% output folder: %VERSIONED_OUTPUT_DIR%
 exit /b 0
 
 :cleanup_version_info

@@ -15,33 +15,33 @@ from app_paths import get_resource_path
 class PDFProcessor:
 
     @staticmethod
-    def _get_gs_path():
+    def _get_qpdf_path():
         if sys.platform == "win32":
-            gs_exe = get_resource_path("plugins", "ghostscript", "bin", "gswin64c.exe")
-        elif sys.platform == "darwin":
-            gs_exe = get_resource_path("plugins", "ghostscript", "bin", "gs")
-        else:
-            gs_exe = "gs"
-        return gs_exe
+            candidates = [
+                get_resource_path("plugins", "qpdf", "qpdf.exe"),
+                os.environ.get("QPDF_PATH", ""),
+                r"D:\Program Files\qpdf 11.9.1\bin\qpdf.exe",
+                r"C:\Program Files\qpdf\bin\qpdf.exe",
+            ]
+            for candidate in candidates:
+                if candidate and os.path.exists(candidate):
+                    return candidate
+            return "qpdf.exe"
+        return "qpdf"
 
     @staticmethod
-    def _embed_fonts_with_gs(input_pdf, output_pdf):
-        PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=True, linearize=False)
-
     @staticmethod
-    def _rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=False):
-        gs_exe = PDFProcessor._get_gs_path()
-        if sys.platform in ["win32", "darwin"] and not os.path.exists(gs_exe):
-            raise FileNotFoundError(f"未找到 Ghostscript 引擎！\n请确保已将引擎文件放置在: {gs_exe}")
+    def _rewrite_with_qpdf(input_pdf, output_pdf, force_version=None, linearize=False):
+        qpdf_exe = PDFProcessor._get_qpdf_path()
+        if sys.platform == "win32" and qpdf_exe != "qpdf.exe" and not os.path.exists(qpdf_exe):
+            raise FileNotFoundError(f"未找到 qpdf 工具！\n请确保已安装或设置 QPDF_PATH: {qpdf_exe}")
 
-        cmd = [gs_exe, "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7", "-dNOPAUSE", "-dQUIET", "-dBATCH"]
-
-        if embed_fonts:
-            cmd.extend(["-dPDFSETTINGS=/prepress", "-dSubsetFonts=true", "-dEmbedAllFonts=true"])
+        cmd = [qpdf_exe]
         if linearize:
-            cmd.append("-dFastWebView=true")
-
-        cmd.extend([f"-sOutputFile={output_pdf}", input_pdf])
+            cmd.append("--linearize")
+        if force_version:
+            cmd.append(f"--force-version={force_version}")
+        cmd.extend([input_pdf, output_pdf])
 
         startupinfo = None
         if sys.platform == "win32":
@@ -50,11 +50,7 @@ class PDFProcessor:
 
         result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Ghostscript 执行失败: {result.stderr}")
-
-    @staticmethod
-    def _linearize_with_gs(input_pdf, output_pdf):
-        PDFProcessor._rewrite_with_gs(input_pdf, output_pdf, embed_fonts=False, linearize=True)
+            raise RuntimeError(f"qpdf 执行失败: {result.stderr}")
 
     @staticmethod
     def _mark_change(change_list, label):
@@ -710,11 +706,6 @@ class PDFProcessor:
             changed = False
             catalog_xref = doc.pdf_catalog()
 
-            needs_gs_engine = any(opt in options for opt in [
-                "embed_nonstandard_fonts",
-                "convert_pdf_version"
-            ])
-
             if "title_from_filename" in options:
                 base_name = Path(input_path).stem
                 meta = doc.metadata
@@ -723,6 +714,14 @@ class PDFProcessor:
                     doc.set_metadata(meta);
                     changed = True
                     PDFProcessor._mark_change(applied_changes, "标题同步为文件名")
+            elif "fast_web_view" in options:
+                base_name = Path(input_path).stem
+                meta = doc.metadata
+                if not (meta.get("title") or "").strip():
+                    meta["title"] = base_name
+                    doc.set_metadata(meta)
+                    changed = True
+                    PDFProcessor._mark_change(applied_changes, "标题补全为文件名")
 
             if "open_page_first" in options or "zoom_default" in options:
                 if doc.page_count > 0:
@@ -1194,24 +1193,22 @@ class PDFProcessor:
                     PDFProcessor._mark_change(applied_changes, "已删除文档元数据")
 
             is_linear = "fast_web_view" in options
-            needs_gs_rewrite = needs_gs_engine or is_linear
-            embed_fonts = "embed_nonstandard_fonts" in options
+            force_pdf_version = "1.7" if "convert_pdf_version" in options else None
+            needs_qpdf_rewrite = bool(is_linear or force_pdf_version)
 
             if changed:
-                if needs_gs_rewrite:
+                if needs_qpdf_rewrite:
                     temp_pdf = str(output_path) + ".tmp.pdf"
                     doc.save(temp_pdf, garbage=3, deflate=True)
                     doc.close()
                     try:
-                        PDFProcessor._rewrite_with_gs(
+                        PDFProcessor._rewrite_with_qpdf(
                             temp_pdf,
                             output_path,
-                            embed_fonts=embed_fonts,
+                            force_version=force_pdf_version,
                             linearize=is_linear,
                         )
-                        if embed_fonts:
-                            PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
-                        if "convert_pdf_version" in options:
+                        if force_pdf_version:
                             PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
                         if is_linear:
                             PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
@@ -1223,16 +1220,14 @@ class PDFProcessor:
                     doc.close()
             else:
                 doc.close()
-                if needs_gs_rewrite:
-                    PDFProcessor._rewrite_with_gs(
+                if needs_qpdf_rewrite:
+                    PDFProcessor._rewrite_with_qpdf(
                         input_path,
                         output_path,
-                        embed_fonts=embed_fonts,
+                        force_version=force_pdf_version,
                         linearize=is_linear,
                     )
-                    if embed_fonts:
-                        PDFProcessor._mark_change(applied_changes, "已重写并嵌入字体")
-                    if "convert_pdf_version" in options:
+                    if force_pdf_version:
                         PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
                     if is_linear:
                         PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")

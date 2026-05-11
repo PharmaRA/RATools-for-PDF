@@ -2,7 +2,7 @@
 
 专为 RA 递交场景开发的桌面端 PDF 批量处理工具，适用于 eCTD 资料整理、合规清理和结构标准化。
 
-项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并在部分文件级优化能力中调用 `Ghostscript`。当前仓库已内置 Windows 所需的 Ghostscript 运行文件。项目源码采用 `GNU AGPL v3`，第三方组件声明见 `THIRD_PARTY_NOTICES.md`。
+项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并使用 `qpdf` 完成版本转换与线性化等结构级优化。项目源码采用 `GNU AGPL v3`，第三方组件声明见 `THIRD_PARTY_NOTICES.md`。
 
 ## 项目特性
 
@@ -33,7 +33,7 @@
 
 - 批量转换页面为 A4
 - 批量转换页面为 Letter
-- 批量嵌入非标准字体
+- 批量嵌入非标准字体（暂不可用）
 - PDF 版本转换
 - 启用线性化（快速网页浏览）
 
@@ -125,7 +125,7 @@
 - Python 3
 - PySide6
 - PyMuPDF (`fitz`)
-- Ghostscript（部分功能依赖）
+- qpdf（版本转换与线性化依赖）
 
 ## 项目结构
 
@@ -163,7 +163,7 @@ RATools-for-PDF/
 说明：
 
 - 请保留发布包中的完整目录结构，不要只单独拷贝 `.exe`
-- Windows 发布包已包含运行所需的界面依赖和 Ghostscript 相关资源，通常无需额外安装 Python 或 Ghostscript
+- Windows 发布包已包含运行所需的界面依赖和 qpdf 相关资源，通常无需额外安装 Python 或 qpdf
 - 首次运行后，程序会在可执行文件所在目录生成 `settings.ini`
 - `NoUpdate` 变体不会显示检查更新入口，也不会在启动时访问 GitHub 检查更新
 
@@ -177,10 +177,9 @@ RATools-for-PDF/
 pip install -r requirements.txt
 ```
 
-以下能力会调用 Ghostscript：
+以下能力会调用 qpdf：
 
 - PDF 版本转换
-- 嵌入非标准字体
 - 快速网页浏览 / 线性化
 
 ### 3. 启动源码程序
@@ -220,7 +219,7 @@ build_pyinstaller.bat
 - 自动将生成的 exe 修正为 GUI 子系统
 - 从 `app_version.py` 动态生成临时 Windows 版本信息并写入 exe
 - 一并带上 `icon.png`
-- 一并带上 `plugins/ghostscript/` 目录
+- 一并带上 `plugins/qpdf/` 目录及其运行时 DLL
 - 移除 `qopensslbackend.dll` 以减少部分环境下的启动 DLL 冲突
 
 首次使用该链路前，建议确保环境中已安装 `pefile`，因为 GUI 子系统修正脚本 `patch_pe_subsystem.py` 依赖它：
@@ -234,20 +233,21 @@ pip install pefile
 打包完成后，程序输出在：
 
 ```text
-dist/RATools-for-PDF/RATools-for-PDF.exe
-dist/RATools-for-PDF-NoUpdate/RATools-for-PDF-NoUpdate.exe
+dist/RATools-for-PDF_v0.3.3/RATools-for-PDF.exe
+dist/RATools-for-PDF-NoUpdate_v0.3.3/RATools-for-PDF-NoUpdate.exe
 ```
 
 说明：
 
 - 请直接分发整个对应目录，不要只单独拷贝 `.exe`
+- 输出目录会自动附带 `_v版本号` 后缀，便于区分不同发布版本；`exe` 文件名保持稳定不带版本号
 - `settings.ini` 会在程序运行后自动生成到可执行文件所在目录
 - 当前打包方案针对 Windows 桌面环境设计，默认不显示控制台窗口
 - `RATools-for-PDF-NoUpdate` 会在打包时排除 `update_checker` 模块，用于对联网更敏感的分发场景
 
 ### 3. 为什么推荐 `onedir`
 
-虽然单文件 `onefile` 分发更方便，但它通常需要在启动时先解包，启动速度反而更慢。对于本项目这种包含 `PySide6`、`PyMuPDF` 和 `Ghostscript` 资源的桌面工具，`onedir` 模式通常更合适。
+虽然单文件 `onefile` 分发更方便，但它通常需要在启动时先解包，启动速度反而更慢。对于本项目这种包含 `PySide6`、`PyMuPDF` 和 `qpdf` 资源的桌面工具，`onedir` 模式通常更合适。
 
 ### 4. 为什么不用直接 `windowed`
 
@@ -257,22 +257,25 @@ dist/RATools-for-PDF-NoUpdate/RATools-for-PDF-NoUpdate.exe
 
 仓库中仍保留 `build_nuitka.bat` 作为可选方案。如果你更看重正式发布时的启动效率，可以再尝试 `Nuitka`；如果你更看重打包速度和成功率，优先使用 `PyInstaller onedir`。
 
-## Ghostscript 说明
+`build_nuitka.bat` 当前也会将输出目录自动命名为 `main_v版本号.dist`，便于区分不同构建版本；`main.exe` 文件名保持不变。
 
-程序会在不同平台按如下方式查找 Ghostscript：
+## qpdf 说明
 
-- Windows：`plugins/ghostscript/bin/gswin64c.exe`
-- macOS：`plugins/ghostscript/bin/gs`
-- Linux：直接调用系统中的 `gs`
+`PDF版本转换` 与 `启用线性化 (快速网页浏览)` 当前默认使用 `qpdf` 执行，以尽量保留 PDF 内部目录、书签和链接结构。
+
+程序会在不同平台按如下方式查找 qpdf：
+
+- Windows：优先 `plugins/qpdf/qpdf.exe`
+- 其次：环境变量 `QPDF_PATH`
+- 再次：常见系统安装路径或 `PATH` 中的 `qpdf.exe`
+- macOS / Linux：直接调用系统中的 `qpdf`
 
 说明：
 
-- 当前仓库的 `plugins/ghostscript/bin/` 中已放入 Windows 所需的 `gswin64c.exe` 和相关动态库，Windows 环境下默认无需额外安装即可使用相关功能
-- 若在 macOS 或 Linux 环境运行，仍需按上述路径或系统环境提供可用的 Ghostscript 可执行文件
-- 如果启用了依赖 Ghostscript 的功能，但程序未找到对应可执行文件，相关处理会失败
-- 冻结打包后，资源文件会优先通过运行时资源目录解析，以适配 PyInstaller 的 `_MEIPASS` 结构
-- 仓库当前附带的 Windows Ghostscript 版本为 `10.06.0`，其授权遵循 `AGPL v3` 或 Artifex 商业许可；重新分发包含该二进制的构建产物时，应同时附带 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`
-- 如需向接收方提供对应源码，请参考 `THIRD_PARTY_NOTICES.md` 中列出的上游源码入口，并确保你分发的确切版本及本地修改可被获取
+- 当前仓库可附带 `plugins/qpdf/` 中的 `qpdf.exe` 与配套 DLL 作为 Windows 发布包内置依赖，避免终端用户额外安装
+- 冻结打包后，`plugins/qpdf/` 会随发布目录一并分发
+- 若程序未找到可用的 qpdf，可导致 `PDF版本转换` 与 `启用线性化` 功能失败
+- 重新分发包含 qpdf 二进制的构建产物时，应同时保留 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`
 
 ## Third-Party Notices
 
