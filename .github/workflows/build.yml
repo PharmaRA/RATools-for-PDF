@@ -32,17 +32,23 @@ jobs:
       run: |
         build_pyinstaller.bat
 
+    - name: Resolve build version
+      shell: pwsh
+      run: |
+        $version = python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"
+        "APP_VERSION_STR=$version" >> $env:GITHUB_ENV
+
     - name: Zip Artifacts
       # Windows 运行器默认使用 PowerShell，直接调用 Compress-Archive 进行压缩
       run: |
-        Compress-Archive -Path dist\RATools-for-PDF -DestinationPath RATools-for-PDF.zip
-        Compress-Archive -Path dist\RATools-for-PDF-NoUpdate -DestinationPath RATools-for-PDF-NoUpdate.zip
+        Compress-Archive -Path "dist\RATools-for-PDF_v${env:APP_VERSION_STR}" -DestinationPath "RATools-for-PDF_v${env:APP_VERSION_STR}.zip"
+        Compress-Archive -Path "dist\RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}" -DestinationPath "RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}.zip"
 
     - name: Create Release and Upload Assets
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/') # 仅在由 tag 触发时才执行发布步骤
       with:
         files: |
-          RATools-for-PDF.zip
-          RATools-for-PDF-NoUpdate.zip
+          RATools-for-PDF_v${{ env.APP_VERSION_STR }}.zip
+          RATools-for-PDF-NoUpdate_v${{ env.APP_VERSION_STR }}.zip
         generate_release_notes: true # 自动生成基于 PR 和 commit 历史的发布说明
