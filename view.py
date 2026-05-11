@@ -276,8 +276,17 @@ class CustomMessageBox(FramelessDraggableDialog):
         icon_lbl.setAlignment(Qt.AlignTop)
 
         msg_lbl = QLabel(message_text)
+        is_multiline_block = ("\n\n" in message_text) or (" -> " in message_text)
         msg_lbl.setWordWrap(True)
-        msg_lbl.setStyleSheet("color: #374151; font-size: 13px; border: none; line-height: 1.5;")
+        if is_multiline_block:
+            msg_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            msg_lbl.setStyleSheet(
+                "color: #334155; font-size: 12px; border: 1px solid #E2E8F0; "
+                "background-color: #F8FAFC; border-radius: 8px; padding: 10px; "
+                "font-family: Consolas, 'Courier New', monospace; line-height: 1.5;"
+            )
+        else:
+            msg_lbl.setStyleSheet("color: #374151; font-size: 13px; border: none; line-height: 1.5;")
         msg_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         content_h_layout.addWidget(icon_lbl)

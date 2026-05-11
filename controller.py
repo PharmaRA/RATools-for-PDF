@@ -975,6 +975,33 @@ class MainController(QObject):
             self.view.show_warning_message("⚠️ 警告", "请至少在右侧勾选一个处理规则！")
             return
 
+        if "filename_ectd_format" in selected_options:
+            rename_pairs = []
+            for i, file_path in enumerate(self.loaded_files, start=1):
+                base_name = os.path.basename(file_path)
+                name, ext = os.path.splitext(base_name)
+                normalized = name.lower().replace(" ", "-")
+                normalized = re.sub(r'[^a-z0-9_-]', '', normalized)
+                if not normalized:
+                    normalized = f"doc_{i:03d}"
+                new_name = f"{normalized}{ext.lower()}"
+                if new_name != base_name:
+                    rename_pairs.append((base_name, new_name))
+
+            if rename_pairs:
+                details = "\n".join([
+                    f"{idx:>2}. {old}\n    -> {new}"
+                    for idx, (old, new) in enumerate(rename_pairs, start=1)
+                ])
+                msg = (
+                    "已启用【eCTD 文件名合规格式化】。\n"
+                    "以下文件在输出时将被重命名：\n\n"
+                    f"{details}\n\n"
+                    "确认后继续处理。"
+                )
+                if not self.view.show_confirm_message("📝 确认文件名格式化", msg):
+                    return
+
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
         processing_files = list(self.loaded_files)
