@@ -1,6 +1,7 @@
 import os
 import platform
 import sys
+import ctypes
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -16,17 +17,29 @@ from app_version import get_display_version
 from app_paths import get_app_dir, get_resource_path
 
 
+def is_win11():
+    """准确判断是否为 Windows 11 (基于内部 build 版本号)"""
+    if sys.platform != "win32":
+        return False
+    # Win11 的版本号是从 22000 开始的
+    return sys.getwindowsversion().build >= 22000
+
+
 def should_use_manual_dialog_shadow():
     """Win11 自带窗口阴影明显，关闭手工阴影以避免双层叠加。"""
-    return not (sys.platform == "win32" and platform.release() == "11")
+    return not is_win11()
 
 
 # ================== 自定义无边框拖拽对话框基类 ==================
 class FramelessDraggableDialog(QDialog):
     def __init__(self, title_text, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)  # 支持圆角透明背景
+
+        #  如果是 Win11，就调用去边框方法
+        if sys.platform == "win32" and platform.release() == "11":
+            self._remove_win11_transparent_border()
 
         self.setStyleSheet("""
             #dialogBg {
@@ -188,7 +201,14 @@ class FramelessDraggableDialog(QDialog):
         """)
 
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(18, 18, 18, 18)
+
+        if is_win11():
+            # Win11 会自动贴着窗口边缘画阴影。必须把边距设为 0，否则阴影会画在 18px 的透明空气外围
+            self.main_layout.setContentsMargins(0, 0, 0, 0)
+        else:
+            # Win10 需要手动渲染阴影，保留 18px 留给内部画阴影用
+            self.main_layout.setContentsMargins(18, 18, 18, 18)
+
         self.main_layout.setSpacing(0)
 
         # 整体圆角和边框容器
@@ -256,6 +276,33 @@ class FramelessDraggableDialog(QDialog):
         if hasattr(self, 'drag_pos'):
             del self.drag_pos
             event.accept()
+
+    def _remove_win11_transparent_border(self):
+        """专门处理 Win11 下强制附加的透明边框、圆角和阴影"""
+        try:
+            hwnd = int(self.winId())
+
+            # 1. 禁用系统圆角
+            DWMWA_WINDOW_CORNER_PREFERENCE = 33
+            DWMWCP_DONOTROUND = 1
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(ctypes.c_int(DWMWCP_DONOTROUND)),
+                ctypes.sizeof(ctypes.c_int)
+            )
+
+            # 2. 彻底隐藏 Win11 强制附加的 1px 边框
+            DWMWA_BORDER_COLOR = 34
+            DWMWA_COLOR_NONE = 0xFFFFFFFE  # 设为无颜色
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                ctypes.byref(ctypes.c_uint(DWMWA_COLOR_NONE)),
+                ctypes.sizeof(ctypes.c_uint)
+            )
+        except Exception as e:
+            print(f"移除 Win11 边框失败: {e}")
 
 
 # ================== 具体的业务对话框 ==================
@@ -734,6 +781,7 @@ class MainWindow(QMainWindow):
                 "title": "文件级优化与输出",
                 "options": [
                     {"id": "convert_pdf_version", "title": "PDF版本转换", "desc": "将PDF版本修改为1.7版本"},
+                    {"id": "remove_pdf_restrictions", "title": "PDF解除权限限制", "desc": "尝试移除禁止复制、打印、编辑等权限限制，不处理需要打开密码的加密文档"},
                     {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
                     {"id": "filename_ectd_format", "title": "eCTD文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]

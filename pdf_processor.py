@@ -30,13 +30,14 @@ class PDFProcessor:
         return "qpdf"
 
     @staticmethod
-    @staticmethod
-    def _rewrite_with_qpdf(input_pdf, output_pdf, force_version=None, linearize=False):
+    def _rewrite_with_qpdf(input_pdf, output_pdf, force_version=None, linearize=False, decrypt_restrictions=False):
         qpdf_exe = PDFProcessor._get_qpdf_path()
         if sys.platform == "win32" and qpdf_exe != "qpdf.exe" and not os.path.exists(qpdf_exe):
             raise FileNotFoundError(f"未找到 qpdf 工具！\n请确保已安装或设置 QPDF_PATH: {qpdf_exe}")
 
         cmd = [qpdf_exe]
+        if decrypt_restrictions:
+            cmd.append("--decrypt")
         if linearize:
             cmd.append("--linearize")
         if force_version:
@@ -51,6 +52,18 @@ class PDFProcessor:
         result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"qpdf 执行失败: {result.stderr}")
+
+    @staticmethod
+    def _format_qpdf_error(error):
+        text = str(error).strip()
+        lowered = text.lower()
+        password_markers = ["password", "invalid password", "incorrect password", "requires a password"]
+        if any(marker in lowered for marker in password_markers):
+            return "该PDF需要密码，当前模式不支持输入密码解锁"
+        if text.startswith("qpdf 执行失败:"):
+            detail = text.split(":", 1)[1].strip()
+            return f"未能移除PDF权限限制：{detail}" if detail else "未能移除PDF权限限制"
+        return text
 
     @staticmethod
     def _mark_change(change_list, label):
@@ -1194,7 +1207,8 @@ class PDFProcessor:
 
             is_linear = "fast_web_view" in options
             force_pdf_version = "1.7" if "convert_pdf_version" in options else None
-            needs_qpdf_rewrite = bool(is_linear or force_pdf_version)
+            remove_pdf_restrictions = "remove_pdf_restrictions" in options
+            needs_qpdf_rewrite = bool(is_linear or force_pdf_version or remove_pdf_restrictions)
 
             if changed:
                 if needs_qpdf_rewrite:
@@ -1207,7 +1221,10 @@ class PDFProcessor:
                             output_path,
                             force_version=force_pdf_version,
                             linearize=is_linear,
+                            decrypt_restrictions=remove_pdf_restrictions,
                         )
+                        if remove_pdf_restrictions:
+                            PDFProcessor._mark_change(applied_changes, "已解除PDF权限限制")
                         if force_pdf_version:
                             PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
                         if is_linear:
@@ -1226,7 +1243,10 @@ class PDFProcessor:
                         output_path,
                         force_version=force_pdf_version,
                         linearize=is_linear,
+                        decrypt_restrictions=remove_pdf_restrictions,
                     )
+                    if remove_pdf_restrictions:
+                        PDFProcessor._mark_change(applied_changes, "已解除PDF权限限制")
                     if force_pdf_version:
                         PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
                     if is_linear:
@@ -1241,4 +1261,6 @@ class PDFProcessor:
         except FileNotFoundError as e:
             return False, f"⚠️ 缺少引擎组件: {str(e)}"
         except Exception as e:
+            if "remove_pdf_restrictions" in options:
+                return False, f"❌ 处理失败: {PDFProcessor._format_qpdf_error(e)}"
             return False, f"❌ 处理失败: {str(e)}"
