@@ -48,6 +48,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' # 由 tag 触发或者手动 run wrokflow 时执行发布步骤
       with:
+        tag_name: v${{ env.APP_VERSION_STR }}
         files: |
           RATools-for-PDF_v${{ env.APP_VERSION_STR }}.zip
           RATools-for-PDF-NoUpdate_v${{ env.APP_VERSION_STR }}.zip
