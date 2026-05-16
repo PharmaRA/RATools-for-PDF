@@ -65,6 +65,405 @@ class PDFProcessor:
             return f"未能移除PDF权限限制：{detail}" if detail else "未能移除PDF权限限制"
         return text
 
+    PRECHECK_OPTION_TITLES = {
+        "open_page_first": "设为首页打开",
+        "page_layout_default": "重置页面布局",
+        "zoom_default": "重置缩放比例",
+        "initial_view_bookmarks_and_page": "设置导览标签",
+        "collapse_all_bookmarks": "折叠所有书签",
+        "title_from_filename": "同步文件名为标题",
+        "bookmark_inherit_zoom": "书签设为承前缩放",
+        "bookmark_open_new_window": "书签动作改为新窗口打开",
+        "bookmark_remove_external_links": "删除书签中的外部链接",
+        "bookmark_remove_invalid": "删除失效书签",
+        "bookmark_remove_unknown_actions": "删除未知动作书签",
+        "link_abs_to_rel_path": "外部文件链接转相对路径",
+        "link_inherit_zoom": "超链接设为承前缩放",
+        "link_open_new_window": "超链接动作改为新窗口打开",
+        "cleanup_remove_external_uri": "删除外部URI链接",
+        "cleanup_remove_invalid_links": "清理失效超链接",
+        "cleanup_remove_unknown_action_links": "清理非标准动作链接",
+        "cleanup_remove_dynamic_content": "彻底清除动态内容 (JS/3D)",
+        "cleanup_remove_attachments": "移除所有内嵌附件",
+        "cleanup_remove_tags": "移除结构化标签",
+        "cleanup_remove_annotations": "清理所有高亮/批注",
+        "cleanup_remove_metadata": "清空文档元数据",
+        "cleanup_remove_all_links_bookmarks": "移除全部链接和书签",
+        "convert_pdf_version": "PDF版本转换",
+        "remove_pdf_restrictions": "PDF解除权限限制",
+        "fast_web_view": "启用线性化 (快速网页浏览)",
+    }
+
+    @staticmethod
+    def _add_precheck_suggestion(suggestions, option_id, reason):
+        if option_id in suggestions:
+            return
+        suggestions[option_id] = {
+            "matched": True,
+            "title": PDFProcessor.PRECHECK_OPTION_TITLES.get(option_id, option_id),
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _catalog_key(doc, catalog_xref, key):
+        try:
+            return doc.xref_get_key(catalog_xref, key)
+        except Exception:
+            return ("null", "null")
+
+    @staticmethod
+    def _catalog_key_is_present(doc, catalog_xref, key):
+        kind, value = PDFProcessor._catalog_key(doc, catalog_xref, key)
+        return kind != "null" and value != "null"
+
+    @staticmethod
+    def _read_pdf_header_version(input_path):
+        try:
+            with open(input_path, "rb") as f:
+                header = f.read(32)
+        except Exception:
+            return ""
+        match = re.search(rb"%PDF-(\d+\.\d+)", header)
+        return match.group(1).decode("ascii") if match else ""
+
+    @staticmethod
+    def _is_pdf_linearized(input_path):
+        try:
+            with open(input_path, "rb") as f:
+                header = f.read(4096)
+        except Exception:
+            return False
+        return b"/Linearized" in header
+
+    @staticmethod
+    def _qpdf_encryption_info(input_path):
+        qpdf_exe = PDFProcessor._get_qpdf_path()
+        if sys.platform == "win32" and qpdf_exe != "qpdf.exe" and not os.path.exists(qpdf_exe):
+            return ""
+
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        try:
+            result = subprocess.run(
+                [qpdf_exe, "--show-encryption", input_path],
+                startupinfo=startupinfo,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            return ""
+        return f"{result.stdout}\n{result.stderr}".strip()
+
+    @staticmethod
+    def _dereference_xref_value(doc, value):
+        match = re.match(r"^(\d+)\s+0\s+R$", str(value or "").strip())
+        if not match:
+            return str(value or "")
+        try:
+            return doc.xref_object(int(match.group(1)))
+        except Exception:
+            return str(value or "")
+
+    @staticmethod
+    def _catalog_key_resolved_value(doc, catalog_xref, key):
+        _kind, value = PDFProcessor._catalog_key(doc, catalog_xref, key)
+        return PDFProcessor._dereference_xref_value(doc, value)
+
+    @staticmethod
+    def _qpdf_reports_restrictions(input_path):
+        info = PDFProcessor._qpdf_encryption_info(input_path).lower()
+        if not info or "file is not encrypted" in info:
+            return False
+        return ": not allowed" in info
+
+    @staticmethod
+    def build_precheck_report(input_path):
+        report = {
+            "available": False,
+            "file_path": input_path,
+            "file_name": os.path.basename(input_path),
+            "suggestions": {},
+            "error": "",
+        }
+
+        if not os.path.exists(input_path):
+            report["error"] = "文件不存在"
+            return report
+        if not os.path.isfile(input_path):
+            report["error"] = "不是PDF文件"
+            return report
+
+        suggestions = report["suggestions"]
+        doc = None
+        try:
+            doc = fitz.open(input_path)
+            if doc.needs_pass:
+                report["error"] = "文件需要打开密码，无法预检内部结构"
+                return report
+
+            report["available"] = True
+            catalog_xref = doc.pdf_catalog()
+            toc = doc.get_toc(simple=False)
+            has_bookmarks = len(toc) > 0
+            meta = doc.metadata or {}
+            base_name = Path(input_path).stem
+
+            if (meta.get("title") or "") != base_name:
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "title_from_filename",
+                    "PDF标题属性与文件名不一致或为空",
+                )
+
+            page_mode_kind, page_mode_value = PDFProcessor._catalog_key(doc, catalog_xref, "PageMode")
+            if has_bookmarks and not (page_mode_kind == "name" and page_mode_value == "/UseOutlines"):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "initial_view_bookmarks_and_page",
+                    "文档包含书签，但打开时未设置为显示书签面板",
+                )
+            elif not has_bookmarks and page_mode_kind == "name" and page_mode_value != "/UseNone":
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "initial_view_bookmarks_and_page",
+                    "文档不含书签，但初始导览标签不是页面视图",
+                )
+
+            if PDFProcessor._catalog_key_is_present(doc, catalog_xref, "PageLayout"):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "page_layout_default",
+                    "文档设置了显式页面布局",
+                )
+
+            open_action_kind, open_action_value = PDFProcessor._catalog_key(doc, catalog_xref, "OpenAction")
+            if open_action_kind != "null" and doc.page_count > 0:
+                open_action_value = PDFProcessor._dereference_xref_value(doc, open_action_value)
+                first_page_ref = f"{doc[0].xref} 0 R"
+                compact_action = open_action_value.replace(" ", "")
+                if first_page_ref.replace(" ", "") not in compact_action:
+                    PDFProcessor._add_precheck_suggestion(
+                        suggestions,
+                        "open_page_first",
+                        "文档打开动作没有指向第一页",
+                    )
+                if "/XYZnullnullnull" not in compact_action:
+                    PDFProcessor._add_precheck_suggestion(
+                        suggestions,
+                        "zoom_default",
+                        "文档打开动作使用了固定缩放或非默认视图",
+                    )
+
+            if has_bookmarks:
+                if any(isinstance(item[-1], dict) and item[-1].get("collapse") is not True for item in toc):
+                    PDFProcessor._add_precheck_suggestion(
+                        suggestions,
+                        "collapse_all_bookmarks",
+                        "文档包含未折叠的书签",
+                    )
+
+                for item in toc:
+                    try:
+                        _level, _title, bm_page, dest = item
+                    except Exception:
+                        continue
+                    if not isinstance(dest, dict):
+                        dest = {}
+                    kind = dest.get("kind", fitz.LINK_NONE)
+                    if kind == fitz.LINK_GOTO and dest.get("zoom", 0.0) not in [0, 0.0, None]:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "bookmark_inherit_zoom",
+                            "部分内部书签使用了固定缩放比例",
+                        )
+                    if kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "bookmark_open_new_window",
+                            "部分外部文件书签未设置为新窗口打开",
+                        )
+                    if kind == fitz.LINK_URI:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "bookmark_remove_external_links",
+                            "书签中包含外部URI链接",
+                        )
+                    if kind == fitz.LINK_NONE or (kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count)):
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "bookmark_remove_invalid",
+                            "书签中存在失效目标",
+                        )
+                    if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "bookmark_remove_unknown_actions",
+                            "书签中存在非标准动作",
+                        )
+
+            link_file_kind = getattr(fitz, "LINK_FILE", None)
+            file_like_link_kinds = {fitz.LINK_GOTOR}
+            if link_file_kind is not None:
+                file_like_link_kinds.add(link_file_kind)
+
+            has_any_link = False
+            has_non_link_annotation = False
+            for page in doc:
+                links = page.get_links()
+                if links:
+                    has_any_link = True
+                for link in links:
+                    kind = link.get("kind", fitz.LINK_NONE)
+                    if kind in file_like_link_kinds:
+                        file_path = link.get("file", "") or ""
+                        decoded_file_path = unquote(file_path)
+                        if decoded_file_path and (
+                            ":" in decoded_file_path
+                            or decoded_file_path.startswith("/")
+                            or decoded_file_path.startswith("\\")
+                        ):
+                            PDFProcessor._add_precheck_suggestion(
+                                suggestions,
+                                "link_abs_to_rel_path",
+                                "外部文件链接中包含绝对路径",
+                            )
+                    if kind == fitz.LINK_GOTO and link.get("zoom", 0.0) not in [0, 0.0, None]:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "link_inherit_zoom",
+                            "部分内部超链接使用了固定缩放比例",
+                        )
+                    if kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "link_open_new_window",
+                            "部分外部文件链接未设置为新窗口打开",
+                        )
+                    if kind == fitz.LINK_URI:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "cleanup_remove_external_uri",
+                            "页面中包含外部URI链接",
+                        )
+                    if kind == fitz.LINK_NONE:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "cleanup_remove_invalid_links",
+                            "页面中存在无有效动作的链接区域",
+                        )
+                    if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                        PDFProcessor._add_precheck_suggestion(
+                            suggestions,
+                            "cleanup_remove_unknown_action_links",
+                            "页面中存在非标准链接动作",
+                        )
+
+                for annot in page.annots() or []:
+                    try:
+                        if annot.type[0] == 8:
+                            uri = getattr(annot, "uri", "") or ""
+                            if not uri and hasattr(annot, "info"):
+                                uri = annot.info.get("uri", "") or ""
+                            if uri:
+                                PDFProcessor._add_precheck_suggestion(
+                                    suggestions,
+                                    "cleanup_remove_external_uri",
+                                    "页面注释中包含外部URI链接",
+                                )
+                        else:
+                            has_non_link_annotation = True
+                    except Exception:
+                        continue
+
+            if has_non_link_annotation:
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "cleanup_remove_annotations",
+                    "文档包含高亮、文本框或其它批注",
+                )
+
+            if doc.embfile_count() > 0:
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "cleanup_remove_attachments",
+                    f"文档包含 {doc.embfile_count()} 个内嵌附件",
+                )
+
+            if (
+                PDFProcessor._catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
+                or PDFProcessor._catalog_key_is_present(doc, catalog_xref, "MarkInfo")
+            ):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "cleanup_remove_tags",
+                    "文档包含结构化标签信息",
+                )
+
+            metadata_values = [
+                value
+                for key, value in meta.items()
+                if key not in ["format", "encryption"] and str(value or "").strip()
+            ]
+            if metadata_values or PDFProcessor._catalog_key_is_present(doc, catalog_xref, "PieceInfo"):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "cleanup_remove_metadata",
+                    "文档包含可清理的元数据",
+                )
+
+            catalog_object = ""
+            try:
+                catalog_object = doc.xref_object(catalog_xref)
+            except Exception:
+                catalog_object = ""
+            names_kind, _names_value = PDFProcessor._catalog_key(doc, catalog_xref, "Names")
+            names_value = PDFProcessor._catalog_key_resolved_value(doc, catalog_xref, "Names")
+            dynamic_probe = f"{catalog_object}\n{names_value}"
+            if names_kind != "null" and any(marker in dynamic_probe for marker in ["/JavaScript", "/JS", "/RichMedia", "/3D"]):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "cleanup_remove_dynamic_content",
+                    "文档包含 JavaScript、3D 或富媒体入口",
+                )
+
+            pdf_version = PDFProcessor._read_pdf_header_version(input_path)
+            if pdf_version and pdf_version != "1.7":
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "convert_pdf_version",
+                    f"当前PDF版本为 {pdf_version}，不是 1.7",
+                )
+
+            if not PDFProcessor._is_pdf_linearized(input_path):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "fast_web_view",
+                    "文档未启用线性化快速网页浏览",
+                )
+
+            if PDFProcessor._qpdf_reports_restrictions(input_path):
+                PDFProcessor._add_precheck_suggestion(
+                    suggestions,
+                    "remove_pdf_restrictions",
+                    "文档存在打印、复制或编辑权限限制",
+                )
+
+            return report
+        except Exception as e:
+            report["available"] = False
+            report["error"] = str(e)
+            return report
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+
     @staticmethod
     def _mark_change(change_list, label):
         if label not in change_list:

@@ -283,6 +283,73 @@ class ProcessWorker(QThread):
             self.error.emit(str(e))
 
 
+class PreCheckWorker(QThread):
+    """
+    后台预检线程：只读取 PDF 状态，生成建议勾选的处理项，不修改文件。
+    """
+    progress = Signal(int, str, str)
+    finished_precheck = Signal(str)
+    error_precheck = Signal(str)
+
+    def __init__(self, files):
+        super().__init__()
+        self.files = list(files)
+
+    def run(self):
+        try:
+            started_at = datetime.now()
+            suggested_files = 0
+            failed_files = 0
+
+            for i, file_path in enumerate(self.files):
+                base_name = os.path.basename(file_path)
+                self.progress.emit(
+                    i,
+                    "正在预检...",
+                    f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始预检: {base_name}",
+                )
+
+                report = PDFProcessor.build_precheck_report(file_path)
+                if not report.get("available"):
+                    failed_files += 1
+                    reason = report.get("error") or "无法读取PDF结构"
+                    self.progress.emit(
+                        i,
+                        "预检失败",
+                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 预检失败\n    原因: {reason}",
+                    )
+                    continue
+
+                suggestions = list(report.get("suggestions", {}).values())
+                if suggestions:
+                    suggested_files += 1
+                    advice = "；".join(
+                        f"{item.get('title', '')}（{item.get('reason', '')}）"
+                        for item in suggestions
+                    )
+                    self.progress.emit(
+                        i,
+                        "建议处理",
+                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 建议处理\n    建议: {advice}",
+                    )
+                else:
+                    self.progress.emit(
+                        i,
+                        "无需处理",
+                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 无需处理\n    建议: 未发现当前可自动处理的明显问题",
+                    )
+
+            elapsed_sec = int((datetime.now() - started_at).total_seconds())
+            summary = (
+                f"预检结束。共检查 {len(self.files)} 个文件，"
+                f"发现 {suggested_files} 个文件存在建议处理项，"
+                f"{failed_files} 个文件预检失败。总耗时 {elapsed_sec}s。"
+            )
+            self.finished_precheck.emit(summary)
+        except Exception as e:
+            self.error_precheck.emit(str(e))
+
+
 class IOActionWorker(QThread):
     """
     高级 IO 操作后台线程：处理书签、链接等需要长时间读写的批量导入/导出操作
@@ -402,6 +469,8 @@ class MainController(QObject):
 
         self.setup_connections()
         self.worker = None
+        self.precheck_worker = None
+        self.precheck_files = []
         self.update_worker = None
         app = QCoreApplication.instance()
         if app:
@@ -418,6 +487,7 @@ class MainController(QObject):
         self.view.btn_clear_selected_options.clicked.connect(self.view.clear_selected_options)
         self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
+        self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
         if ENABLE_UPDATE_CHECK:
@@ -434,6 +504,10 @@ class MainController(QObject):
         self.view.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         # 绑定树形图双击事件
         self.view.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+    def _is_precheck_running(self):
+        precheck_worker = getattr(self, "precheck_worker", None)
+        return bool(precheck_worker and precheck_worker.isRunning())
 
     def _wire_about_dialog_updates(self):
         if not ENABLE_UPDATE_CHECK:
@@ -728,6 +802,9 @@ class MainController(QObject):
         if self.worker and self.worker.isRunning():
             self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再移除队列项。")
             return
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再移除队列项。")
+            return
 
         paths_to_remove = set()
 
@@ -837,6 +914,10 @@ class MainController(QObject):
             self.add_files(file_paths)
 
     def add_files(self, paths):
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再添加文件。")
+            return
+
         valid_pdf_paths = []
         for p in paths:
             if os.path.isfile(p) and p.lower().endswith('.pdf'):
@@ -946,6 +1027,9 @@ class MainController(QObject):
         if self.worker and self.worker.isRunning():
             self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再清空待处理队列。")
             return
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再清空待处理队列。")
+            return
 
         if not self.loaded_files:
             return
@@ -964,6 +1048,10 @@ class MainController(QObject):
             self.view.btn_start.setEnabled(False)
             self.view.btn_start.setText("正在停止...")
             self.view.btn_skip_current.setEnabled(False)
+            return
+
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检完成后再开始处理。")
             return
 
         if not self.loaded_files:
@@ -1044,6 +1132,8 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("■ 停止处理")
         self.view.btn_start.setProperty("stopMode", True)
+        self.view.btn_precheck.setEnabled(False)
+        self.view.btn_precheck.hide()
         self.view.btn_skip_current.show()
         self.view.btn_skip_current.setEnabled(True)
         self.view.style().unpolish(self.view.btn_start)
@@ -1064,6 +1154,30 @@ class MainController(QObject):
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
         self.worker.start()
+
+    def start_precheck(self):
+        if self.worker and self.worker.isRunning():
+            self.view.show_warning_message("⚠️ 正在处理", "批量处理进行中，无法执行预检。")
+            return
+        if self._is_precheck_running():
+            return
+        if not self.loaded_files:
+            self.view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
+            return
+
+        self.precheck_files = list(self.loaded_files)
+        self.process_logs += f"\n{'=' * 56}\n批量预检开始\n{'=' * 56}\n"
+        self.view.btn_precheck.setEnabled(False)
+        self.view.btn_precheck.setText("预检中...")
+        self.view.btn_precheck.setProperty("precheckMode", True)
+        self.view.btn_start.setEnabled(False)
+
+        self.precheck_worker = PreCheckWorker(self.precheck_files)
+        self.precheck_worker.progress.connect(self.update_progress)
+        self.precheck_worker.finished_precheck.connect(self.precheck_finished)
+        self.precheck_worker.error_precheck.connect(self.precheck_error)
+        self.precheck_worker.finished.connect(self.precheck_worker.deleteLater)
+        self.precheck_worker.start()
 
     def handle_io_action(self, action_type):
         if not self.loaded_files:
@@ -1100,15 +1214,17 @@ class MainController(QObject):
 
     def update_progress(self, row_index, status_text, log_msg):
         # 获取与该行对应的精确文件路径，用于树节点的映射更新
-        processing_files = self.processing_files or self.loaded_files
+        processing_files = self.processing_files or self.precheck_files or self.loaded_files
         if row_index < 0 or row_index >= len(processing_files):
             return
         file_path = processing_files[row_index]
 
-        if status_text in ["处理完成", "操作成功"]:
+        if status_text in ["处理完成", "操作成功", "无需处理"]:
             color = QColor(16, 185, 129)  # 绿色
-        elif status_text in ["处理失败", "操作失败"]:
+        elif status_text in ["处理失败", "操作失败", "预检失败"]:
             color = QColor(239, 68, 68)  # 红色
+        elif status_text == "建议处理":
+            color = QColor(245, 158, 11)  # 橙色
         elif status_text == "已停止":
             color = QColor(245, 158, 11)  # 橙色
         elif status_text == "已跳过":
@@ -1139,6 +1255,26 @@ class MainController(QObject):
 
         self._refresh_processing_hint(status_text=status_text, file_path=file_path)
 
+    def precheck_finished(self, summary):
+        self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
+        self.view.btn_precheck.setText("🔎 预检")
+        self.view.btn_precheck.setProperty("precheckMode", False)
+        self.view.btn_start.setEnabled(True)
+        self.precheck_files = []
+        self.precheck_worker = None
+        self.view.refresh_selection_summary()
+        self.view.show_info_message("🔎 预检完成", summary)
+
+    def precheck_error(self, error_msg):
+        self.process_logs += f"\n{'!' * 56}\n[预检错误] {error_msg}\n{'!' * 56}\n"
+        self.view.btn_precheck.setText("🔎 预检")
+        self.view.btn_precheck.setProperty("precheckMode", False)
+        self.view.btn_start.setEnabled(True)
+        self.precheck_files = []
+        self.precheck_worker = None
+        self.view.refresh_selection_summary()
+        self.view.show_error_message("❌ 预检失败", f"预检过程中发生错误：\n{error_msg}")
+
     def processing_finished(self, summary):
         self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{summary}\n{'=' * 56}\n"
         self.processing_timer.stop()
@@ -1146,6 +1282,7 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
+        self.view.btn_precheck.show()
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
@@ -1178,6 +1315,7 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
+        self.view.btn_precheck.show()
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
@@ -1231,7 +1369,7 @@ class MainController(QObject):
             self.log_dialog = LogDialog(self.view)
             self.log_dialog.btn_export.clicked.connect(self.export_logs)
 
-        self.log_dialog.text_edit.setText(self.process_logs if self.process_logs else "暂无处理日志...")
+        self.log_dialog.set_log_text(self.process_logs if self.process_logs else "暂无处理日志...")
         self.log_dialog.show()
         self.log_dialog.raise_()
         self.log_dialog.activateWindow()

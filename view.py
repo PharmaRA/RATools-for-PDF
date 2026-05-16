@@ -1,5 +1,7 @@
 import os
+import html
 import platform
+import re
 import sys
 import ctypes
 from PySide6.QtWidgets import (
@@ -379,7 +381,49 @@ class CustomMessageBox(FramelessDraggableDialog):
 class LogDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("📝 处理日志记录", parent)
-        self.resize(650, 480)
+        self.resize(860, 620)
+
+        self.raw_log_text = ""
+        self.filter_mode = "all"
+        self.log_blocks = []
+
+        self.content_layout.setSpacing(12)
+
+        stats_row = QHBoxLayout()
+        stats_row.setContentsMargins(0, 0, 0, 0)
+        stats_row.setSpacing(10)
+        self.stat_total_card, self.stat_total_title, self.stat_total_value = self._create_stat_card(stats_row, "总记录")
+        self.stat_success_card, self.stat_success_title, self.stat_success_value = self._create_stat_card(stats_row, "成功")
+        self.stat_failure_card, self.stat_failure_title, self.stat_failure_value = self._create_stat_card(stats_row, "失败")
+        self.stat_precheck_card, self.stat_precheck_title, self.stat_precheck_value = self._create_stat_card(stats_row, "建议处理")
+        self.stat_skip_card, self.stat_skip_title, self.stat_skip_value = self._create_stat_card(stats_row, "跳过")
+        self.content_layout.addLayout(stats_row)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(8)
+        self.filter_buttons = {}
+        for mode, label in [
+            ("all", "全部"),
+            ("success", "仅成功"),
+            ("failure", "仅失败"),
+            ("precheck", "仅预检"),
+            ("skip", "仅跳过"),
+        ]:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setObjectName("dialogSecondaryBtn")
+            btn.clicked.connect(lambda _checked, current=mode: self.set_filter_mode(current))
+            self.filter_buttons[mode] = btn
+            filter_row.addWidget(btn)
+        filter_row.addStretch()
+        self.content_layout.addLayout(filter_row)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索文件名、状态或结果关键字")
+        self.search_edit.setObjectName("settingsPathEdit")
+        self.search_edit.textChanged.connect(self.refresh_view)
+        self.content_layout.addWidget(self.search_edit)
 
         self.text_edit = QTextEdit()
         self.text_edit.setObjectName("logTextEdit")
@@ -398,6 +442,154 @@ class LogDialog(FramelessDraggableDialog):
         btn_layout.addWidget(self.btn_export)
         btn_layout.addWidget(self.btn_close)
         self.content_layout.addLayout(btn_layout)
+
+        self.set_filter_mode("all")
+
+    def _create_stat_card(self, parent_layout, title):
+        card = QFrame()
+        card.setStyleSheet(
+            "background-color: transparent; border: none;"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 4, 8, 4)
+        card_layout.setSpacing(4)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 700;")
+        value_label = QLabel("0")
+        value_label.setStyleSheet("color: #0F172A; font-size: 20px; font-weight: 700;")
+
+        card_layout.addWidget(title_label)
+        card_layout.addWidget(value_label)
+        parent_layout.addWidget(card)
+        return card, title_label, value_label
+
+    @staticmethod
+    def _split_log_blocks(raw_text):
+        blocks = []
+        current = []
+        for raw_line in raw_text.splitlines():
+            line = raw_line.rstrip()
+            if not line:
+                if current:
+                    blocks.append("\n".join(current))
+                    current = []
+                continue
+            if re.match(r"^\[\d{2}:\d{2}:\d{2}\]", line) and current:
+                blocks.append("\n".join(current))
+                current = [line]
+                continue
+            current.append(line)
+        if current:
+            blocks.append("\n".join(current))
+        return blocks
+
+    @staticmethod
+    def _highlight_html(text, query):
+        if not query:
+            return html.escape(text)
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+        last = 0
+        parts = []
+        for match in pattern.finditer(text):
+            parts.append(html.escape(text[last:match.start()]))
+            parts.append(f"<mark>{html.escape(match.group(0))}</mark>")
+            last = match.end()
+        parts.append(html.escape(text[last:]))
+        return "".join(parts)
+
+    @staticmethod
+    def _build_log_block_info(block_text):
+        status_match = re.search(r"^\s*状态:\s*(.+)$", block_text, re.MULTILINE)
+        status = status_match.group(1).strip() if status_match else ""
+        tags = set()
+
+        if status in {"处理完成", "操作成功", "无需处理"}:
+            tags.add("success")
+        if status in {"处理失败", "操作失败", "预检失败"} or "[致命错误]" in block_text or "[预检错误]" in block_text:
+            tags.add("failure")
+        if status in {"已跳过", "已停止", "未匹配跳过"}:
+            tags.add("skip")
+        if status in {"建议处理", "无需处理", "预检失败"} or "预检" in block_text:
+            tags.add("precheck")
+
+        return {
+            "text": block_text,
+            "status": status,
+            "tags": tags,
+        }
+
+    def set_filter_mode(self, mode):
+        self.filter_mode = mode
+        for key, btn in self.filter_buttons.items():
+            btn.setChecked(key == mode)
+        self.refresh_view()
+
+    def set_log_text(self, raw_text):
+        self.raw_log_text = raw_text or ""
+        self.log_blocks = [
+            self._build_log_block_info(block)
+            for block in self._split_log_blocks(self.raw_log_text)
+        ]
+        self._update_stats()
+        self.refresh_view()
+
+    def _update_stats(self):
+        total = sum(1 for block in self.log_blocks if block["status"])
+        success = sum(1 for block in self.log_blocks if block["status"] in {"处理完成", "操作成功", "无需处理"})
+        failure = sum(1 for block in self.log_blocks if block["status"] in {"处理失败", "操作失败", "预检失败"})
+        precheck = sum(1 for block in self.log_blocks if block["status"] == "建议处理")
+        skip = sum(1 for block in self.log_blocks if block["status"] in {"已跳过", "已停止", "未匹配跳过"})
+
+        self.stat_total_value.setText(str(total))
+        self.stat_success_value.setText(str(success))
+        self.stat_failure_value.setText(str(failure))
+        self.stat_precheck_value.setText(str(precheck))
+        self.stat_skip_value.setText(str(skip))
+
+    def refresh_view(self):
+        query = self.search_edit.text().strip()
+        filtered_blocks = []
+        for block in self.log_blocks:
+            if self.filter_mode != "all" and self.filter_mode not in block["tags"]:
+                continue
+            if query and query.lower() not in block["text"].lower():
+                continue
+            filtered_blocks.append(block)
+
+        if not filtered_blocks:
+            self.text_edit.setHtml(
+                "<div style='color:#94A3B8; font-family:Consolas,\'Courier New\',monospace; font-size:12px;'>暂无匹配日志...</div>"
+            )
+            return
+
+        block_html = []
+        for block in filtered_blocks:
+            tags = block["tags"]
+            if "failure" in tags:
+                border = "#7F1D1D"
+                bg = "#1F1418"
+            elif "skip" in tags:
+                border = "#92400E"
+                bg = "#1F1A12"
+            elif "precheck" in tags:
+                border = "#1D4ED8"
+                bg = "#111827"
+            elif "success" in tags:
+                border = "#065F46"
+                bg = "#0F1B17"
+            else:
+                border = "#334155"
+                bg = "#0F172A"
+
+            highlighted = self._highlight_html(block["text"], query)
+            block_html.append(
+                f"<div style='margin-bottom:10px; padding:10px 12px; background:{bg}; border:1px solid {border}; border-radius:10px;'>"
+                f"<pre style='margin:0; white-space:pre-wrap; color:#E2E8F0; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
+                "</div>"
+            )
+
+        self.text_edit.setHtml("".join(block_html))
 
 
 class SettingsDialog(FramelessDraggableDialog):
@@ -1089,6 +1281,8 @@ class MainWindow(QMainWindow):
         self.btn_skip_current.setObjectName("actionBtn")
         self.btn_skip_current.setEnabled(False)
         self.btn_skip_current.hide()
+        self.btn_precheck = QPushButton("🔎 预检")
+        self.btn_precheck.setObjectName("actionBtn")
         self.btn_start = QPushButton("▶ 开始处理")
         self.btn_start.setObjectName("startBtn")
         footer_layout.addWidget(self.info_label)
@@ -1098,6 +1292,8 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.risk_hint_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.btn_skip_current)
+        footer_layout.addSpacing(10)
+        footer_layout.addWidget(self.btn_precheck)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
@@ -1395,7 +1591,14 @@ class MainWindow(QMainWindow):
 
         self.info_label.setText(f"{total_files} 个文件 · {selected_count} 条规则 · {preset_text}")
 
-        if self.btn_start.property("stopMode") is not True:
+        is_prechecking = hasattr(self, "btn_precheck") and self.btn_precheck.property("precheckMode") is True
+
+        if is_prechecking:
+            self.btn_start.setEnabled(False)
+            self.btn_start.setToolTip("预检进行中，请稍候")
+            self.btn_precheck.setEnabled(False)
+            self.btn_precheck.setToolTip("预检进行中，请稍候")
+        elif self.btn_start.property("stopMode") is not True:
             can_start = (total_files > 0 and selected_count > 0)
             self.btn_start.setEnabled(can_start)
             if total_files == 0:
@@ -1404,6 +1607,16 @@ class MainWindow(QMainWindow):
                 self.btn_start.setToolTip("请至少勾选一条处理规则")
             else:
                 self.btn_start.setToolTip("")
+
+            if hasattr(self, "btn_precheck"):
+                self.btn_precheck.setEnabled(total_files > 0)
+                if total_files == 0:
+                    self.btn_precheck.setToolTip("请先添加至少一个 PDF 文件")
+                else:
+                    self.btn_precheck.setToolTip("扫描队列中文档状态，并提示建议勾选的处理项目")
+        elif hasattr(self, "btn_precheck"):
+            self.btn_precheck.setEnabled(False)
+            self.btn_precheck.setToolTip("处理中无法执行预检")
 
         overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
         if overwrite_cb and overwrite_cb.isChecked():
