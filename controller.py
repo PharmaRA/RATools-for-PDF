@@ -288,6 +288,7 @@ class PreCheckWorker(QThread):
     后台预检线程：只读取 PDF 状态，生成建议勾选的处理项，不修改文件。
     """
     progress = Signal(int, str, str)
+    result_ready = Signal(dict)
     finished_precheck = Signal(str)
     error_precheck = Signal(str)
 
@@ -313,6 +314,13 @@ class PreCheckWorker(QThread):
                 if not report.get("available"):
                     failed_files += 1
                     reason = report.get("error") or "无法读取PDF结构"
+                    self.result_ready.emit({
+                        "file_name": base_name,
+                        "file_path": file_path,
+                        "status": "预检失败",
+                        "suggestions": "",
+                        "error": reason,
+                    })
                     self.progress.emit(
                         i,
                         "预检失败",
@@ -328,12 +336,26 @@ class PreCheckWorker(QThread):
                         for item in suggestions
                         if item.get("title")
                     )
+                    self.result_ready.emit({
+                        "file_name": base_name,
+                        "file_path": file_path,
+                        "status": "建议处理",
+                        "suggestions": advice,
+                        "error": "",
+                    })
                     self.progress.emit(
                         i,
                         "建议处理",
                         f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 建议处理\n    建议: {advice}",
                     )
                 else:
+                    self.result_ready.emit({
+                        "file_name": base_name,
+                        "file_path": file_path,
+                        "status": "无需处理",
+                        "suggestions": "",
+                        "error": "",
+                    })
                     self.progress.emit(
                         i,
                         "无需处理",
@@ -461,6 +483,7 @@ class MainController(QObject):
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self.last_failed_files = []
+        self.last_precheck_results = []
         self.processing_timer = QTimer(self)
         self.processing_timer.setInterval(1000)
         self.processing_timer.timeout.connect(self._refresh_processing_hint)
@@ -490,6 +513,7 @@ class MainController(QObject):
         self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
         self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
+        self.view.btn_export_precheck.clicked.connect(self.export_precheck_results)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
@@ -511,6 +535,11 @@ class MainController(QObject):
     def _is_precheck_running(self):
         precheck_worker = getattr(self, "precheck_worker", None)
         return bool(precheck_worker and precheck_worker.isRunning())
+
+    def _record_precheck_result(self, row):
+        self.last_precheck_results.append(dict(row))
+        self.view.btn_export_precheck.setProperty("hasPrecheckResults", True)
+        self.view.refresh_selection_summary()
 
     def _wire_about_dialog_updates(self):
         if not ENABLE_UPDATE_CHECK:
@@ -1250,6 +1279,8 @@ class MainController(QObject):
             return
 
         self.precheck_files = list(self.loaded_files)
+        self.last_precheck_results = []
+        self.view.btn_export_precheck.setProperty("hasPrecheckResults", False)
         self.process_logs += f"\n{'=' * 56}\n批量预检开始\n{'=' * 56}\n"
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.setText("预检中...")
@@ -1258,6 +1289,7 @@ class MainController(QObject):
 
         self.precheck_worker = PreCheckWorker(self.precheck_files)
         self.precheck_worker.progress.connect(self.update_progress)
+        self.precheck_worker.result_ready.connect(self._record_precheck_result)
         self.precheck_worker.finished_precheck.connect(self.precheck_finished)
         self.precheck_worker.error_precheck.connect(self.precheck_error)
         self.precheck_worker.finished.connect(self.precheck_worker.deleteLater)
@@ -1516,6 +1548,47 @@ class MainController(QObject):
                 self.view.show_success_message("✅ 导出成功", "处理日志已成功保存！")
             except Exception as e:
                 self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
+
+    def export_precheck_results(self):
+        if not self.last_precheck_results:
+            self.view.show_warning_message("⚠️ 提示", "请先执行一次批量预检，再导出预检结果。")
+            return
+
+        default_dir = ""
+        default_output_dir = self.view.settings_dialog.default_output_edit.text().strip()
+        if default_output_dir and os.path.isdir(default_output_dir):
+            default_dir = default_output_dir
+        elif self.loaded_files:
+            try:
+                file_dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+                default_dir = os.path.commonpath(file_dirs)
+            except ValueError:
+                default_dir = os.path.dirname(os.path.abspath(self.loaded_files[0]))
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"RATools_precheck_results_{timestamp}.csv"
+        default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
+
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self.view,
+            "导出预检结果",
+            default_path,
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".csv"):
+            file_path += ".csv"
+
+        try:
+            fieldnames = ["file_name", "file_path", "status", "suggestions", "error"]
+            with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(self.last_precheck_results)
+            self.view.show_success_message("✅ 导出成功", "预检结果已成功保存！")
+        except Exception as e:
+            self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
 
     def _open_directory(self, dir_path):
         sys_plat = platform.system()
