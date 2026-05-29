@@ -483,6 +483,7 @@ class MainController(QObject):
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self.last_failed_files = []
+        self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         self.last_precheck_results = []
         self.processing_timer = QTimer(self)
         self.processing_timer.setInterval(1000)
@@ -517,7 +518,7 @@ class MainController(QObject):
         self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
         self.view.btn_export_precheck.clicked.connect(self.export_precheck_results)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
-        self.view.btn_start.clicked.connect(self.start_processing)
+        self.view.btn_start.clicked.connect(lambda _checked=False: self.start_processing())
         self.view.btn_log.clicked.connect(self.show_log_dialog)
         if ENABLE_UPDATE_CHECK:
             self.view.btn_top_about.clicked.connect(self._wire_about_dialog_updates)
@@ -1248,6 +1249,7 @@ class MainController(QObject):
         self.processing_total = len(processing_files)
         self.processing_done = 0
         self.processing_done_paths = set()
+        self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         if retry_failed:
             self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
         else:
@@ -1365,6 +1367,12 @@ class MainController(QObject):
         if status_text in ["处理完成", "处理失败", "已跳过"] and file_path not in self.processing_done_paths:
             self.processing_done_paths.add(file_path)
             self.processing_done = len(self.processing_done_paths)
+            if status_text == "处理完成":
+                self.batch_result_counts["success"] += 1
+            elif status_text == "处理失败":
+                self.batch_result_counts["failure"] += 1
+            elif status_text == "已跳过":
+                self.batch_result_counts["skip"] += 1
 
         if status_text == "处理失败" and file_path not in self.last_failed_files:
             self.last_failed_files.append(file_path)
@@ -1405,8 +1413,34 @@ class MainController(QObject):
         self.view.refresh_selection_summary()
         self.view.show_error_message("❌ 预检失败", f"预检过程中发生错误：\n{error_msg}")
 
+    def _build_batch_result_summary(self, worker_summary):
+        total = self.processing_total or sum(self.batch_result_counts.values())
+        success = self.batch_result_counts.get("success", 0)
+        failure = self.batch_result_counts.get("failure", 0)
+        skip = self.batch_result_counts.get("skip", 0)
+        elapsed = 0
+        if self.processing_started_at:
+            elapsed = int((datetime.now() - self.processing_started_at).total_seconds())
+
+        lines = [
+            "批次结果摘要",
+            f"总数：{total}",
+            f"成功：{success}",
+            f"失败：{failure}",
+            f"跳过：{skip}",
+            f"总耗时：{elapsed}s",
+        ]
+        if self.last_failed_files:
+            lines.append(f"失败项：{len(self.last_failed_files)} 个，可使用“仅处理失败项”重试")
+        else:
+            lines.append("失败项：0 个")
+        if worker_summary:
+            lines.extend(["", worker_summary])
+        return "\n".join(lines)
+
     def processing_finished(self, summary):
-        self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{summary}\n{'=' * 56}\n"
+        batch_summary = self._build_batch_result_summary(summary)
+        self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{batch_summary}\n{'=' * 56}\n"
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
@@ -1428,9 +1462,9 @@ class MainController(QObject):
         self._last_processing_hint = ""
 
         if "任务已停止" in summary:
-            self.view.show_info_message("⏹️ 已停止", summary)
+            self.view.show_info_message("⏹️ 已停止", batch_summary)
         else:
-            self.view.show_success_message("✅ 处理完成", "所有 PDF 文件的批量处理任务已结束！")
+            self.view.show_success_message("✅ 处理完成", batch_summary)
 
         auto_open_cb = self.view.all_checkboxes.get("处理完成后自动打开输出文件夹")
         if auto_open_cb and auto_open_cb.isChecked() and self.loaded_files:
