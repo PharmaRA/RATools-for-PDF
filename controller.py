@@ -1233,6 +1233,7 @@ class MainController(QObject):
         self.view.btn_start.setText("■ 停止处理")
         self.view.btn_start.setProperty("stopMode", True)
         self.view.btn_retry_failed.setEnabled(False)
+        self.view.btn_retry_failed.hide()
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.hide()
         self.view.btn_skip_current.show()
@@ -1250,6 +1251,7 @@ class MainController(QObject):
         else:
             self.last_failed_files = []
             self.view.btn_retry_failed.setProperty("hasFailedItems", False)
+            self.view.btn_retry_failed.hide()
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self._refresh_processing_hint()
@@ -1281,6 +1283,7 @@ class MainController(QObject):
         self.precheck_files = list(self.loaded_files)
         self.last_precheck_results = []
         self.view.btn_export_precheck.setProperty("hasPrecheckResults", False)
+        self.view.btn_export_precheck.hide()
         self.process_logs += f"\n{'=' * 56}\n批量预检开始\n{'=' * 56}\n"
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.setText("预检中...")
