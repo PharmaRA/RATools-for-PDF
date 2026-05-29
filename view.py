@@ -1281,6 +1281,9 @@ class MainWindow(QMainWindow):
         self.btn_skip_current.setObjectName("actionBtn")
         self.btn_skip_current.setEnabled(False)
         self.btn_skip_current.hide()
+        self.btn_retry_failed = QPushButton("↻ 仅处理失败项")
+        self.btn_retry_failed.setObjectName("actionBtn")
+        self.btn_retry_failed.setEnabled(False)
         self.btn_precheck = QPushButton("🔎 预检")
         self.btn_precheck.setObjectName("actionBtn")
         self.btn_start = QPushButton("▶ 开始处理")
@@ -1292,6 +1295,8 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.risk_hint_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.btn_skip_current)
+        footer_layout.addSpacing(10)
+        footer_layout.addWidget(self.btn_retry_failed)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_precheck)
         footer_layout.addSpacing(10)
@@ -1598,6 +1603,9 @@ class MainWindow(QMainWindow):
             self.btn_start.setToolTip("预检进行中，请稍候")
             self.btn_precheck.setEnabled(False)
             self.btn_precheck.setToolTip("预检进行中，请稍候")
+            if hasattr(self, "btn_retry_failed"):
+                self.btn_retry_failed.setEnabled(False)
+                self.btn_retry_failed.setToolTip("预检进行中，请稍候")
         elif self.btn_start.property("stopMode") is not True:
             can_start = (total_files > 0 and selected_count > 0)
             self.btn_start.setEnabled(can_start)
@@ -1614,9 +1622,21 @@ class MainWindow(QMainWindow):
                     self.btn_precheck.setToolTip("请先添加至少一个 PDF 文件")
                 else:
                     self.btn_precheck.setToolTip("扫描队列中文档状态，并提示建议勾选的处理项目")
+            if hasattr(self, "btn_retry_failed"):
+                has_failed = self.btn_retry_failed.property("hasFailedItems") is True
+                self.btn_retry_failed.setEnabled(total_files > 0 and selected_count > 0 and has_failed)
+                if not has_failed:
+                    self.btn_retry_failed.setToolTip("当前没有可重试的失败项")
+                elif selected_count == 0:
+                    self.btn_retry_failed.setToolTip("请至少勾选一条处理规则")
+                else:
+                    self.btn_retry_failed.setToolTip("仅重新处理上一轮失败的文件")
         elif hasattr(self, "btn_precheck"):
             self.btn_precheck.setEnabled(False)
             self.btn_precheck.setToolTip("处理中无法执行预检")
+            if hasattr(self, "btn_retry_failed"):
+                self.btn_retry_failed.setEnabled(False)
+                self.btn_retry_failed.setToolTip("处理中无法重试失败项")
 
         overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
         if overwrite_cb and overwrite_cb.isChecked():

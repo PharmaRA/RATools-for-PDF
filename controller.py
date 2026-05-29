@@ -323,9 +323,10 @@ class PreCheckWorker(QThread):
                 suggestions = list(report.get("suggestions", {}).values())
                 if suggestions:
                     suggested_files += 1
-                    advice = "；".join(
-                        f"{item.get('title', '')}（{item.get('reason', '')}）"
+                    advice = "、".join(
+                        item.get("title", "")
                         for item in suggestions
+                        if item.get("title")
                     )
                     self.progress.emit(
                         i,
@@ -459,6 +460,7 @@ class MainController(QObject):
         self.processing_files = []
         self.processing_current_file = ""
         self._last_processing_hint = ""
+        self.last_failed_files = []
         self.processing_timer = QTimer(self)
         self.processing_timer.setInterval(1000)
         self.processing_timer.timeout.connect(self._refresh_processing_hint)
@@ -487,6 +489,7 @@ class MainController(QObject):
         self.view.btn_clear_selected_options.clicked.connect(self.view.clear_selected_options)
         self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
+        self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(self.start_processing)
         self.view.btn_log.clicked.connect(self.show_log_dialog)
@@ -1042,7 +1045,7 @@ class MainController(QObject):
             self.view.update_counters_ui(0)
             self.process_logs = ""
 
-    def start_processing(self):
+    def start_processing(self, processing_files=None, retry_failed=False):
         if self.worker and self.worker.isRunning():
             self.worker.request_stop()
             self.view.btn_start.setEnabled(False)
@@ -1056,6 +1059,15 @@ class MainController(QObject):
 
         if not self.loaded_files:
             self.view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
+            return
+
+        if processing_files is None:
+            processing_files = list(self.loaded_files)
+        else:
+            processing_files = list(processing_files)
+
+        if not processing_files:
+            self.view.show_warning_message("⚠️ 警告", "没有可处理的 PDF 文件！")
             return
 
         selected_options = self.view.get_selected_options()
@@ -1099,8 +1111,6 @@ class MainController(QObject):
 
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
-        processing_files = list(self.loaded_files)
-
         out_dir = ""
         common_base = ""
 
@@ -1132,6 +1142,7 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("■ 停止处理")
         self.view.btn_start.setProperty("stopMode", True)
+        self.view.btn_retry_failed.setEnabled(False)
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.hide()
         self.view.btn_skip_current.show()
@@ -1144,6 +1155,11 @@ class MainController(QObject):
         self.processing_total = len(processing_files)
         self.processing_done = 0
         self.processing_done_paths = set()
+        if retry_failed:
+            self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
+        else:
+            self.last_failed_files = []
+            self.view.btn_retry_failed.setProperty("hasFailedItems", False)
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self._refresh_processing_hint()
@@ -1154,6 +1170,13 @@ class MainController(QObject):
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
         self.worker.start()
+
+    def start_retry_failed_processing(self):
+        retry_files = [path for path in self.last_failed_files if path in self.loaded_files]
+        if not retry_files:
+            self.view.show_warning_message("⚠️ 无失败项", "当前没有可重新处理的失败文件。")
+            return
+        self.start_processing(processing_files=retry_files, retry_failed=True)
 
     def start_precheck(self):
         if self.worker and self.worker.isRunning():
@@ -1245,6 +1268,15 @@ class MainController(QObject):
             self.processing_done_paths.add(file_path)
             self.processing_done = len(self.processing_done_paths)
 
+        if status_text == "处理失败" and file_path not in self.last_failed_files:
+            self.last_failed_files.append(file_path)
+            self.view.btn_retry_failed.setProperty("hasFailedItems", True)
+            self.view.refresh_selection_summary()
+        elif status_text == "处理完成" and file_path in self.last_failed_files:
+            self.last_failed_files.remove(file_path)
+            self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
+            self.view.refresh_selection_summary()
+
         if status_text == "正在处理..." and file_path:
             self.processing_current_file = os.path.basename(file_path)
         elif status_text in ["处理完成", "处理失败", "已停止"]:
@@ -1283,6 +1315,7 @@ class MainController(QObject):
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
         self.view.btn_precheck.show()
+        self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
@@ -1316,6 +1349,7 @@ class MainController(QObject):
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
         self.view.btn_precheck.show()
+        self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
         self.view.style().unpolish(self.view.btn_start)
