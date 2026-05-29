@@ -1242,8 +1242,16 @@ class MainWindow(QMainWindow):
         self.btn_preset_us.setFocusPolicy(Qt.NoFocus)
         preset_layout.addWidget(self.btn_preset_us)
 
+        self.btn_preset_favorite = QPushButton("我的常用")
+        self.btn_preset_favorite.setObjectName("presetBtn")
+        self.btn_preset_favorite.setCheckable(True)
+        self.btn_preset_favorite.setFocusPolicy(Qt.NoFocus)
+        preset_layout.addWidget(self.btn_preset_favorite)
+
         self.btn_clear_selected_options = QPushButton("全部取消")
         self.btn_clear_selected_options.setObjectName("actionBtn")
+        self.btn_save_favorite_preset = QPushButton("保存为常用")
+        self.btn_save_favorite_preset.setObjectName("actionBtn")
 
         self.preset_summary_label = QLabel("默认载入中国 eCTD 预设，可按需微调。")
         self.preset_summary_label.setObjectName("presetSummary")
@@ -1252,10 +1260,12 @@ class MainWindow(QMainWindow):
         self.preset_btn_group.setExclusive(True)
         self.preset_btn_group.addButton(self.btn_preset_china)
         self.preset_btn_group.addButton(self.btn_preset_us)
+        self.preset_btn_group.addButton(self.btn_preset_favorite)
 
         preset_layout.addSpacing(8)
         preset_layout.addWidget(self.preset_summary_label)
         preset_layout.addStretch()
+        preset_layout.addWidget(self.btn_save_favorite_preset)
         preset_layout.addWidget(self.btn_clear_selected_options)
         main_layout.addWidget(preset_bar)
 
@@ -1454,7 +1464,32 @@ class MainWindow(QMainWindow):
         self.preset_btn_group.setExclusive(False)
         self.btn_preset_china.setChecked(preset_key == "china")
         self.btn_preset_us.setChecked(preset_key == "us")
+        self.btn_preset_favorite.setChecked(preset_key == "favorite")
         self.preset_btn_group.setExclusive(True)
+
+    def get_processing_options(self):
+        return [
+            opt_id
+            for mod in self.MODULES_DATA
+            for opt in mod["options"]
+            for opt_id in [opt["id"]]
+            if self.all_checkboxes.get(opt_id) and self.all_checkboxes[opt_id].isChecked()
+        ]
+
+    def get_favorite_preset_options(self):
+        value = self.app_settings.value("Presets/FavoriteOptions", [])
+        if isinstance(value, str):
+            return [item for item in value.split(",") if item]
+        return list(value or [])
+
+    def save_favorite_preset(self):
+        favorite_options = self.get_processing_options()
+        self.app_settings.setValue("Presets/FavoriteOptions", favorite_options)
+        self.active_preset_key = "favorite"
+        self._set_preset_button_state("favorite")
+        self.custom_selection_before_preset = set(favorite_options)
+        self.refresh_selection_summary()
+        self.show_success_message("✅ 已保存", "当前处理规则已保存为我的常用。")
 
     def restore_custom_selection(self):
         checkbox_groups = {}
@@ -1477,6 +1512,11 @@ class MainWindow(QMainWindow):
         self.refresh_selection_summary()
 
     def toggle_preset(self, preset_key):
+        if preset_key == "favorite" and not self.get_favorite_preset_options():
+            self.show_warning_message("⚠️ 尚未保存", "请先点击“保存为常用”保存当前规则组合。")
+            self._set_preset_button_state(self.active_preset_key)
+            return
+
         if self.active_preset_key == preset_key:
             self.restore_custom_selection()
             return
@@ -1507,11 +1547,16 @@ class MainWindow(QMainWindow):
         self.refresh_selection_summary()
 
     def apply_preset(self, preset_key, persist=True):
-        preset = self.PRESET_OPTIONS.get(preset_key)
-        if not preset:
-            return
+        if preset_key == "favorite":
+            target_options = set(self.get_favorite_preset_options())
+        else:
+            preset = self.PRESET_OPTIONS.get(preset_key)
+            if not preset:
+                return
+            target_options = set(preset["options"])
 
-        target_options = set(preset["options"])
+        if not target_options:
+            return
 
         checkbox_groups = {}
         for opt_id, cb in self.all_checkboxes.items():
@@ -1587,6 +1632,7 @@ class MainWindow(QMainWindow):
             if opt not in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]
         ])
         preset_titles = {key: value["title"] for key, value in self.PRESET_OPTIONS.items()}
+        preset_titles["favorite"] = "我的常用"
         preset_key = self.active_preset_key if isinstance(self.active_preset_key, str) else ""
         preset_text = preset_titles.get(preset_key, "自定义选择")
         total_files = self.current_file_count

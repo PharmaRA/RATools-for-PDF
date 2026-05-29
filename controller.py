@@ -509,6 +509,8 @@ class MainController(QObject):
         self.view.btn_clear.clicked.connect(self.clear_list)
         self.view.btn_preset_china.clicked.connect(lambda: self.view.toggle_preset("china"))
         self.view.btn_preset_us.clicked.connect(lambda: self.view.toggle_preset("us"))
+        self.view.btn_preset_favorite.clicked.connect(lambda: self.view.toggle_preset("favorite"))
+        self.view.btn_save_favorite_preset.clicked.connect(self.view.save_favorite_preset)
         self.view.btn_clear_selected_options.clicked.connect(self.view.clear_selected_options)
         self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
