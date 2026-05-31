@@ -434,11 +434,14 @@ class LogDialog(FramelessDraggableDialog):
         btn_layout = QHBoxLayout()
         self.btn_export = QPushButton("⬇️ 导出日志")
         self.btn_export.setObjectName("dialogPrimaryBtn")
+        self.btn_export_precheck = QPushButton("⬇ 导出预检结果")
+        self.btn_export_precheck.setObjectName("dialogPrimaryBtn")
         self.btn_close = QPushButton("关闭")
         self.btn_close.setObjectName("dialogSecondaryBtn")
         self.btn_close.clicked.connect(self.accept)
 
         btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_export_precheck)
         btn_layout.addWidget(self.btn_export)
         btn_layout.addWidget(self.btn_close)
         self.content_layout.addLayout(btn_layout)
@@ -1295,10 +1298,6 @@ class MainWindow(QMainWindow):
         self.btn_retry_failed.setObjectName("actionBtn")
         self.btn_retry_failed.setEnabled(False)
         self.btn_retry_failed.hide()
-        self.btn_export_precheck = QPushButton("⬇ 导出预检结果")
-        self.btn_export_precheck.setObjectName("actionBtn")
-        self.btn_export_precheck.setEnabled(False)
-        self.btn_export_precheck.hide()
         self.btn_apply_precheck = QPushButton("✓ 应用预检建议")
         self.btn_apply_precheck.setObjectName("actionBtn")
         self.btn_apply_precheck.setEnabled(False)
@@ -1320,8 +1319,6 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.btn_skip_current)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_retry_failed)
-        footer_layout.addSpacing(10)
-        footer_layout.addWidget(self.btn_export_precheck)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_apply_precheck)
         footer_layout.addSpacing(10)
@@ -1672,10 +1669,6 @@ class MainWindow(QMainWindow):
                 self.btn_retry_failed.setEnabled(False)
                 self.btn_retry_failed.hide()
                 self.btn_retry_failed.setToolTip("预检进行中，请稍候")
-            if hasattr(self, "btn_export_precheck"):
-                self.btn_export_precheck.setEnabled(False)
-                self.btn_export_precheck.hide()
-                self.btn_export_precheck.setToolTip("预检进行中，请稍候")
             if hasattr(self, "btn_apply_precheck"):
                 self.btn_apply_precheck.setEnabled(False)
                 self.btn_apply_precheck.hide()
@@ -1710,14 +1703,6 @@ class MainWindow(QMainWindow):
                     self.btn_retry_failed.setToolTip("请至少勾选一条处理规则")
                 else:
                     self.btn_retry_failed.setToolTip("仅重新处理上一轮失败的文件")
-            if hasattr(self, "btn_export_precheck"):
-                has_precheck_results = self.btn_export_precheck.property("hasPrecheckResults") is True
-                self.btn_export_precheck.setVisible(has_precheck_results)
-                self.btn_export_precheck.setEnabled(has_precheck_results)
-                if has_precheck_results:
-                    self.btn_export_precheck.setToolTip("导出最近一次批量预检结果")
-                else:
-                    self.btn_export_precheck.setToolTip("请先执行一次批量预检")
             if hasattr(self, "btn_apply_precheck"):
                 has_precheck_suggestions = self.btn_apply_precheck.property("hasPrecheckSuggestions") is True
                 self.btn_apply_precheck.setVisible(has_precheck_suggestions)
@@ -1743,10 +1728,6 @@ class MainWindow(QMainWindow):
                 self.btn_retry_failed.setEnabled(False)
                 self.btn_retry_failed.hide()
                 self.btn_retry_failed.setToolTip("处理中无法重试失败项")
-            if hasattr(self, "btn_export_precheck"):
-                self.btn_export_precheck.setEnabled(False)
-                self.btn_export_precheck.hide()
-                self.btn_export_precheck.setToolTip("处理中无法导出预检结果")
             if hasattr(self, "btn_apply_precheck"):
                 self.btn_apply_precheck.setEnabled(False)
                 self.btn_apply_precheck.hide()

@@ -520,7 +520,6 @@ class MainController(QObject):
         self.view.btn_skip_current.clicked.connect(self.skip_current_file)
 
         self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
-        self.view.btn_export_precheck.clicked.connect(self.export_precheck_results)
         self.view.btn_apply_precheck.clicked.connect(self.apply_precheck_suggestions)
         self.view.btn_process_precheck_suggested.clicked.connect(self.start_precheck_suggested_processing)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
@@ -547,7 +546,6 @@ class MainController(QObject):
 
     def _record_precheck_result(self, row):
         self.last_precheck_results.append(dict(row))
-        self.view.btn_export_precheck.setProperty("hasPrecheckResults", True)
         suggestion_ids = str(row.get("suggestion_ids", "") or "")
         if suggestion_ids.strip():
             self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", True)
@@ -1342,8 +1340,6 @@ class MainController(QObject):
         self.precheck_files = list(self.loaded_files)
         self.last_precheck_results = []
         self.last_precheck_suggested_files = []
-        self.view.btn_export_precheck.setProperty("hasPrecheckResults", False)
-        self.view.btn_export_precheck.hide()
         self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
         self.view.btn_apply_precheck.hide()
         self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
@@ -1594,8 +1590,13 @@ class MainController(QObject):
         if not hasattr(self, 'log_dialog'):
             self.log_dialog = LogDialog(self.view)
             self.log_dialog.btn_export.clicked.connect(self.export_logs)
+            self.log_dialog.btn_export_precheck.clicked.connect(self.export_precheck_results)
 
         self.log_dialog.set_log_text(self.process_logs if self.process_logs else "暂无处理日志...")
+        self.log_dialog.btn_export_precheck.setEnabled(bool(self.last_precheck_results))
+        self.log_dialog.btn_export_precheck.setToolTip(
+            "导出最近一次批量预检结果" if self.last_precheck_results else "请先执行一次批量预检"
+        )
         self.log_dialog.show()
         self.log_dialog.raise_()
         self.log_dialog.activateWindow()
