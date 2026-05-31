@@ -1633,6 +1633,9 @@ class MainWindow(QMainWindow):
             self.queue_meta_label.setText("当前队列为空")
         else:
             self.queue_meta_label.setText(f"已加入{count}个PDF")
+        if hasattr(self, "btn_precheck") and self.btn_precheck.property("precheckResultCurrent") is True:
+            self.btn_precheck.setProperty("precheckResultCurrent", False)
+            self.btn_precheck.show()
         self.refresh_selection_summary()
 
     def refresh_selection_summary(self):

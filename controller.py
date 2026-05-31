@@ -489,6 +489,7 @@ class MainController(QObject):
         self.last_precheck_suggested_files = []
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         self.last_precheck_results = []
+        self.precheck_result_current = False
         self.processing_timer = QTimer(self)
         self.processing_timer.setInterval(1000)
         self.processing_timer.timeout.connect(self._refresh_processing_hint)
@@ -543,6 +544,11 @@ class MainController(QObject):
     def _is_precheck_running(self):
         precheck_worker = getattr(self, "precheck_worker", None)
         return bool(precheck_worker and precheck_worker.isRunning())
+
+    def _mark_precheck_stale(self):
+        self.precheck_result_current = False
+        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
+        self.view.btn_precheck.show()
 
     def _record_precheck_result(self, row):
         self.last_precheck_results.append(dict(row))
@@ -978,6 +984,8 @@ class MainController(QObject):
         self._cleanup_empty_folders()
 
         # 5. 更新左下角的总数统计
+        if paths_to_remove:
+            self._mark_precheck_stale()
         self.view.update_counters_ui(len(self.loaded_files))
 
     def _cleanup_empty_folders(self):
@@ -1154,6 +1162,7 @@ class MainController(QObject):
             # 将创建的文件节点加入字典中进行状态管理
             self.file_nodes[path] = file_node
 
+        self._mark_precheck_stale()
         self.view.update_counters_ui(len(self.loaded_files))
 
     def add_folder(self):
@@ -1177,6 +1186,7 @@ class MainController(QObject):
             self.folder_nodes.clear()
             self.file_nodes.clear()
             self.view.clear_tree_ui()
+            self._mark_precheck_stale()
             self.view.update_counters_ui(0)
             self.process_logs = ""
 
@@ -1340,6 +1350,8 @@ class MainController(QObject):
         self.precheck_files = list(self.loaded_files)
         self.last_precheck_results = []
         self.last_precheck_suggested_files = []
+        self.precheck_result_current = False
+        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
         self.view.btn_apply_precheck.hide()
         self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
@@ -1453,6 +1465,9 @@ class MainController(QObject):
         self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
         self.view.btn_precheck.setText("🔎 预检")
         self.view.btn_precheck.setProperty("precheckMode", False)
+        self.precheck_result_current = True
+        self.view.btn_precheck.setProperty("precheckResultCurrent", True)
+        self.view.btn_precheck.hide()
         self.view.btn_start.setEnabled(True)
         self.precheck_files = []
         self.precheck_worker = None
@@ -1502,6 +1517,8 @@ class MainController(QObject):
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
+        self.precheck_result_current = False
+        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_precheck.show()
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
