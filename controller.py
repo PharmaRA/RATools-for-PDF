@@ -1520,6 +1520,10 @@ class MainController(QObject):
         self.precheck_result_current = False
         self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_precheck.show()
+        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
+        self.view.btn_apply_precheck.hide()
+        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
+        self.view.btn_process_precheck_suggested.hide()
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
