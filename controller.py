@@ -486,6 +486,7 @@ class MainController(QObject):
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self.last_failed_files = []
+        self.last_precheck_suggested_files = []
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         self.last_precheck_results = []
         self.processing_timer = QTimer(self)
@@ -521,6 +522,7 @@ class MainController(QObject):
         self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
         self.view.btn_export_precheck.clicked.connect(self.export_precheck_results)
         self.view.btn_apply_precheck.clicked.connect(self.apply_precheck_suggestions)
+        self.view.btn_process_precheck_suggested.clicked.connect(self.start_precheck_suggested_processing)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(lambda _checked=False: self.start_processing())
         self.view.btn_log.clicked.connect(self.show_log_dialog)
@@ -549,6 +551,11 @@ class MainController(QObject):
         suggestion_ids = str(row.get("suggestion_ids", "") or "")
         if suggestion_ids.strip():
             self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", True)
+        if row.get("status") == "建议处理" and row.get("file_path"):
+            file_path = row.get("file_path")
+            if file_path not in self.last_precheck_suggested_files:
+                self.last_precheck_suggested_files.append(file_path)
+            self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", True)
         self.view.refresh_selection_summary()
 
     def apply_precheck_suggestions(self):
@@ -1274,6 +1281,8 @@ class MainController(QObject):
         self.view.btn_start.setProperty("stopMode", True)
         self.view.btn_retry_failed.setEnabled(False)
         self.view.btn_retry_failed.hide()
+        self.view.btn_process_precheck_suggested.setEnabled(False)
+        self.view.btn_process_precheck_suggested.hide()
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.hide()
         self.view.btn_skip_current.show()
@@ -1289,6 +1298,8 @@ class MainController(QObject):
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         if retry_failed:
             self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
+        elif processing_files != self.loaded_files:
+            self.process_logs += f"\n{'=' * 56}\n仅处理建议文件开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
         else:
             self.last_failed_files = []
             self.view.btn_retry_failed.setProperty("hasFailedItems", False)
@@ -1311,6 +1322,13 @@ class MainController(QObject):
             return
         self.start_processing(processing_files=retry_files, retry_failed=True)
 
+    def start_precheck_suggested_processing(self):
+        suggested_files = [path for path in self.last_precheck_suggested_files if path in self.loaded_files]
+        if not suggested_files:
+            self.view.show_warning_message("⚠️ 无建议文件", "最近一次预检没有可处理的建议文件。")
+            return
+        self.start_processing(processing_files=suggested_files)
+
     def start_precheck(self):
         if self.worker and self.worker.isRunning():
             self.view.show_warning_message("⚠️ 正在处理", "批量处理进行中，无法执行预检。")
@@ -1323,10 +1341,13 @@ class MainController(QObject):
 
         self.precheck_files = list(self.loaded_files)
         self.last_precheck_results = []
+        self.last_precheck_suggested_files = []
         self.view.btn_export_precheck.setProperty("hasPrecheckResults", False)
         self.view.btn_export_precheck.hide()
         self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
         self.view.btn_apply_precheck.hide()
+        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
+        self.view.btn_process_precheck_suggested.hide()
         self.process_logs += f"\n{'=' * 56}\n批量预检开始\n{'=' * 56}\n"
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.setText("预检中...")

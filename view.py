@@ -1303,6 +1303,10 @@ class MainWindow(QMainWindow):
         self.btn_apply_precheck.setObjectName("actionBtn")
         self.btn_apply_precheck.setEnabled(False)
         self.btn_apply_precheck.hide()
+        self.btn_process_precheck_suggested = QPushButton("▶ 仅处理建议文件")
+        self.btn_process_precheck_suggested.setObjectName("actionBtn")
+        self.btn_process_precheck_suggested.setEnabled(False)
+        self.btn_process_precheck_suggested.hide()
         self.btn_precheck = QPushButton("🔎 预检")
         self.btn_precheck.setObjectName("actionBtn")
         self.btn_start = QPushButton("▶ 开始处理")
@@ -1320,6 +1324,8 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.btn_export_precheck)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_apply_precheck)
+        footer_layout.addSpacing(10)
+        footer_layout.addWidget(self.btn_process_precheck_suggested)
         footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_precheck)
         footer_layout.addSpacing(10)
@@ -1674,6 +1680,10 @@ class MainWindow(QMainWindow):
                 self.btn_apply_precheck.setEnabled(False)
                 self.btn_apply_precheck.hide()
                 self.btn_apply_precheck.setToolTip("预检进行中，请稍候")
+            if hasattr(self, "btn_process_precheck_suggested"):
+                self.btn_process_precheck_suggested.setEnabled(False)
+                self.btn_process_precheck_suggested.hide()
+                self.btn_process_precheck_suggested.setToolTip("预检进行中，请稍候")
         elif self.btn_start.property("stopMode") is not True:
             can_start = (total_files > 0 and selected_count > 0)
             self.btn_start.setEnabled(can_start)
@@ -1716,6 +1726,16 @@ class MainWindow(QMainWindow):
                     self.btn_apply_precheck.setToolTip("自动勾选最近一次预检建议的处理规则")
                 else:
                     self.btn_apply_precheck.setToolTip("请先执行一次包含建议项的预检")
+            if hasattr(self, "btn_process_precheck_suggested"):
+                has_precheck_suggested_files = self.btn_process_precheck_suggested.property("hasPrecheckSuggestedFiles") is True
+                self.btn_process_precheck_suggested.setVisible(has_precheck_suggested_files)
+                self.btn_process_precheck_suggested.setEnabled(total_files > 0 and selected_count > 0 and has_precheck_suggested_files)
+                if not has_precheck_suggested_files:
+                    self.btn_process_precheck_suggested.setToolTip("请先执行一次包含建议项的预检")
+                elif selected_count == 0:
+                    self.btn_process_precheck_suggested.setToolTip("请至少勾选一条处理规则")
+                else:
+                    self.btn_process_precheck_suggested.setToolTip("仅处理最近一次预检中存在建议项的文件")
         elif hasattr(self, "btn_precheck"):
             self.btn_precheck.setEnabled(False)
             self.btn_precheck.setToolTip("处理中无法执行预检")
@@ -1731,6 +1751,10 @@ class MainWindow(QMainWindow):
                 self.btn_apply_precheck.setEnabled(False)
                 self.btn_apply_precheck.hide()
                 self.btn_apply_precheck.setToolTip("处理中无法应用预检建议")
+            if hasattr(self, "btn_process_precheck_suggested"):
+                self.btn_process_precheck_suggested.setEnabled(False)
+                self.btn_process_precheck_suggested.hide()
+                self.btn_process_precheck_suggested.setToolTip("处理中无法仅处理建议文件")
 
         overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
         if overwrite_cb and overwrite_cb.isChecked():
