@@ -331,6 +331,7 @@ class PreCheckWorker(QThread):
                 suggestions = list(report.get("suggestions", {}).values())
                 if suggestions:
                     suggested_files += 1
+                    suggestion_ids = ",".join(report.get("suggestions", {}).keys())
                     advice = "、".join(
                         item.get("title", "")
                         for item in suggestions
@@ -341,6 +342,7 @@ class PreCheckWorker(QThread):
                         "file_path": file_path,
                         "status": "建议处理",
                         "suggestions": advice,
+                        "suggestion_ids": suggestion_ids,
                         "error": "",
                     })
                     self.progress.emit(
@@ -354,6 +356,7 @@ class PreCheckWorker(QThread):
                         "file_path": file_path,
                         "status": "无需处理",
                         "suggestions": "",
+                        "suggestion_ids": "",
                         "error": "",
                     })
                     self.progress.emit(
@@ -517,6 +520,7 @@ class MainController(QObject):
 
         self.view.btn_retry_failed.clicked.connect(self.start_retry_failed_processing)
         self.view.btn_export_precheck.clicked.connect(self.export_precheck_results)
+        self.view.btn_apply_precheck.clicked.connect(self.apply_precheck_suggestions)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(lambda _checked=False: self.start_processing())
         self.view.btn_log.clicked.connect(self.show_log_dialog)
@@ -542,7 +546,40 @@ class MainController(QObject):
     def _record_precheck_result(self, row):
         self.last_precheck_results.append(dict(row))
         self.view.btn_export_precheck.setProperty("hasPrecheckResults", True)
+        suggestion_ids = str(row.get("suggestion_ids", "") or "")
+        if suggestion_ids.strip():
+            self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", True)
         self.view.refresh_selection_summary()
+
+    def apply_precheck_suggestions(self):
+        suggested_options = []
+        seen = set()
+        for row in self.last_precheck_results:
+            raw_ids = str(row.get("suggestion_ids", "") or "")
+            for option_id in [item.strip() for item in raw_ids.split(",") if item.strip()]:
+                if option_id in seen:
+                    continue
+                if option_id in self.view.all_checkboxes:
+                    suggested_options.append(option_id)
+                    seen.add(option_id)
+
+        if not suggested_options:
+            self.view.show_warning_message("⚠️ 无建议项", "最近一次预检没有可自动应用的建议处理项。")
+            return
+
+        self.view.is_applying_preset = True
+        try:
+            for option_id in suggested_options:
+                self.view.all_checkboxes[option_id].setChecked(True)
+        finally:
+            self.view.is_applying_preset = False
+
+        self.view.active_preset_key = None
+        self.view._set_preset_button_state(None)
+        self.view.custom_selection_before_preset = set(self.view.get_selected_options())
+        self.view.persist_all_settings()
+        self.view.refresh_selection_summary()
+        self.view.show_success_message("✅ 已应用", f"已自动勾选 {len(suggested_options)} 条预检建议规则。")
 
     def _wire_about_dialog_updates(self):
         if not ENABLE_UPDATE_CHECK:
@@ -1288,6 +1325,8 @@ class MainController(QObject):
         self.last_precheck_results = []
         self.view.btn_export_precheck.setProperty("hasPrecheckResults", False)
         self.view.btn_export_precheck.hide()
+        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
+        self.view.btn_apply_precheck.hide()
         self.process_logs += f"\n{'=' * 56}\n批量预检开始\n{'=' * 56}\n"
         self.view.btn_precheck.setEnabled(False)
         self.view.btn_precheck.setText("预检中...")
@@ -1620,7 +1659,7 @@ class MainController(QObject):
             file_path += ".csv"
 
         try:
-            fieldnames = ["file_name", "file_path", "status", "suggestions", "error"]
+            fieldnames = ["file_name", "file_path", "status", "suggestions", "suggestion_ids", "error"]
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
