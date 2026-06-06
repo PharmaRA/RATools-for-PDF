@@ -94,6 +94,216 @@ class PDFProcessor:
         "fast_web_view": "启用线性化 (快速网页浏览)",
     }
 
+    BASE14_FONT_NAMES = {
+        "Courier",
+        "Courier-Bold",
+        "Courier-Oblique",
+        "Courier-BoldOblique",
+        "Helvetica",
+        "Helvetica-Bold",
+        "Helvetica-Oblique",
+        "Helvetica-BoldOblique",
+        "Times-Roman",
+        "Times-Bold",
+        "Times-Italic",
+        "Times-BoldItalic",
+        "Symbol",
+        "ZapfDingbats",
+    }
+
+    @staticmethod
+    def _normalize_font_name(font_name):
+        name = str(font_name or "").strip()
+        if re.match(r"^[A-Z]{6}\+", name):
+            name = name.split("+", 1)[1]
+        return name
+
+    @staticmethod
+    def _is_base14_font(font_name):
+        return PDFProcessor._normalize_font_name(font_name) in PDFProcessor.BASE14_FONT_NAMES
+
+    @staticmethod
+    def _format_font_page_numbers(page_numbers):
+        parsed_pages = set()
+        for page in page_numbers:
+            try:
+                page_number = int(page)
+            except (TypeError, ValueError):
+                continue
+            if page_number > 0:
+                parsed_pages.add(page_number)
+
+        pages = sorted(parsed_pages)
+        if not pages:
+            return "页码未知"
+
+        ranges = []
+        start = pages[0]
+        prev = pages[0]
+        for page in pages[1:]:
+            if page == prev + 1:
+                prev = page
+                continue
+            ranges.append(f"{start}-{prev}" if start != prev else str(start))
+            start = page
+            prev = page
+        ranges.append(f"{start}-{prev}" if start != prev else str(start))
+        return f"第{','.join(ranges)}页"
+
+    @staticmethod
+    def _font_object_has_embedded_file(doc, xref, seen=None):
+        if not xref:
+            return False, False
+        if seen is None:
+            seen = set()
+        if xref in seen:
+            return False, True
+        seen.add(xref)
+
+        try:
+            obj = doc.xref_object(int(xref))
+        except Exception:
+            return False, False
+
+        if re.search(r"/FontFile(?:2|3)?\s+\d+\s+0\s+R", obj):
+            return True, True
+
+        refs = []
+        refs.extend(int(match) for match in re.findall(r"/FontDescriptor\s+(\d+)\s+0\s+R", obj))
+        refs.extend(int(match) for match in re.findall(r"/DescendantFonts\s*\[\s*(\d+)\s+0\s+R", obj))
+
+        known = True
+        for ref in refs:
+            embedded, child_known = PDFProcessor._font_object_has_embedded_file(doc, ref, seen)
+            known = known and child_known
+            if embedded:
+                return True, True
+        return False, known
+
+    @staticmethod
+    def _font_tuple_value(font_tuple, index):
+        if len(font_tuple) <= index:
+            return ""
+        return font_tuple[index]
+
+    @staticmethod
+    def _font_tuple_embedded_fallback(font_tuple):
+        ext = str(PDFProcessor._font_tuple_value(font_tuple, 1) or "").strip().lower()
+        if ext and ext not in {"n/a", "none", "null"}:
+            return True, True
+        if ext in {"n/a", "none", "null"}:
+            return False, True
+        return False, False
+
+    @staticmethod
+    def _collect_font_precheck_findings(doc):
+        fonts = {}
+        for page_index, page in enumerate(doc, start=1):
+            try:
+                page_fonts = page.get_fonts(full=True)
+            except Exception:
+                continue
+
+            for font_tuple in page_fonts:
+                original_name = str(PDFProcessor._font_tuple_value(font_tuple, 3) or "").strip()
+                if not original_name:
+                    original_name = str(PDFProcessor._font_tuple_value(font_tuple, 4) or "").strip()
+                normalized_name = PDFProcessor._normalize_font_name(original_name)
+                if not normalized_name:
+                    continue
+
+                try:
+                    xref = int(PDFProcessor._font_tuple_value(font_tuple, 0) or 0)
+                except Exception:
+                    xref = 0
+                embedded, known = PDFProcessor._font_object_has_embedded_file(doc, xref)
+                if not embedded and known:
+                    embedded, known = PDFProcessor._font_tuple_embedded_fallback(font_tuple)
+
+                entry = fonts.setdefault(normalized_name, {
+                    "font_name": original_name,
+                    "original_names": set(),
+                    "normalized_name": normalized_name,
+                    "pages": set(),
+                    "has_unembedded": False,
+                    "has_embedded": False,
+                    "embedding_unknown": False,
+                    "base14": PDFProcessor._is_base14_font(normalized_name),
+                })
+                entry["original_names"].add(original_name)
+                entry["pages"].add(page_index)
+                if not known:
+                    entry["embedding_unknown"] = True
+                elif embedded:
+                    entry["has_embedded"] = True
+                else:
+                    entry["has_unembedded"] = True
+
+        findings = []
+        for normalized_name, entry in sorted(fonts.items(), key=lambda item: item[0].lower()):
+            embedding_status_known = not entry["embedding_unknown"]
+            has_unembedded = entry["has_unembedded"]
+            has_unknown_embedding_status = entry["embedding_unknown"]
+            embedded = entry["has_embedded"] and not entry["has_unembedded"] and embedding_status_known
+            if entry["has_unembedded"]:
+                embedded = False
+            substitution_risk = bool((not entry["base14"]) and has_unembedded)
+
+            if embedded and entry["base14"] and not entry["embedding_unknown"]:
+                continue
+
+            findings.append({
+                "font_name": sorted(entry["original_names"])[0],
+                "original_names": sorted(entry["original_names"]),
+                "normalized_name": normalized_name,
+                "pages": sorted(entry["pages"]),
+                "embedded": embedded,
+                "base14": entry["base14"],
+                "substitution_risk": substitution_risk,
+                "embedding_status_known": embedding_status_known,
+                "has_unembedded": has_unembedded,
+                "has_unknown_embedding_status": has_unknown_embedding_status,
+            })
+
+        unembedded_count = sum(1 for item in findings if item["has_unembedded"])
+        non_base14_count = sum(1 for item in findings if not item["base14"])
+        risk_count = sum(1 for item in findings if item["substitution_risk"])
+        unknown_count = sum(1 for item in findings if item["has_unknown_embedding_status"])
+
+        summary_parts = []
+        if unembedded_count:
+            summary_parts.append(f"未嵌入字体 {unembedded_count} 个")
+        if non_base14_count:
+            summary_parts.append(f"非标准字体 {non_base14_count} 个")
+        if risk_count:
+            summary_parts.append(f"替代字体风险 {risk_count} 个")
+        if unknown_count:
+            summary_parts.append(f"嵌入状态未知字体 {unknown_count} 个")
+
+        detail_parts = []
+        for item in findings:
+            labels = []
+            if item["has_unembedded"]:
+                labels.append("未嵌入")
+            elif item["embedded"]:
+                labels.append("已嵌入")
+            else:
+                labels.append("嵌入状态未知")
+            if item["has_unknown_embedding_status"] and item["has_unembedded"]:
+                labels.append("嵌入状态未知")
+            labels.append("Base14" if item["base14"] else "非Base14")
+            if item["substitution_risk"]:
+                labels.append("替代风险")
+            detail_parts.append(
+                f"{item['normalized_name']}({PDFProcessor._format_font_page_numbers(item['pages'])}，{'，'.join(labels)})"
+            )
+
+        return {
+            "font_summary": "，".join(summary_parts),
+            "font_details": "; ".join(detail_parts),
+            "font_findings": findings,
+        }
+
     @staticmethod
     def _add_precheck_suggestion(suggestions, option_id, reason):
         if option_id in suggestions:
@@ -323,6 +533,9 @@ class PDFProcessor:
             "file_path": input_path,
             "file_name": os.path.basename(input_path),
             "suggestions": {},
+            "font_summary": "",
+            "font_details": "",
+            "font_findings": [],
             "error": "",
         }
 
@@ -604,6 +817,24 @@ class PDFProcessor:
                     "remove_pdf_restrictions",
                     "文档存在打印、复制或编辑权限限制",
                 )
+
+            try:
+                font_precheck = PDFProcessor._collect_font_precheck_findings(doc)
+                report["font_summary"] = font_precheck.get("font_summary", "")
+                report["font_details"] = font_precheck.get("font_details", "")
+                report["font_findings"] = font_precheck.get("font_findings", [])
+                if report["font_summary"]:
+                    reason = report["font_summary"]
+                    if report["font_details"]:
+                        reason = f"{reason}；明细：{report['font_details']}"
+                    PDFProcessor._add_precheck_report_finding(
+                        suggestions,
+                        "font_precheck_review",
+                        "字体预检：需要复核",
+                        reason,
+                    )
+            except Exception:
+                pass
 
             return report
         except Exception as e:

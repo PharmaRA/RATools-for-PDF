@@ -490,7 +490,10 @@ class PreCheckWorker(QThread):
                         "file_path": file_path,
                         "status": "预检失败",
                         "suggestions": "",
+                        "suggestion_ids": "",
                         "error": reason,
+                        "font_summary": "",
+                        "font_details": "",
                     })
                     self.progress.emit(
                         i,
@@ -531,6 +534,8 @@ class PreCheckWorker(QThread):
                         "suggestions": advice,
                         "suggestion_ids": suggestion_ids,
                         "error": "",
+                        "font_summary": report.get("font_summary", ""),
+                        "font_details": report.get("font_details", ""),
                     })
                     self.progress.emit(
                         i,
@@ -545,6 +550,8 @@ class PreCheckWorker(QThread):
                         "suggestions": "",
                         "suggestion_ids": "",
                         "error": "",
+                        "font_summary": report.get("font_summary", ""),
+                        "font_details": report.get("font_details", ""),
                     })
                     self.progress.emit(
                         i,
@@ -1126,7 +1133,16 @@ class MainController(QObject):
             ])
 
             report = PDFProcessor.build_precheck_report(path)
-            suggestions = [item.get("title", "") for item in report.get("suggestions", {}).values() if item.get("title")]
+            suggestions = []
+            for item in report.get("suggestions", {}).values():
+                title = item.get("title", "")
+                if not title:
+                    continue
+                reason = item.get("reason", "")
+                if item.get("report_only") and reason:
+                    suggestions.append(f"{title}：{reason}")
+                else:
+                    suggestions.append(title)
             details.append("")
             if suggestions:
                 details.append("🛠️ 建议处理：")
@@ -1957,11 +1973,24 @@ class MainController(QObject):
             file_path += ".csv"
 
         try:
-            fieldnames = ["file_name", "file_path", "status", "suggestions", "suggestion_ids", "error"]
+            fieldnames = [
+                "file_name",
+                "file_path",
+                "status",
+                "suggestions",
+                "suggestion_ids",
+                "error",
+                "font_summary",
+                "font_details",
+            ]
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(self.last_precheck_results)
+                rows = []
+                for row in self.last_precheck_results:
+                    export_row = {key: row.get(key, "") for key in fieldnames}
+                    rows.append(export_row)
+                writer.writerows(rows)
             self.view.show_success_message("✅ 导出成功", "预检结果已成功保存！")
         except Exception as e:
             self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
