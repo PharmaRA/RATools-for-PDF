@@ -6,7 +6,7 @@ import shutil
 import csv
 import json
 import re
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 from pathlib import Path
 
 from app_paths import get_resource_path
@@ -103,6 +103,142 @@ class PDFProcessor:
             "title": PDFProcessor.PRECHECK_OPTION_TITLES.get(option_id, option_id),
             "reason": reason,
         }
+
+    @staticmethod
+    def _add_precheck_report_finding(suggestions, finding_id, title, reason):
+        if finding_id in suggestions:
+            existing_reason = suggestions[finding_id].get("reason", "")
+            if reason and reason not in existing_reason:
+                suggestions[finding_id]["reason"] = f"{existing_reason}；{reason}" if existing_reason else reason
+            return
+        suggestions[finding_id] = {
+            "matched": True,
+            "title": title,
+            "reason": reason,
+            "report_only": True,
+        }
+
+    @staticmethod
+    def _resolve_external_file_target(base_dir, file_path):
+        raw_path = str(file_path or "").strip()
+        if not raw_path:
+            return "", "", False
+
+        parsed = urlparse(unquote(raw_path))
+        if parsed.scheme.lower() == "file":
+            if parsed.netloc:
+                file_part = f"//{parsed.netloc}{parsed.path}"
+            else:
+                file_part = parsed.path
+        else:
+            file_part = raw_path.split("#", 1)[0]
+
+        decoded_path = unquote(file_part).strip()
+        if not decoded_path:
+            return "", "", False
+        if re.match(r"^/[A-Za-z]:[\\/]", decoded_path):
+            decoded_path = decoded_path[1:]
+
+        is_absolute = (
+            os.path.isabs(decoded_path)
+            or bool(re.match(r"^[A-Za-z]:[\\/]", decoded_path))
+            or decoded_path.startswith("\\\\")
+            or decoded_path.startswith("//")
+        )
+        normalized_path = os.path.normpath(decoded_path.replace("\\", os.sep).replace("/", os.sep))
+        target_path = normalized_path if is_absolute else os.path.normpath(os.path.join(base_dir, normalized_path))
+        return decoded_path, target_path, not is_absolute
+
+    @staticmethod
+    def _read_target_pdf_page_count(target_path):
+        target_doc = None
+        try:
+            target_doc = fitz.open(target_path)
+            if target_doc.needs_pass:
+                return None
+            return target_doc.page_count
+        except Exception:
+            return None
+        finally:
+            if target_doc is not None:
+                try:
+                    target_doc.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, target_page=None, source_label="链接"):
+        link_file_kind = getattr(fitz, "LINK_FILE", None)
+        is_file_link = kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] or (
+            link_file_kind is not None and kind == link_file_kind
+        )
+        if not is_file_link:
+            return
+
+        if not str(file_path or "").strip():
+            finding_id = (
+                "link_target_integrity_gotor_missing_file"
+                if kind == fitz.LINK_GOTOR
+                else "link_target_integrity_missing_file"
+            )
+            title = (
+                "链接目标完整性检查：GoToR目标文件不存在"
+                if kind == fitz.LINK_GOTOR
+                else "链接目标完整性检查：外部文件链接目标不存在"
+            )
+            PDFProcessor._add_precheck_report_finding(
+                suggestions,
+                finding_id,
+                title,
+                f"{source_label} 未指定目标文件",
+            )
+            return
+
+        decoded_path, target_path, is_relative = PDFProcessor._resolve_external_file_target(base_dir, file_path)
+        if not decoded_path:
+            return
+
+        if not os.path.isfile(target_path):
+            if kind == fitz.LINK_GOTOR:
+                PDFProcessor._add_precheck_report_finding(
+                    suggestions,
+                    "link_target_integrity_gotor_missing_file",
+                    "链接目标完整性检查：GoToR目标文件不存在",
+                    f"{source_label} 指向的目标文件不存在: {decoded_path}",
+                )
+            else:
+                PDFProcessor._add_precheck_report_finding(
+                    suggestions,
+                    "link_target_integrity_missing_file",
+                    "链接目标完整性检查：外部文件链接目标不存在",
+                    f"{source_label} 指向的目标文件不存在: {decoded_path}",
+                )
+            if is_relative:
+                PDFProcessor._add_precheck_report_finding(
+                    suggestions,
+                    "link_target_integrity_broken_relative_path",
+                    "链接目标完整性检查：eCTD相对路径链接断链",
+                    f"{source_label} 指向的相对路径不存在: {decoded_path}",
+                )
+            return
+
+        if kind != fitz.LINK_GOTOR:
+            return
+
+        page_count = PDFProcessor._read_target_pdf_page_count(target_path)
+        if page_count is None:
+            return
+        try:
+            target_page_index = int(target_page if target_page is not None else 0)
+        except Exception:
+            target_page_index = -1
+        if target_page_index < 0 or target_page_index >= page_count:
+            PDFProcessor._add_precheck_report_finding(
+                suggestions,
+                "link_target_integrity_gotor_page_out_of_range",
+                "链接目标完整性检查：GoToR目标页码越界",
+                f"{source_label} 指向 {decoded_path} 的第 {target_page_index + 1} 页，超过目标文件页数 {page_count}",
+            )
 
     @staticmethod
     def _catalog_key(doc, catalog_xref, key):
@@ -206,6 +342,7 @@ class PDFProcessor:
                 return report
 
             report["available"] = True
+            base_dir = os.path.dirname(os.path.abspath(input_path))
             catalog_xref = doc.pdf_catalog()
             toc = doc.get_toc(simple=False)
             has_bookmarks = len(toc) > 0
@@ -286,6 +423,14 @@ class PDFProcessor:
                             "bookmark_open_new_window",
                             "部分外部文件书签未设置为新窗口打开",
                         )
+                    PDFProcessor._add_link_target_integrity_findings(
+                        suggestions,
+                        base_dir,
+                        kind,
+                        dest.get("file", ""),
+                        dest.get("page", 0),
+                        "书签",
+                    )
                     if kind == fitz.LINK_URI:
                         PDFProcessor._add_precheck_suggestion(
                             suggestions,
@@ -343,6 +488,14 @@ class PDFProcessor:
                             "link_open_new_window",
                             "部分外部文件链接未设置为新窗口打开",
                         )
+                    PDFProcessor._add_link_target_integrity_findings(
+                        suggestions,
+                        base_dir,
+                        kind,
+                        link.get("file", ""),
+                        link.get("page", 0),
+                        "页面链接",
+                    )
                     if kind == fitz.LINK_URI:
                         PDFProcessor._add_precheck_suggestion(
                             suggestions,

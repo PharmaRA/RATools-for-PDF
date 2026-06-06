@@ -470,6 +470,7 @@ class PreCheckWorker(QThread):
         try:
             started_at = datetime.now()
             suggested_files = 0
+            review_files = 0
             failed_files = 0
 
             for i, file_path in enumerate(self.files):
@@ -498,27 +499,43 @@ class PreCheckWorker(QThread):
                     )
                     continue
 
-                suggestions = list(report.get("suggestions", {}).values())
+                report_suggestions = report.get("suggestions", {})
+                suggestions = list(report_suggestions.values())
                 if suggestions:
-                    suggested_files += 1
-                    suggestion_ids = ",".join(report.get("suggestions", {}).keys())
-                    advice = "、".join(
-                        item.get("title", "")
-                        for item in suggestions
-                        if item.get("title")
-                    )
+                    actionable_ids = [
+                        option_id
+                        for option_id, item in report_suggestions.items()
+                        if not item.get("report_only")
+                    ]
+                    has_report_only = any(item.get("report_only") for item in suggestions)
+                    if actionable_ids:
+                        suggested_files += 1
+                    if has_report_only:
+                        review_files += 1
+                    suggestion_ids = ",".join(actionable_ids)
+                    status = "建议处理" if actionable_ids else "需要复核"
+                    advice_parts = []
+                    for item in suggestions:
+                        title = item.get("title", "")
+                        if not title:
+                            continue
+                        if item.get("report_only") and item.get("reason"):
+                            advice_parts.append(f"{title}：{item.get('reason')}")
+                        else:
+                            advice_parts.append(title)
+                    advice = "、".join(advice_parts)
                     self.result_ready.emit({
                         "file_name": base_name,
                         "file_path": file_path,
-                        "status": "建议处理",
+                        "status": status,
                         "suggestions": advice,
                         "suggestion_ids": suggestion_ids,
                         "error": "",
                     })
                     self.progress.emit(
                         i,
-                        "建议处理",
-                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 建议处理\n    建议: {advice}",
+                        status,
+                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    建议: {advice}",
                     )
                 else:
                     self.result_ready.emit({
@@ -539,6 +556,7 @@ class PreCheckWorker(QThread):
             summary = (
                 f"预检结束。共检查 {len(self.files)} 个文件，"
                 f"发现 {suggested_files} 个文件存在建议处理项，"
+                f"{review_files} 个文件需要人工复核，"
                 f"{failed_files} 个文件预检失败。总耗时 {elapsed_sec}s。"
             )
             self.finished_precheck.emit(summary)
@@ -744,7 +762,7 @@ class MainController(QObject):
         suggestion_ids = str(row.get("suggestion_ids", "") or "")
         if suggestion_ids.strip():
             self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", True)
-        if row.get("status") == "建议处理" and row.get("file_path"):
+        if row.get("status") == "建议处理" and row.get("file_path") and suggestion_ids.strip():
             file_path = row.get("file_path")
             if file_path not in self.last_precheck_suggested_files:
                 self.last_precheck_suggested_files.append(file_path)
@@ -1619,7 +1637,7 @@ class MainController(QObject):
             color = QColor(16, 185, 129)  # 绿色
         elif status_text in ["处理失败", "操作失败", "预检失败"]:
             color = QColor(239, 68, 68)  # 红色
-        elif status_text == "建议处理":
+        elif status_text in ["建议处理", "需要复核"]:
             color = QColor(245, 158, 11)  # 橙色
         elif status_text == "已停止":
             color = QColor(245, 158, 11)  # 橙色

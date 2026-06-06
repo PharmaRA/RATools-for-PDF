@@ -513,7 +513,7 @@ class LogDialog(FramelessDraggableDialog):
             tags.add("failure")
         if status in {"已跳过", "已停止", "未匹配跳过"}:
             tags.add("skip")
-        if status in {"建议处理", "无需处理", "预检失败"} or "预检" in block_text:
+        if status in {"建议处理", "需要复核", "无需处理", "预检失败"} or "预检" in block_text:
             tags.add("precheck")
 
         return {
