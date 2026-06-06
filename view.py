@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
-    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit
+    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
@@ -598,7 +598,7 @@ class LogDialog(FramelessDraggableDialog):
 class SettingsDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("⚙️ 全局设置", parent)
-        self.resize(520, 320)
+        self.resize(560, 420)
 
         self.content_layout.setSpacing(16)
 
@@ -615,6 +615,19 @@ class SettingsDialog(FramelessDraggableDialog):
         self.cb_overwrite = QCheckBox("覆盖原始文件 (不推荐)")
         self.cb_overwrite.setChecked(False)
         self.cb_overwrite.setStyleSheet(cb_style.replace("color: #374151;", "color: #EF4444;"))
+
+        self.cb_parallel_processing = QCheckBox("启用并行处理")
+        self.cb_parallel_processing.setChecked(False)
+        self.cb_parallel_processing.setStyleSheet(cb_style)
+
+        self.parallel_max_workers = max(2, min(os.cpu_count() or 2, 4))
+        self.spin_parallel_workers = QSpinBox()
+        self.spin_parallel_workers.setRange(2, self.parallel_max_workers)
+        self.spin_parallel_workers.setValue(2)
+        self.spin_parallel_workers.setEnabled(False)
+        self.spin_parallel_workers.setObjectName("settingsWorkerSpin")
+        self.spin_parallel_workers.setSuffix(" 个任务")
+        self.cb_parallel_processing.toggled.connect(self.spin_parallel_workers.setEnabled)
 
         title = QLabel("默认保存位置")
         title.setObjectName("dialogSectionTitle")
@@ -661,6 +674,35 @@ class SettingsDialog(FramelessDraggableDialog):
         danger_hint.setWordWrap(True)
         danger_hint.setObjectName("dangerHint")
         self.content_layout.addWidget(danger_hint)
+
+        title = QLabel("处理性能")
+        title.setObjectName("dialogSectionTitle")
+        self.content_layout.addWidget(title)
+
+        parallel_card = QFrame()
+        parallel_card.setObjectName("settingsPathCard")
+        parallel_layout = QVBoxLayout(parallel_card)
+        parallel_layout.setContentsMargins(12, 12, 12, 12)
+        parallel_layout.setSpacing(10)
+
+        parallel_hint = QLabel("并行处理会同时处理多个 PDF。建议从 2 个任务开始，异常文件可在队列中选中后单独终止。")
+        parallel_hint.setWordWrap(True)
+        parallel_hint.setObjectName("settingsPathHint")
+        parallel_layout.addWidget(parallel_hint)
+
+        parallel_layout.addWidget(self.cb_parallel_processing)
+
+        worker_row = QHBoxLayout()
+        worker_row.setContentsMargins(24, 0, 0, 0)
+        worker_row.setSpacing(8)
+        worker_label = QLabel("并行数量")
+        worker_label.setObjectName("settingsPathHint")
+        worker_row.addWidget(worker_label)
+        worker_row.addWidget(self.spin_parallel_workers)
+        worker_row.addStretch()
+        parallel_layout.addLayout(worker_row)
+
+        self.content_layout.addWidget(parallel_card)
 
         self.content_layout.addStretch()
 
@@ -1348,6 +1390,9 @@ class MainWindow(QMainWindow):
             for j, opt in enumerate(mod["options"]):
                 self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
 
+        self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
+        self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
+
         self.load_all_settings()
         self.refresh_selection_summary()
 
@@ -1424,6 +1469,15 @@ class MainWindow(QMainWindow):
         default_output_dir = str(self.app_settings.value("Settings/DefaultOutputDir", "") or "")
         self.settings_dialog.default_output_edit.setText(default_output_dir)
 
+        parallel_enabled = str(self.app_settings.value("Settings/ParallelProcessingEnabled", "false")).lower() == 'true'
+        try:
+            parallel_workers = int(self.app_settings.value("Settings/ParallelWorkerCount", 2))
+        except Exception:
+            parallel_workers = 2
+        self.settings_dialog.spin_parallel_workers.setValue(parallel_workers)
+        self.settings_dialog.cb_parallel_processing.setChecked(parallel_enabled)
+        self.settings_dialog.spin_parallel_workers.setEnabled(parallel_enabled)
+
         # 兼容旧版本：如果用户之前勾选过“中文/英文字体嵌入”，迁移到新的统一选项
         merged_font_opt = self.all_checkboxes.get("embed_nonstandard_fonts")
         if merged_font_opt and not merged_font_opt.isChecked():
@@ -1450,6 +1504,14 @@ class MainWindow(QMainWindow):
             if key:
                 self.app_settings.setValue(key, cb.isChecked())
         self.app_settings.setValue("Settings/DefaultOutputDir", self.settings_dialog.default_output_edit.text().strip())
+        self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
+        self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
+
+    def persist_parallel_settings(self):
+        if not hasattr(self, "app_settings"):
+            return
+        self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
+        self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
 
     def persist_current_checkbox(self, checkbox):
         if not hasattr(self, "app_settings"):

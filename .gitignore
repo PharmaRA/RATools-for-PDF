@@ -9,3 +9,4 @@ settings.ini
 /.worktrees
 test_*
 /docs
+/tests

@@ -60,10 +60,9 @@ def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, 
 
 def _render_logs_as_csv_rows(log_text):
     rows = []
-    current_original_file = ""
-    current_output_file = ""
-    current_time = ""
-    current_start_seconds = None
+    starts_by_file = {}
+    pending_result = None
+    last_start_file = None
 
     def _time_to_seconds(value):
         try:
@@ -79,38 +78,66 @@ def _render_logs_as_csv_rows(log_text):
 
         start_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]\s+开始处理:\s+(.+)$", line)
         if start_match:
-            current_time = start_match.group(1)
-            current_start_seconds = _time_to_seconds(current_time)
-            current_original_file = start_match.group(2)
-            current_output_file = ""
+            start_time = start_match.group(1)
+            original_file = start_match.group(2)
+            starts_by_file[original_file] = {
+                "seconds": _time_to_seconds(start_time),
+                "output": original_file,
+            }
+            last_start_file = original_file
+            continue
+
+        output_match = re.match(r"^\s+输出文件:\s+(.+)$", line)
+        if output_match:
+            output_file = output_match.group(1)
+            if pending_result:
+                pending_result["file_output"] = output_file
+            elif last_start_file in starts_by_file:
+                starts_by_file[last_start_file]["output"] = output_file
+            elif rows:
+                rows[-1]["file_output"] = output_file
             continue
 
         result_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]\s+(.+)$", line)
-        if result_match and "开始处理:" not in line and current_original_file:
-            current_time = result_match.group(1)
-            current_output_file = result_match.group(2)
+        if result_match and "开始处理:" not in line:
+            result_time = result_match.group(1)
+            output_file = result_match.group(2)
+            if output_file not in starts_by_file:
+                pending_result = None
+                last_start_file = None
+                continue
+            start_info = starts_by_file[output_file]
+            pending_result = {
+                "time": result_time,
+                "file_original": output_file,
+                "file_output": start_info.get("output") or output_file,
+                "start_seconds": start_info.get("seconds"),
+            }
+            last_start_file = None
             continue
 
         status_match = re.match(r"^\s+状态:\s+(.+)$", line)
-        if status_match:
+        if status_match and pending_result:
             status_value = status_match.group(1)
-            end_seconds = _time_to_seconds(current_time)
+            end_seconds = _time_to_seconds(pending_result["time"])
             duration_sec = ""
-            if current_start_seconds is not None and end_seconds is not None:
-                delta = end_seconds - current_start_seconds
+            if pending_result["start_seconds"] is not None and end_seconds is not None:
+                delta = end_seconds - pending_result["start_seconds"]
                 if delta < 0:
                     delta += 24 * 3600
                 duration_sec = delta
 
             rows.append({
-                "time": current_time,
-                "file_original": current_original_file,
-                "file_output": current_output_file or current_original_file,
+                "time": pending_result["time"],
+                "file_original": pending_result["file_original"],
+                "file_output": pending_result["file_output"],
                 "status": status_value,
                 "success": "true" if status_value == "处理完成" else "false",
                 "duration_sec": duration_sec,
                 "changes": "",
             })
+            starts_by_file.pop(pending_result["file_original"], None)
+            pending_result = None
             continue
 
         result_line_match = re.match(r"^\s+结果:\s+(.+)$", line)
@@ -130,16 +157,19 @@ class ProcessWorker(QThread):
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
-    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False):
+    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1):
         super().__init__()
         self.files = files
         self.options = options
         self.output_dir = output_dir
         self.common_base = common_base
         self.overwrite_original = overwrite_original
+        self.max_workers = max(1, int(max_workers or 1))
         self._stop_requested = False
         self._skip_requested = False
+        self._skip_requested_files = set()
         self._can_skip_current = False
+        self._current_file_path = ""
 
     def request_stop(self):
         self._stop_requested = True
@@ -148,7 +178,136 @@ class ProcessWorker(QThread):
         if self._can_skip_current:
             self._skip_requested = True
 
+    def request_skip_file(self, file_path):
+        if file_path:
+            self._skip_requested_files.add(os.path.normcase(os.path.normpath(file_path)))
+
     def run(self):
+        if self.max_workers <= 1:
+            self._run_serial()
+        else:
+            self._run_parallel()
+
+    def _build_output_path(self, index, file_path, rename_ectd):
+        base_name = os.path.basename(file_path)
+        if rename_ectd:
+            name, ext = os.path.splitext(base_name)
+            name = name.lower().replace(" ", "-")
+            name = re.sub(r'[^a-z0-9_-]', '', name)
+            if not name:
+                name = f"doc_{index + 1:03d}"
+            base_name = f"{name}{ext.lower()}"
+
+        if self.overwrite_original:
+            return base_name, file_path + ".tmp_overwrite.pdf"
+
+        if self.common_base:
+            file_dir = os.path.dirname(os.path.abspath(file_path))
+            rel_dir = os.path.relpath(file_dir, self.common_base)
+            if rel_dir == '.':
+                target_dir = self.output_dir
+            else:
+                target_dir = os.path.join(self.output_dir, rel_dir)
+        else:
+            target_dir = self.output_dir
+
+        os.makedirs(target_dir, exist_ok=True)
+        return base_name, os.path.join(target_dir, base_name)
+
+    def _start_process_task(self, index, file_path, rename_ectd):
+        base_name, out_path = self._build_output_path(index, file_path, rename_ectd)
+        self.progress.emit(
+            index,
+            "正在处理...",
+            f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
+        )
+        parent_conn, child_conn = mp.Pipe(duplex=False)
+        proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, child_conn))
+        proc.start()
+        child_conn.close()
+        return {
+            "index": index,
+            "file_path": file_path,
+            "base_name": base_name,
+            "out_path": out_path,
+            "parent_conn": parent_conn,
+            "proc": proc,
+        }
+
+    def _terminate_process_task(self, task):
+        proc = task["proc"]
+        if proc.is_alive():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        proc.join(timeout=2)
+        if proc.is_alive():
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            proc.join(timeout=1)
+
+    def _join_process_task(self, task):
+        proc = task["proc"]
+        proc.join(timeout=2)
+        if proc.is_alive():
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            proc.join(timeout=1)
+
+    def _remove_partial_output(self, out_path):
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+
+    def _close_task_connection(self, task):
+        try:
+            task["parent_conn"].close()
+        except Exception:
+            pass
+
+    def _finish_process_task(self, task, success, msg):
+        out_path = task["out_path"]
+        if success and self.overwrite_original:
+            try:
+                os.replace(out_path, task["file_path"])
+                out_path = task["file_path"]
+            except Exception as e:
+                success = False
+                msg = f"覆盖原文件失败: {str(e)}"
+                self._remove_partial_output(task["out_path"])
+
+        status = "处理完成" if success else "处理失败"
+        self.progress.emit(
+            task["index"],
+            status,
+            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}",
+        )
+        return success
+
+    def _emit_stopped_task(self, task):
+        self._remove_partial_output(task["out_path"])
+        self.progress.emit(
+            task["index"],
+            "已停止",
+            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: 用户手动停止处理",
+        )
+
+    def _emit_skipped_task(self, task, reason="已跳过当前文件"):
+        self._remove_partial_output(task["out_path"])
+        self.progress.emit(
+            task["index"],
+            "已跳过",
+            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: 已跳过\n    输出文件: {task['out_path']}\n    原因: {reason}",
+        )
+
+    def _run_serial(self):
         try:
             started_at = datetime.now()
             success_count = 0
@@ -160,91 +319,43 @@ class ProcessWorker(QThread):
                     stopped = True
                     break
 
-                base_name = os.path.basename(file_path)
-                self.progress.emit(i, "正在处理...", f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {base_name}")
-
-                # eCTD 命名合规处理
-                if rename_ectd:
-                    name, ext = os.path.splitext(base_name)
-                    name = name.lower().replace(" ", "-")
-                    name = re.sub(r'[^a-z0-9_-]', '', name)
-                    if not name:
-                        name = f"doc_{i + 1:03d}"
-                    base_name = f"{name}{ext.lower()}"
-
-                # 决定输出路径 (支持保留原有文件夹层级结构)
-                if self.overwrite_original:
-                    out_path = file_path + ".tmp_overwrite.pdf"
-                else:
-                    if self.common_base:
-                        file_dir = os.path.dirname(os.path.abspath(file_path))
-                        rel_dir = os.path.relpath(file_dir, self.common_base)
-                        if rel_dir == '.':
-                            target_dir = self.output_dir
-                        else:
-                            target_dir = os.path.join(self.output_dir, rel_dir)
-                    else:
-                        target_dir = self.output_dir
-
-                    os.makedirs(target_dir, exist_ok=True)
-                    out_path = os.path.join(target_dir, base_name)
-
-                parent_conn, child_conn = mp.Pipe(duplex=False)
-                proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, child_conn))
-                proc.start()
-                child_conn.close()
+                task = self._start_process_task(i, file_path, rename_ectd)
+                base_name = task["base_name"]
+                out_path = task["out_path"]
+                parent_conn = task["parent_conn"]
+                proc = task["proc"]
 
                 success, msg = False, "处理中断"
                 skipped_current = False
                 self._can_skip_current = True
+                self._current_file_path = file_path
                 while proc.is_alive():
                     if self._stop_requested:
                         stopped = True
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
+                        self._terminate_process_task(task)
                         break
 
                     if self._skip_requested:
                         skipped_current = True
                         self._skip_requested = False
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
+                        self._terminate_process_task(task)
                         break
 
                     if parent_conn.poll(1.0):
                         break
 
-                proc.join(timeout=2)
-                if proc.is_alive():
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    proc.join(timeout=1)
+                self._join_process_task(task)
                 self._can_skip_current = False
+                self._current_file_path = ""
 
                 if stopped:
-                    if os.path.exists(out_path):
-                        try:
-                            os.remove(out_path)
-                        except Exception:
-                            pass
-                    self.progress.emit(i, "已停止", f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: ⏹️ 用户手动停止处理")
-                    parent_conn.close()
+                    self._emit_stopped_task(task)
+                    self._close_task_connection(task)
                     break
 
                 if skipped_current:
-                    if os.path.exists(out_path):
-                        try:
-                            os.remove(out_path)
-                        except Exception:
-                            pass
-                    self.progress.emit(i, "已跳过", f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: ⏭ 已跳过当前文件")
-                    parent_conn.close()
+                    self._emit_skipped_task(task)
+                    self._close_task_connection(task)
                     continue
 
                 if parent_conn.poll():
@@ -253,23 +364,82 @@ class ProcessWorker(QThread):
                     success, msg = False, "处理进程无返回结果"
                 parent_conn.close()
 
-                if success and self.overwrite_original:
-                    try:
-                        os.replace(out_path, file_path)
-                        out_path = file_path
-                    except Exception as e:
-                        success = False
-                        msg = f"覆盖原文件失败: {str(e)}"
-                        if os.path.exists(out_path):
-                            os.remove(out_path)
-
-                if success:
+                if self._finish_process_task(task, success, msg):
                     success_count += 1
-                    status = "处理完成"
-                else:
-                    status = "处理失败"
 
-                self.progress.emit(i, status, f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    结果: {msg}")
+            if stopped:
+                summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
+            else:
+                summary = f"处理结束。共成功处理 {success_count} / {len(self.files)} 个文件。"
+            elapsed_sec = int((datetime.now() - started_at).total_seconds())
+            summary += f" 总耗时 {elapsed_sec}s。"
+            self.finished_all.emit(summary)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def _run_parallel(self):
+        try:
+            started_at = datetime.now()
+            success_count = 0
+            rename_ectd = "filename_ectd_format" in self.options
+            stopped = False
+            next_index = 0
+            running = {}
+
+            while next_index < len(self.files) or running:
+                while not self._stop_requested and next_index < len(self.files) and len(running) < self.max_workers:
+                    file_path = self.files[next_index]
+                    task = self._start_process_task(next_index, file_path, rename_ectd)
+                    running[os.path.normcase(os.path.normpath(file_path))] = task
+                    next_index += 1
+
+                if self._stop_requested:
+                    stopped = True
+                    for key, task in list(running.items()):
+                        self._terminate_process_task(task)
+                        self._emit_stopped_task(task)
+                        self._close_task_connection(task)
+                        running.pop(key, None)
+                    break
+
+                for skip_key in list(self._skip_requested_files):
+                    task = running.pop(skip_key, None)
+                    self._skip_requested_files.discard(skip_key)
+                    if not task:
+                        continue
+                    self._terminate_process_task(task)
+                    self._emit_skipped_task(task, "用户终止选中文件")
+                    self._close_task_connection(task)
+
+                finished_keys = []
+                for key, task in list(running.items()):
+                    parent_conn = task["parent_conn"]
+                    proc = task["proc"]
+                    if parent_conn.poll():
+                        success, msg = parent_conn.recv()
+                    elif not proc.is_alive():
+                        success, msg = False, "处理进程无返回结果"
+                    else:
+                        continue
+
+                    proc.join(timeout=2)
+                    if proc.is_alive():
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        proc.join(timeout=1)
+                    self._close_task_connection(task)
+                    if self._finish_process_task(task, success, msg):
+                        success_count += 1
+                    finished_keys.append(key)
+
+                for key in finished_keys:
+                    running.pop(key, None)
+
+                if running and not finished_keys:
+                    self.msleep(100)
 
             if stopped:
                 summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
@@ -484,6 +654,8 @@ class MainController(QObject):
         self.processing_done_paths = set()
         self.processing_files = []
         self.processing_current_file = ""
+        self.processing_parallel_mode = False
+        self.processing_worker_count = 1
         self._last_processing_hint = ""
         self.last_failed_files = []
         self.last_precheck_suggested_files = []
@@ -549,6 +721,23 @@ class MainController(QObject):
         self.precheck_result_current = False
         self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_precheck.show()
+
+    def _get_processing_worker_count(self):
+        settings_dialog = self.view.settings_dialog
+        if not settings_dialog.cb_parallel_processing.isChecked():
+            return 1
+        try:
+            worker_count = max(2, int(settings_dialog.spin_parallel_workers.value()))
+        except Exception:
+            worker_count = 2
+        max_workers = getattr(settings_dialog, "parallel_max_workers", None)
+        if max_workers is None and hasattr(settings_dialog.spin_parallel_workers, "maximum"):
+            max_workers = settings_dialog.spin_parallel_workers.maximum()
+        try:
+            max_workers = max(2, int(max_workers))
+        except Exception:
+            max_workers = worker_count
+        return min(worker_count, max_workers)
 
     def _record_precheck_result(self, row):
         self.last_precheck_results.append(dict(row))
@@ -1256,6 +1445,9 @@ class MainController(QObject):
 
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
+        max_workers = self._get_processing_worker_count()
+        self.processing_parallel_mode = max_workers > 1
+        self.processing_worker_count = max_workers
         out_dir = ""
         common_base = ""
 
@@ -1295,6 +1487,12 @@ class MainController(QObject):
         self.view.btn_precheck.hide()
         self.view.btn_skip_current.show()
         self.view.btn_skip_current.setEnabled(True)
+        if self.processing_parallel_mode:
+            self.view.btn_skip_current.setText("⏹ 终止选中文件")
+            self.view.btn_skip_current.setToolTip("选中队列中正在处理的 PDF 后，只终止该文件")
+        else:
+            self.view.btn_skip_current.setText("⏭ 跳过当前文件")
+            self.view.btn_skip_current.setToolTip("跳过当前正在处理的文件")
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
 
@@ -1317,7 +1515,14 @@ class MainController(QObject):
         self._refresh_processing_hint()
         self.processing_timer.start()
 
-        self.worker = ProcessWorker(processing_files, selected_options, out_dir, common_base, overwrite_original)
+        self.worker = ProcessWorker(
+            processing_files,
+            selected_options,
+            out_dir,
+            common_base,
+            overwrite_original,
+            max_workers=max_workers,
+        )
         self.worker.progress.connect(self.update_progress)
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
@@ -1453,7 +1658,7 @@ class MainController(QObject):
 
         if status_text == "正在处理..." and file_path:
             self.processing_current_file = os.path.basename(file_path)
-        elif status_text in ["处理完成", "处理失败", "已停止"]:
+        elif status_text in ["处理完成", "处理失败", "已停止", "已跳过"]:
             self.processing_current_file = ""
 
         if log_msg:
@@ -1527,6 +1732,8 @@ class MainController(QObject):
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
+        self.view.btn_skip_current.setText("⏭ 跳过当前文件")
+        self.view.btn_skip_current.setToolTip("")
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
         self.view.refresh_selection_summary()
@@ -1536,6 +1743,8 @@ class MainController(QObject):
         self.processing_done_paths.clear()
         self.processing_files = []
         self.processing_current_file = ""
+        self.processing_parallel_mode = False
+        self.processing_worker_count = 1
         self._last_processing_hint = ""
 
         if "任务已停止" in summary:
@@ -1561,6 +1770,8 @@ class MainController(QObject):
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
+        self.view.btn_skip_current.setText("⏭ 跳过当前文件")
+        self.view.btn_skip_current.setToolTip("")
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
         self.view.refresh_selection_summary()
@@ -1570,6 +1781,8 @@ class MainController(QObject):
         self.processing_done_paths.clear()
         self.processing_files = []
         self.processing_current_file = ""
+        self.processing_parallel_mode = False
+        self.processing_worker_count = 1
         self._last_processing_hint = ""
         self.view.show_error_message("❌ 处理异常", f"处理过程中发生错误：\n{error_msg}")
 
@@ -1586,7 +1799,9 @@ class MainController(QObject):
         hint = f"处理中 {elapsed}s · {done}/{total} · {percent}%"
 
         current_name = self.processing_current_file
-        if status_text == "正在处理..." and file_path:
+        if self.processing_parallel_mode:
+            current_name = f"并行 {self.processing_worker_count} 个任务"
+        elif status_text == "正在处理..." and file_path:
             current_name = os.path.basename(file_path)
         if current_name:
             hint += f" · {current_name}"
@@ -1596,8 +1811,30 @@ class MainController(QObject):
             self._last_processing_hint = hint
 
     def skip_current_file(self):
-        if self.worker and self.worker.isRunning():
+        if not (self.worker and self.worker.isRunning()):
+            return
+
+        if not self.processing_parallel_mode:
             self.worker.request_skip_current()
+            return
+
+        selected_items = self.view.tree.selectedItems()
+        if not selected_items:
+            self.view.show_warning_message("⚠️ 未选择文件", "请先在左侧队列选中一个正在处理的 PDF。")
+            return
+
+        requested = 0
+        for item in selected_items:
+            file_path = item.text(1)
+            status_text = item.text(2)
+            if file_path and status_text == "正在处理...":
+                self.worker.request_skip_file(file_path)
+                requested += 1
+
+        if requested:
+            return
+
+        self.view.show_warning_message("⚠️ 未选择正在处理的文件", "请选择状态为“正在处理...”的 PDF 后再终止。")
 
     def on_io_action_finished(self, result_msg):
         self.process_logs += f"\n{'-' * 56}\n{result_msg}\n{'-' * 56}\n"
