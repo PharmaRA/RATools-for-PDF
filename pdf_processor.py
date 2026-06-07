@@ -937,6 +937,9 @@ class PDFProcessor:
                 return False, f"字体修复后验证失败：{after.get('error') or '无法读取PDF'}", False
             if PDFProcessor._font_precheck_has_embedding_risk(after):
                 detail = after.get("font_details") or after.get("font_summary") or "仍存在字体嵌入风险"
+                provider_detail = result.message.strip() if result.message else ""
+                if provider_detail:
+                    return False, f"{result.provider_name} 返回成功，但后验证未通过：{detail}；后端返回：{provider_detail}", False
                 return False, f"{result.provider_name} 返回成功，但后验证未通过：{detail}", False
 
             os.replace(temp_output, pdf_path)
@@ -1566,7 +1569,7 @@ class PDFProcessor:
     def process_document(input_path, output_path, options):
         try:
             options = set(options or [])
-            font_embedding_requested = "embed_nonstandard_fonts" in options
+            # 字体嵌入改为 UI 里的 Acrobat 手动交接按钮；批处理只忽略旧配置残留。
             options.discard("embed_nonstandard_fonts")
 
             doc = fitz.open(input_path)
@@ -2115,13 +2118,6 @@ class PDFProcessor:
                         PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
                 else:
                     shutil.copy2(input_path, output_path)
-
-            if font_embedding_requested:
-                font_ok, font_msg, font_changed = PDFProcessor._run_font_embedding_workflow(output_path)
-                if not font_ok:
-                    return False, f"❌ 字体修复工作流失败: {font_msg}"
-                if font_changed:
-                    PDFProcessor._mark_change(applied_changes, "字体修复后验证通过")
 
             if applied_changes:
                 return True, f"✅ 处理成功；修改项：{PDFProcessor._format_change_summary(change_counts, applied_changes)}"

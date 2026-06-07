@@ -378,6 +378,79 @@ class CustomMessageBox(FramelessDraggableDialog):
         self.content_layout.addLayout(btn_layout)
 
 
+class ManualFontEmbeddingDialog(FramelessDraggableDialog):
+    def __init__(self, pdf_paths, open_callback, parent=None):
+        super().__init__("🛠 手动嵌入缺失字体", parent)
+        self.resize(520, 360)
+        self.pdf_paths = list(pdf_paths or [])
+        self.open_callback = open_callback
+
+        intro = QLabel(
+            "请在 Acrobat 中手动执行印前检查来嵌入缺失字体。\n"
+            "点击下方按钮后会打开选中的 PDF，对话框会保持打开，便于你对照步骤操作。"
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #374151; font-size: 13px; line-height: 1.5;")
+        self.content_layout.addWidget(intro)
+
+        steps = QLabel(
+            "操作路径：\n"
+            "1. 所有工具 > 印刷制作 > 印前检查\n"
+            "2. 选择“嵌入缺失的字体”\n"
+            "3. 点击修复并保存\n"
+            "4. 回到 RATools 重新预检确认字体风险是否消失"
+        )
+        steps.setWordWrap(True)
+        steps.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        steps.setStyleSheet(
+            "color: #334155; font-size: 12px; border: 1px solid #E2E8F0; "
+            "background-color: #F8FAFC; border-radius: 8px; padding: 10px; "
+            "font-family: Consolas, 'Courier New', monospace; line-height: 1.5;"
+        )
+        self.content_layout.addWidget(steps)
+
+        file_count = len(self.pdf_paths)
+        self.status_label = QLabel(f"已选中 {file_count} 个 PDF。")
+        self.status_label.setWordWrap(True)
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.status_label.setStyleSheet("color: #64748B; font-size: 12px;")
+        self.content_layout.addWidget(self.status_label)
+        self.content_layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        btn_layout.addStretch()
+
+        self.btn_open_acrobat = QPushButton("打开 Acrobat")
+        self.btn_open_acrobat.setObjectName("dialogPrimaryBtn")
+        self.btn_open_acrobat.setFixedHeight(32)
+        self.btn_open_acrobat.clicked.connect(self.open_acrobat)
+
+        self.btn_close = QPushButton("关闭")
+        self.btn_close.setObjectName("dialogSecondaryBtn")
+        self.btn_close.setFixedHeight(32)
+        self.btn_close.clicked.connect(self.accept)
+
+        btn_layout.addWidget(self.btn_open_acrobat)
+        btn_layout.addWidget(self.btn_close)
+        self.content_layout.addLayout(btn_layout)
+
+    def open_acrobat(self):
+        if not self.open_callback:
+            self.status_label.setText("无法打开 Acrobat：缺少打开回调。")
+            return
+        self.btn_open_acrobat.setEnabled(False)
+        try:
+            ok, message = self.open_callback()
+        except Exception as exc:
+            ok, message = False, f"无法打开 Acrobat：{exc}"
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(
+            "color: #047857; font-size: 12px;" if ok else "color: #B91C1C; font-size: 12px;"
+        )
+        self.btn_open_acrobat.setEnabled(True)
+
+
 class LogDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("📝 处理日志记录", parent)
@@ -967,8 +1040,7 @@ class MainWindow(QMainWindow):
                 "title": "页面与字体标准化",
                 "options": [
                     {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到A4纸张尺寸，尽量保留全部内容"},
-                    {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"},
-                    {"id": "embed_nonstandard_fonts", "title": "字体修复工作流：Acrobat Pro Preflight", "desc": "先执行字体风险预检；有风险时调用 Acrobat Pro Preflight 外部后端；处理后强制复检，风险未消失则判定失败"}
+                    {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"}
                 ]
             },
             {
@@ -1220,6 +1292,10 @@ class MainWindow(QMainWindow):
         self.btn_import_bookmarks = QPushButton("📥 批量导入书签 (CSV)")
         self.btn_export_links = QPushButton("📤 批量导出链接 (JSON)")
         self.btn_import_links = QPushButton("📥 批量导入链接 (JSON)")
+        self.btn_embed_missing_fonts = QPushButton("🛠 嵌入缺失字体")
+        self.btn_embed_missing_fonts.setObjectName("secondaryBtn")
+        self.btn_embed_missing_fonts.setCursor(Qt.PointingHandCursor)
+        self.btn_embed_missing_fonts.setToolTip("打开选中的 PDF，并在 Acrobat 中手动执行印前检查的“嵌入缺失的字体”。")
 
         for btn in [self.btn_export_bookmarks, self.btn_import_bookmarks, self.btn_export_links, self.btn_import_links]:
             btn.setStyleSheet(btn_style)
@@ -1234,7 +1310,16 @@ class MainWindow(QMainWindow):
             for opt in mod["options"]:
                 page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
-            if mod["title"] == "书签管理":
+            if mod["title"] == "页面与字体标准化":
+                page_layout.addSpacing(12)
+                page_layout.addWidget(self._create_section_label("字体手动处理"))
+                font_action_hint = QLabel("如预检提示存在未嵌入字体，请先选中左侧 PDF，再点击下面的按钮跳转 Acrobat 进行处理。")
+                font_action_hint.setWordWrap(True)
+                font_action_hint.setStyleSheet("color: #6B7280; font-size: 11px;")
+                page_layout.addWidget(font_action_hint)
+                page_layout.addWidget(self.btn_embed_missing_fonts)
+
+            elif mod["title"] == "书签管理":
                 page_layout.addSpacing(12)
                 page_layout.addWidget(self._create_section_label("导出/导入书签"))
                 btn_layout = QVBoxLayout()
@@ -1408,6 +1493,10 @@ class MainWindow(QMainWindow):
     def show_error_message(self, title, message):
         CustomMessageBox(title, message, msg_type="error", parent=self).exec()
 
+    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
+        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
+        dlg.exec()
+
     def show_confirm_message(self, title, message):
         dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
         return dlg.exec() == QDialog.Accepted
@@ -1478,13 +1567,6 @@ class MainWindow(QMainWindow):
         self.settings_dialog.cb_parallel_processing.setChecked(parallel_enabled)
         self.settings_dialog.spin_parallel_workers.setEnabled(parallel_enabled)
 
-        # 兼容旧版本：如果用户之前勾选过“中文/英文字体嵌入”，迁移到新的统一选项
-        merged_font_opt = self.all_checkboxes.get("embed_nonstandard_fonts")
-        if merged_font_opt and not merged_font_opt.isChecked():
-            old_cn = str(self.app_settings.value("Modules/Mod_1_Opt_2", "false")).lower() == 'true'
-            old_en = str(self.app_settings.value("Modules/Mod_1_Opt_3", "false")).lower() == 'true'
-            if old_cn or old_en:
-                merged_font_opt.setChecked(True)
         self.is_applying_preset = False
 
         # 默认恢复上次会话的勾选状态（自定义），不自动套用预设

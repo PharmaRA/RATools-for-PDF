@@ -723,6 +723,9 @@ class MainController(QObject):
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(lambda _checked=False: self.start_processing())
         self.view.btn_log.clicked.connect(self.show_log_dialog)
+        btn_embed_missing_fonts = getattr(self.view, "btn_embed_missing_fonts", None)
+        if btn_embed_missing_fonts is not None:
+            btn_embed_missing_fonts.clicked.connect(self.open_selected_files_in_acrobat_for_font_embedding)
         if ENABLE_UPDATE_CHECK:
             self.view.btn_top_about.clicked.connect(self._wire_about_dialog_updates)
 
@@ -881,6 +884,125 @@ class MainController(QObject):
 
         if not opened:
             self.view.show_error_message("打开失败", "无法打开发布页：浏览器拒绝打开链接")
+
+    @staticmethod
+    def _extract_executable_from_open_command(command):
+        command = str(command or "").strip()
+        if not command:
+            return ""
+        quoted = re.match(r'^\s*"([^"]+?\.exe)"', command, flags=re.IGNORECASE)
+        if quoted:
+            return quoted.group(1)
+        unquoted = re.match(r'^\s*(.+?\.exe)(?:\s+|$)', command, flags=re.IGNORECASE)
+        if unquoted:
+            return unquoted.group(1).strip()
+        first = command.split()[0] if command.split() else ""
+        return first if first.lower().endswith(".exe") else ""
+
+    @staticmethod
+    def _find_acrobat_executable():
+        candidates = [
+            os.environ.get("RATOOLS_ACROBAT_PATH", ""),
+            r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
+            r"C:\Program Files\Adobe\Acrobat\Acrobat\Acrobat.exe",
+            r"C:\Program Files (x86)\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
+        ]
+
+        if platform.system() == "Windows":
+            try:
+                import winreg
+
+                registry_locations = [
+                    (winreg.HKEY_CLASSES_ROOT, r"Acrobat.Document.DC\shell\open\command", ""),
+                    (winreg.HKEY_CLASSES_ROOT, r"Acrobat.Document\shell\open\command", ""),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe", ""),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe", ""),
+                ]
+                for hive, key_path, value_name in registry_locations:
+                    try:
+                        with winreg.OpenKey(hive, key_path) as key:
+                            value, _value_type = winreg.QueryValueEx(key, value_name)
+                        exe_path = MainController._extract_executable_from_open_command(value)
+                        if exe_path:
+                            candidates.append(exe_path)
+                    except OSError:
+                        continue
+            except Exception:
+                pass
+
+        for candidate in candidates:
+            candidate = str(candidate or "").strip().strip('"')
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        return ""
+
+    @staticmethod
+    def _open_pdf_for_manual_font_embedding(pdf_path, acrobat_path=None):
+        if acrobat_path and os.path.isfile(acrobat_path):
+            subprocess.Popen([acrobat_path, pdf_path])
+            return
+
+        sys_plat = platform.system()
+        if sys_plat == "Windows":
+            os.startfile(pdf_path)
+        elif sys_plat == "Darwin":
+            subprocess.Popen(["open", pdf_path])
+        else:
+            subprocess.Popen(["xdg-open", pdf_path])
+
+    def _selected_pdf_paths_for_manual_font_embedding(self):
+        selected_items = self.view.tree.selectedItems()
+        pdf_paths = []
+        seen = set()
+        for item in selected_items:
+            path = str(item.text(1) or "").strip().strip('"')
+            if not path or not os.path.isfile(path) or not path.lower().endswith(".pdf"):
+                continue
+            key = os.path.normcase(os.path.abspath(path))
+            if key in seen:
+                continue
+            seen.add(key)
+            pdf_paths.append(path)
+        return pdf_paths
+
+    def _open_pdf_paths_in_acrobat_for_font_embedding(self, pdf_paths):
+        acrobat_path = self._find_acrobat_executable()
+        opened = []
+        failures = []
+        for pdf_path in pdf_paths:
+            try:
+                self._open_pdf_for_manual_font_embedding(pdf_path, acrobat_path=acrobat_path)
+                opened.append(pdf_path)
+            except Exception as exc:
+                failures.append(f"{os.path.basename(pdf_path)}：{exc}")
+
+        if not opened:
+            return False, "无法打开选中的 PDF：\n" + "\n".join(failures)
+
+        message = (
+            f"已打开 {len(opened)} 个 PDF。\n\n"
+            "请在 Acrobat 中执行：\n"
+            "1. 所有工具 > 印刷制作 > 印前检查\n"
+            "2. 选择“嵌入缺失的字体”\n"
+            "3. 点击修复并保存\n\n"
+            "处理完成后，回到 RATools 重新执行预检确认字体风险是否消失。"
+        )
+        if not acrobat_path:
+            message += "\n\n未定位到 Acrobat.exe，已改用系统默认 PDF 程序打开。"
+        if failures:
+            message += "\n\n部分文件未能打开：\n" + "\n".join(failures)
+        return True, message
+
+    def open_selected_files_in_acrobat_for_font_embedding(self):
+        pdf_paths = self._selected_pdf_paths_for_manual_font_embedding()
+        if not pdf_paths:
+            self.view.show_warning_message("⚠️ 未选择 PDF", "请先在左侧待处理队列中选中需要嵌入缺失字体的 PDF 文件。")
+            return
+
+        self.view.show_manual_font_embedding_dialog(
+            pdf_paths,
+            lambda paths=tuple(pdf_paths): self._open_pdf_paths_in_acrobat_for_font_embedding(list(paths)),
+        )
 
     def _handle_silent_update_result(self, result):
         if not result.ok or not result.has_update or not result.is_major or not result.latest_release:

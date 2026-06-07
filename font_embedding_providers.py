@@ -33,6 +33,7 @@ class AcrobatPreflightFontEmbeddingProvider(FontEmbeddingProvider):
         "Embed missing fonts",
         "Embed fonts",
         "Embed all fonts",
+        "嵌入缺失的字体",
         "嵌入缺失字体",
         "嵌入字体",
     ]
@@ -80,20 +81,79 @@ class AcrobatPreflightFontEmbeddingProvider(FontEmbeddingProvider):
 
         profile_names = json.dumps(self._profile_names(), ensure_ascii=False)
         return f"""
-(function () {{
+event.value = (function () {{
+try {{
+    var currentStep = "init";
     var profileNames = {profile_names};
+    var targetDoc = (typeof event !== "undefined" && event && event.target) ? event.target : this;
     function fail(message) {{
-        throw new Error(message);
+        return {{ ok: false, error: String(message), step: currentStep }};
+    }}
+    function safeGet(obj, key) {{
+        try {{
+            return obj ? obj[key] : null;
+        }} catch (getError) {{
+            return null;
+        }}
+    }}
+    function safeCall(obj, methodName, arg1) {{
+        try {{
+            var method = safeGet(obj, methodName);
+            if (typeof method !== "function") {{
+                return null;
+            }}
+            if (arguments.length > 2) {{
+                return method.call(obj, arg1);
+            }}
+            return method.call(obj);
+        }} catch (callError) {{
+            return null;
+        }}
+    }}
+    function getPreflightApi() {{
+        currentStep = "locate Preflight API";
+        if (typeof Preflight !== "undefined") {{
+            return Preflight;
+        }}
+        if (typeof preflight !== "undefined") {{
+            return preflight;
+        }}
+        var docPreflight = safeGet(targetDoc, "preflight");
+        if (docPreflight) {{
+            return docPreflight;
+        }}
+        return null;
+    }}
+    function collectProfileNames() {{
+        currentStep = "collect installed profiles";
+        var names = [];
+        var api = getPreflightApi();
+        if (!api || typeof safeGet(api, "getNumProfiles") !== "function" || typeof safeGet(api, "getNthProfile") !== "function") {{
+            return names;
+        }}
+        try {{
+            var count = safeCall(api, "getNumProfiles");
+            for (var idx = 0; idx < count; idx++) {{
+                try {{
+                    var item = safeCall(api, "getNthProfile", idx);
+                    if (!item) {{
+                        continue;
+                    }}
+                    var name = item.name || item.Name || String(item);
+                    if (name) {{
+                        names.push(String(name));
+                    }}
+                }} catch (profileError) {{}}
+            }}
+        }} catch (listError) {{}}
+        return names;
     }}
     function getProfileByName(name) {{
-        if (typeof Preflight !== "undefined" && Preflight.getProfileByName) {{
-            try {{ return Preflight.getProfileByName(name); }} catch (e1) {{}}
-        }}
-        if (typeof preflight !== "undefined" && preflight.getProfileByName) {{
-            try {{ return preflight.getProfileByName(name); }} catch (e2) {{}}
-        }}
-        if (this.preflight && this.preflight.getProfileByName) {{
-            try {{ return this.preflight.getProfileByName(name); }} catch (e3) {{}}
+        currentStep = "find profile: " + name;
+        var api = getPreflightApi();
+        var profile = safeCall(api, "getProfileByName", name);
+        if (profile) {{
+            return profile;
         }}
         return null;
     }}
@@ -107,13 +167,31 @@ class AcrobatPreflightFontEmbeddingProvider(FontEmbeddingProvider):
         }}
     }}
     if (!profile) {{
-        fail("未找到可执行的 Acrobat Preflight 字体嵌入 profile。请通过 RATOOLS_ACROBAT_PREFLIGHT_PROFILE 指定本机 profile 名称。");
+        var notFound = fail("未找到可执行的 Acrobat Preflight 字体嵌入 profile。请通过 RATOOLS_ACROBAT_PREFLIGHT_PROFILE 指定本机 profile 名称。");
+        notFound.requested_profiles = profileNames;
+        notFound.installed_profiles = collectProfileNames();
+        return JSON.stringify(notFound);
     }}
-    if (typeof this.preflight !== "function") {{
-        fail("当前 Acrobat JavaScript 环境未暴露 doc.preflight()，可能不是 Acrobat Pro 或该版本不支持脚本化 Preflight。");
+    var docPreflight = safeGet(targetDoc, "preflight");
+    if (!targetDoc || typeof docPreflight !== "function") {{
+        return JSON.stringify(fail("当前 Acrobat JavaScript 环境未暴露 doc.preflight()，可能不是 Acrobat Pro 或该版本不支持脚本化 Preflight。"));
     }}
-    var result = this.preflight(profile, true);
-    return JSON.stringify({{ ok: true, profile: profileName, result: String(result) }});
+    currentStep = "execute preflight: " + profileName;
+    var thermometer = (typeof app !== "undefined" && app && app.thermometer) ? app.thermometer : null;
+    var result = docPreflight.call(targetDoc, profile, false, thermometer);
+    return JSON.stringify({{
+        ok: true,
+        profile: profileName,
+        result: String(result),
+        numErrors: result && typeof result.numErrors !== "undefined" ? result.numErrors : null,
+        numWarnings: result && typeof result.numWarnings !== "undefined" ? result.numWarnings : null,
+        numInfos: result && typeof result.numInfos !== "undefined" ? result.numInfos : null,
+        numFixed: result && typeof result.numFixed !== "undefined" ? result.numFixed : null,
+        numNotFixed: result && typeof result.numNotFixed !== "undefined" ? result.numNotFixed : null
+    }});
+}} catch (e) {{
+    return JSON.stringify({{ ok: false, error: String(e && (e.message || e)), step: currentStep }});
+}}
 }})();
 """
 
@@ -129,19 +207,48 @@ class AcrobatPreflightFontEmbeddingProvider(FontEmbeddingProvider):
         shutil.copy2(input_path, output_path)
 
         app = None
+        av_doc = None
         pd_doc = None
         try:
             app = win32com_client.Dispatch("AcroExch.App")
-            pd_doc = win32com_client.Dispatch("AcroExch.PDDoc")
-            if not pd_doc.Open(output_path):
+            av_doc = win32com_client.Dispatch("AcroExch.AVDoc")
+            if not av_doc.Open(output_path, ""):
                 return FontEmbeddingResult(False, self.provider_id, self.provider_name, "Acrobat 无法打开待处理 PDF")
+            pd_doc = av_doc.GetPDDoc()
 
-            js_object = pd_doc.GetJSObject()
             script = self._preflight_script()
             try:
-                result = js_object.eval(script)
+                aform_app = win32com_client.Dispatch("AFormAut.App")
+                result = aform_app.Fields.ExecuteThisJavascript(script)
             except Exception as exc:
                 return FontEmbeddingResult(False, self.provider_id, self.provider_name, f"Acrobat Preflight 执行失败：{exc}")
+            if not str(result or "").strip():
+                return FontEmbeddingResult(
+                    False,
+                    self.provider_id,
+                    self.provider_name,
+                    "Acrobat Preflight 脚本未返回脚本结果，无法确认 profile 是否找到或 fixup 是否执行。"
+                    "请确认 Acrobat Pro 支持 Preflight JavaScript，并通过 RATOOLS_ACROBAT_PREFLIGHT_PROFILE 指定本机可用的字体嵌入 profile。",
+                )
+            try:
+                script_result = json.loads(str(result))
+            except Exception:
+                script_result = None
+            if isinstance(script_result, dict) and not script_result.get("ok", False):
+                error = script_result.get("error") or str(result)
+                details = [f"Acrobat Preflight 脚本报告失败：{error}"]
+                step = script_result.get("step")
+                if step:
+                    details.append(f"失败步骤：{step}")
+                requested_profiles = script_result.get("requested_profiles") or []
+                installed_profiles = script_result.get("installed_profiles") or []
+                if requested_profiles:
+                    details.append(f"已尝试 profile：{'; '.join(str(item) for item in requested_profiles)}")
+                if installed_profiles:
+                    details.append(f"本机可见 profile：{'; '.join(str(item) for item in installed_profiles)}")
+                else:
+                    details.append("未能从 Acrobat JavaScript API 枚举到本机 profile")
+                return FontEmbeddingResult(False, self.provider_id, self.provider_name, "；".join(details))
 
             try:
                 pd_doc.Save(1, output_path)
@@ -149,13 +256,31 @@ class AcrobatPreflightFontEmbeddingProvider(FontEmbeddingProvider):
                 return FontEmbeddingResult(False, self.provider_id, self.provider_name, f"Acrobat 保存 PDF 失败：{exc}")
 
             message = "Acrobat Preflight 已执行"
-            if result:
+            if isinstance(script_result, dict):
+                profile = script_result.get("profile") or "未知 profile"
+                preflight_result = script_result.get("result") or ""
+                message = f"{message}：profile={profile}"
+                if preflight_result:
+                    message = f"{message}，result={preflight_result}"
+                counters = []
+                for key in ["numErrors", "numWarnings", "numInfos", "numFixed", "numNotFixed"]:
+                    value = script_result.get(key)
+                    if value is not None:
+                        counters.append(f"{key}={value}")
+                if counters:
+                    message = f"{message}，{', '.join(counters)}"
+            elif result:
                 message = f"{message}：{result}"
             return FontEmbeddingResult(True, self.provider_id, self.provider_name, message)
         finally:
             if pd_doc is not None:
                 try:
                     pd_doc.Close()
+                except Exception:
+                    pass
+            if av_doc is not None:
+                try:
+                    av_doc.Close(True)
                 except Exception:
                     pass
             if app is not None:
