@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from pathlib import Path
 
 from app_paths import get_resource_path
+from font_embedding_providers import get_font_embedding_provider
 
 
 class PDFProcessor:
@@ -303,6 +304,49 @@ class PDFProcessor:
             "font_details": "; ".join(detail_parts),
             "font_findings": findings,
         }
+
+    @staticmethod
+    def _font_precheck_has_embedding_risk(font_precheck):
+        for item in font_precheck.get("font_findings", []) or []:
+            if (
+                item.get("has_unembedded")
+                or item.get("substitution_risk")
+                or item.get("has_unknown_embedding_status")
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _collect_font_precheck_for_path(pdf_path):
+        doc = None
+        try:
+            doc = fitz.open(pdf_path)
+            if doc.needs_pass:
+                return {
+                    "available": False,
+                    "error": "该PDF需要密码，无法执行字体风险预检",
+                    "font_summary": "",
+                    "font_details": "",
+                    "font_findings": [],
+                }
+            font_precheck = PDFProcessor._collect_font_precheck_findings(doc)
+            font_precheck["available"] = True
+            font_precheck["error"] = ""
+            return font_precheck
+        except Exception as exc:
+            return {
+                "available": False,
+                "error": str(exc),
+                "font_summary": "",
+                "font_details": "",
+                "font_findings": [],
+            }
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _add_precheck_suggestion(suggestions, option_id, reason):
@@ -872,6 +916,37 @@ class PDFProcessor:
             else:
                 parts.append(label)
         return "、".join(parts)
+
+    @staticmethod
+    def _run_font_embedding_workflow(pdf_path):
+        before = PDFProcessor._collect_font_precheck_for_path(pdf_path)
+        if not before.get("available"):
+            return False, f"字体风险预检失败：{before.get('error') or '无法读取PDF'}", False
+        if not PDFProcessor._font_precheck_has_embedding_risk(before):
+            return True, "字体风险预检通过，无需调用外部后端", False
+
+        provider = get_font_embedding_provider()
+        temp_output = f"{pdf_path}.font_embed.tmp.pdf"
+        try:
+            result = provider.embed_missing_fonts(pdf_path, temp_output, before)
+            if not result.success:
+                return False, f"{result.provider_name} 处理失败：{result.message}", False
+
+            after = PDFProcessor._collect_font_precheck_for_path(temp_output)
+            if not after.get("available"):
+                return False, f"字体修复后验证失败：{after.get('error') or '无法读取PDF'}", False
+            if PDFProcessor._font_precheck_has_embedding_risk(after):
+                detail = after.get("font_details") or after.get("font_summary") or "仍存在字体嵌入风险"
+                return False, f"{result.provider_name} 返回成功，但后验证未通过：{detail}", False
+
+            os.replace(temp_output, pdf_path)
+            return True, f"{result.provider_name} 字体修复后验证通过", True
+        finally:
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(temp_output)
+                except Exception:
+                    pass
 
     @staticmethod
     def _transform_rect(rect, scale, dx, dy):
@@ -1490,6 +1565,10 @@ class PDFProcessor:
     @staticmethod
     def process_document(input_path, output_path, options):
         try:
+            options = set(options or [])
+            font_embedding_requested = "embed_nonstandard_fonts" in options
+            options.discard("embed_nonstandard_fonts")
+
             doc = fitz.open(input_path)
             applied_changes = []
             change_counts = {}
@@ -2036,6 +2115,13 @@ class PDFProcessor:
                         PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
                 else:
                     shutil.copy2(input_path, output_path)
+
+            if font_embedding_requested:
+                font_ok, font_msg, font_changed = PDFProcessor._run_font_embedding_workflow(output_path)
+                if not font_ok:
+                    return False, f"❌ 字体修复工作流失败: {font_msg}"
+                if font_changed:
+                    PDFProcessor._mark_change(applied_changes, "字体修复后验证通过")
 
             if applied_changes:
                 return True, f"✅ 处理成功；修改项：{PDFProcessor._format_change_summary(change_counts, applied_changes)}"

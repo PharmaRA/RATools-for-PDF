@@ -968,7 +968,7 @@ class MainWindow(QMainWindow):
                 "options": [
                     {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到A4纸张尺寸，尽量保留全部内容"},
                     {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"},
-                    {"id": "embed_nonstandard_fonts", "title": "嵌入全部非标准字体（暂不可用）", "desc": "该功能当前版本暂不支持自动嵌入全部非标准字体"}
+                    {"id": "embed_nonstandard_fonts", "title": "字体修复工作流：Acrobat Pro Preflight", "desc": "先执行字体风险预检；有风险时调用 Acrobat Pro Preflight 外部后端；处理后强制复检，风险未消失则判定失败"}
                 ]
             },
             {
@@ -1832,18 +1832,12 @@ class MainWindow(QMainWindow):
         cb.setChecked(checked)
         cb.setFocusPolicy(Qt.NoFocus)
         cb.toggled.connect(self.on_checkbox_toggled)
-        if opt_id == "embed_nonstandard_fonts":
-            cb.setEnabled(False)
-            cb.setToolTip("该功能当前暂不可用")
         self.all_checkboxes[opt_id] = cb
 
         title_lbl = QLabel(title)
         title_lbl.setWordWrap(True)
-        if opt_id == "embed_nonstandard_fonts":
-            title_lbl.setStyleSheet("font-weight: 500; color: #9CA3AF;")
-        else:
-            title_lbl.setStyleSheet("font-weight: 500; color: #374151;")
-            title_lbl.mousePressEvent = lambda event, checkbox=cb: checkbox.toggle()
+        title_lbl.setStyleSheet("font-weight: 500; color: #374151;")
+        title_lbl.mousePressEvent = lambda event, checkbox=cb: checkbox.toggle()
 
         top_layout.addWidget(cb, 0, Qt.AlignTop)
         top_layout.addWidget(title_lbl, 1)
@@ -1852,10 +1846,7 @@ class MainWindow(QMainWindow):
         if desc:
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
-            if opt_id == "embed_nonstandard_fonts":
-                desc_lbl.setStyleSheet("color: #9CA3AF; font-size: 11px; margin-left: 24px;")
-            else:
-                desc_lbl.setStyleSheet("color: #6B7280; font-size: 11px; margin-left: 24px;")
+            desc_lbl.setStyleSheet("color: #6B7280; font-size: 11px; margin-left: 24px;")
             layout.addWidget(desc_lbl)
 
         return container

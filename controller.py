@@ -1443,13 +1443,6 @@ class MainController(QObject):
             self.view.show_warning_message("⚠️ 警告", "请至少在右侧勾选一个处理规则！")
             return
 
-        if "embed_nonstandard_fonts" in selected_options:
-            self.view.show_warning_message(
-                "⚠️ 功能暂不可用",
-                "【嵌入全部非标准字体】当前版本暂不可用。"
-            )
-            return
-
         if "filename_ectd_format" in selected_options:
             rename_pairs = []
             for i, file_path in enumerate(self.loaded_files, start=1):

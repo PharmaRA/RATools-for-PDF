@@ -229,7 +229,16 @@ pip install -r requirements.txt
 - 快速网页浏览 / 线性化
 - PDF 解除权限限制
 
-字体预检基于 PyMuPDF 读取 PDF 内部字体资源，不依赖 qpdf，也不会嵌入或替换字体。
+字体预检基于 PyMuPDF 读取 PDF 内部字体资源，不依赖 qpdf。
+
+字体修复工作流当前是第一轮探索原型：
+
+- 先用 RATools 自身的字体风险预检识别未嵌入字体、替代字体风险与嵌入状态未知项
+- 若存在风险，调用外部 provider 处理；默认 provider 为 Windows 上的 Acrobat Pro Preflight COM/OLE 后端
+- provider 返回成功后，RATools 会强制重新执行字体预检；只有未嵌入、替代风险、嵌入状态未知三类风险均消失，才判定处理成功
+- Acrobat Pro Preflight profile 名称可能因版本或语言不同而变化，可用环境变量 `RATOOLS_ACROBAT_PREFLIGHT_PROFILE` 指定，多个名称用英文分号分隔
+- 若需要替换默认 Acrobat JavaScript 原型，可用 `RATOOLS_ACROBAT_PREFLIGHT_JS` 指向自定义 `.js` 文件
+- 该功能不承诺覆盖 CJK 或复杂字体的自研修复；视觉保真兜底应作为单独的“风险页面转图片固定外观”功能处理
 
 ### 3. 启动源码程序
 
