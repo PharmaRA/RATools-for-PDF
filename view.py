@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
-    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox
+    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox, QRadioButton
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
@@ -1462,6 +1462,16 @@ class MainWindow(QMainWindow):
         self.processing_hint_label.setObjectName("processingHint")
         self.risk_hint_label = QLabel("")
         self.risk_hint_label.setObjectName("footerHint")
+        self.processing_mode_group = QButtonGroup(self)
+        self.radio_smart_processing = QRadioButton("智能处理：仅处理预检发现的问题")
+        self.radio_smart_processing.setObjectName("modeRadio")
+        self.radio_smart_processing.setToolTip("仅执行已勾选且预检发现问题的规则；无法可靠预检的勾选规则仍会执行")
+        self.radio_force_processing = QRadioButton("强制执行全部勾选规则")
+        self.radio_force_processing.setObjectName("modeRadio")
+        self.radio_force_processing.setToolTip("保留当前行为：执行所有已勾选处理规则")
+        self.radio_smart_processing.setChecked(True)
+        self.processing_mode_group.addButton(self.radio_smart_processing)
+        self.processing_mode_group.addButton(self.radio_force_processing)
         self.btn_skip_current = QPushButton("⏭ 跳过当前文件")
         self.btn_skip_current.setObjectName("actionBtn")
         self.btn_skip_current.setEnabled(False)
@@ -1487,6 +1497,10 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.processing_hint_label)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.risk_hint_label)
+        footer_layout.addSpacing(16)
+        footer_layout.addWidget(self.radio_smart_processing)
+        footer_layout.addSpacing(8)
+        footer_layout.addWidget(self.radio_force_processing)
         footer_layout.addSpacing(16)
         footer_layout.addWidget(self.btn_skip_current)
         footer_layout.addSpacing(10)
@@ -1522,6 +1536,8 @@ class MainWindow(QMainWindow):
 
         self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
         self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
+        self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+        self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
 
         self.load_all_settings()
         self.refresh_selection_summary()
@@ -1612,6 +1628,10 @@ class MainWindow(QMainWindow):
         self.settings_dialog.cb_parallel_processing.setChecked(parallel_enabled)
         self.settings_dialog.spin_parallel_workers.setEnabled(parallel_enabled)
 
+        processing_mode = str(self.app_settings.value("Settings/ProcessingMode", "smart") or "smart").lower()
+        self.radio_force_processing.setChecked(processing_mode == "force")
+        self.radio_smart_processing.setChecked(processing_mode != "force")
+
         self.is_applying_preset = False
 
         # 默认恢复上次会话的勾选状态（自定义），不自动套用预设
@@ -1633,12 +1653,18 @@ class MainWindow(QMainWindow):
         self.app_settings.setValue("Settings/DefaultOutputDir", self.settings_dialog.default_output_edit.text().strip())
         self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
         self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
+        self.app_settings.setValue("Settings/ProcessingMode", self.get_processing_mode())
 
     def persist_parallel_settings(self):
         if not hasattr(self, "app_settings"):
             return
         self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
         self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
+
+    def persist_processing_mode(self):
+        if not hasattr(self, "app_settings"):
+            return
+        self.app_settings.setValue("Settings/ProcessingMode", self.get_processing_mode())
 
     def persist_current_checkbox(self, checkbox):
         if not hasattr(self, "app_settings"):
@@ -1657,6 +1683,14 @@ class MainWindow(QMainWindow):
 
     def get_selected_preset(self):
         return self.active_preset_key
+
+    def get_processing_mode(self):
+        return "force" if self.radio_force_processing.isChecked() else "smart"
+
+    def get_processing_mode_label(self):
+        if self.get_processing_mode() == "force":
+            return "强制执行全部勾选规则"
+        return "智能处理：仅处理预检发现的问题"
 
     def _set_preset_button_state(self, preset_key):
         self.preset_btn_group.setExclusive(False)

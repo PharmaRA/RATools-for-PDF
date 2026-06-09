@@ -28,13 +28,13 @@ from word_converter import (
 )
 
 
-def _process_document_task(file_path, out_path, options):
-    return PDFProcessor.process_document(file_path, out_path, options)
+def _process_document_task(file_path, out_path, options, processing_mode="smart"):
+    return PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode)
 
 
-def _process_document_task_pipe(file_path, out_path, options, conn):
+def _process_document_task_pipe(file_path, out_path, options, processing_mode, conn):
     try:
-        conn.send(PDFProcessor.process_document(file_path, out_path, options))
+        conn.send(PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode))
     except Exception as e:
         conn.send((False, f"处理进程异常: {str(e)}"))
     finally:
@@ -165,10 +165,11 @@ class ProcessWorker(QThread):
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
-    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1):
+    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart"):
         super().__init__()
         self.files = files
         self.options = options
+        self.processing_mode = str(processing_mode or "smart").lower()
         self.output_dir = output_dir
         self.common_base = common_base
         self.overwrite_original = overwrite_original
@@ -230,7 +231,7 @@ class ProcessWorker(QThread):
             f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
         parent_conn, child_conn = mp.Pipe(duplex=False)
-        proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, child_conn))
+        proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, self.processing_mode, child_conn))
         proc.start()
         child_conn.close()
         return {
@@ -618,7 +619,14 @@ class WordConversionWorker(QThread):
                     )
 
                     convert_word_to_pdf(file_path, raw_pdf, pdfa=self.pdfa)
-                    success, message = PDFProcessor.process_document(raw_pdf, final_pdf, self.options)
+                    # Word conversion uses a curated eCTD post-processing profile. Force mode keeps
+                    # those Word-specific defaults deterministic instead of letting PDF precheck skip them.
+                    success, message = PDFProcessor.process_document(
+                        raw_pdf,
+                        final_pdf,
+                        self.options,
+                        processing_mode="force",
+                    )
                     if not success:
                         raise WordConversionError(message, code="pdf_postprocess_failed")
 
@@ -1800,6 +1808,7 @@ class MainController(QObject):
 
         overwrite_cb = self.view.all_checkboxes.get("覆盖原始文件 (不推荐)")
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
+        processing_mode = self.view.get_processing_mode()
         max_workers = self._get_processing_worker_count()
         self.processing_parallel_mode = max_workers > 1
         self.processing_worker_count = max_workers
@@ -1858,13 +1867,14 @@ class MainController(QObject):
         self.processing_done_paths = set()
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
         if retry_failed:
-            self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
+            self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n处理模式：{self.view.get_processing_mode_label()}\n{'=' * 56}\n"
         elif processing_files != self.loaded_files:
-            self.process_logs += f"\n{'=' * 56}\n仅处理建议文件开始：{len(processing_files)} 个文件\n{'=' * 56}\n"
+            self.process_logs += f"\n{'=' * 56}\n仅处理建议文件开始：{len(processing_files)} 个文件\n处理模式：{self.view.get_processing_mode_label()}\n{'=' * 56}\n"
         else:
             self.last_failed_files = []
             self.view.btn_retry_failed.setProperty("hasFailedItems", False)
             self.view.btn_retry_failed.hide()
+            self.process_logs += f"\n{'=' * 56}\n批量处理开始：{len(processing_files)} 个文件\n处理模式：{self.view.get_processing_mode_label()}\n{'=' * 56}\n"
         self.processing_current_file = ""
         self._last_processing_hint = ""
         self._refresh_processing_hint()
@@ -1877,6 +1887,7 @@ class MainController(QObject):
             common_base,
             overwrite_original,
             max_workers=max_workers,
+            processing_mode=processing_mode,
         )
         self.worker.progress.connect(self.update_progress)
         self.worker.finished_all.connect(self.processing_finished)

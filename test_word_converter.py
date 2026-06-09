@@ -1,7 +1,9 @@
 import zipfile
 
+import fitz
 import pytest
 
+from pdf_processor import PDFProcessor
 from word_converter import (
     NonWindowsWordConversionError,
     UnsupportedWordFileError,
@@ -176,3 +178,100 @@ def test_build_word_output_path_uses_ectd_filename_and_common_base(tmp_path):
 
     assert output.endswith("m1/my-study.pdf")
     assert (output_root / "m1").is_dir()
+
+
+def _write_pdf(path, title=None, author=None):
+    doc = fitz.open()
+    page = doc.new_page(width=300, height=300)
+    page.insert_text((72, 72), "RATools test PDF")
+    metadata = {}
+    if title is not None:
+        metadata["title"] = title
+    if author is not None:
+        metadata["author"] = author
+    if metadata:
+        doc.set_metadata(metadata)
+    doc.save(path)
+    doc.close()
+
+
+def test_filtered_pdf_precheck_only_reports_selected_options(tmp_path):
+    pdf = tmp_path / "filtered.pdf"
+    _write_pdf(pdf, title="Wrong title", author="Author")
+
+    broad_report = PDFProcessor.build_precheck_report(str(pdf))
+    filtered_report = PDFProcessor.build_precheck_report(str(pdf), selected_options={"title_from_filename"})
+
+    assert "title_from_filename" in broad_report["suggestions"]
+    assert "cleanup_remove_metadata" in broad_report["suggestions"]
+    assert set(filtered_report["suggestions"]) == {"title_from_filename"}
+
+
+def test_smart_pdf_option_resolution_filters_detectable_and_keeps_unsupported(monkeypatch, tmp_path):
+    pdf = tmp_path / "resolve.pdf"
+    _write_pdf(pdf)
+
+    def fake_precheck(_path, selected_options=None):
+        assert selected_options == {"title_from_filename", "cleanup_remove_metadata", "page_size_a4"}
+        return {
+            "available": True,
+            "suggestions": {
+                "title_from_filename": {"matched": True, "title": "同步文件名为标题", "reason": "title"}
+            },
+        }
+
+    monkeypatch.setattr(PDFProcessor, "build_precheck_report", fake_precheck)
+
+    resolved = PDFProcessor.resolve_processing_options(
+        str(pdf),
+        {"title_from_filename", "cleanup_remove_metadata", "page_size_a4"},
+        processing_mode="smart",
+    )
+
+    assert resolved["options"] == {"title_from_filename", "page_size_a4"}
+    assert resolved["skipped"] == ["cleanup_remove_metadata"]
+    assert resolved["forced_unsupported"] == ["page_size_a4"]
+    assert "智能处理" in resolved["log"]
+
+
+def test_process_document_smart_skips_selected_rule_without_precheck_match(tmp_path):
+    pdf = tmp_path / "clean-title.pdf"
+    out = tmp_path / "out.pdf"
+    _write_pdf(pdf, title="clean-title")
+
+    success, message = PDFProcessor.process_document(
+        str(pdf),
+        str(out),
+        {"title_from_filename"},
+        processing_mode="smart",
+    )
+
+    assert success is True
+    assert "智能处理" in message
+    assert "已跳过未命中规则" in message
+    doc = fitz.open(out)
+    try:
+        assert doc.metadata.get("title") == "clean-title"
+    finally:
+        doc.close()
+
+
+def test_process_document_force_executes_all_selected_rules(tmp_path):
+    pdf = tmp_path / "force.pdf"
+    out = tmp_path / "out.pdf"
+    _write_pdf(pdf, title="force", author="Author")
+
+    success, message = PDFProcessor.process_document(
+        str(pdf),
+        str(out),
+        {"cleanup_remove_metadata"},
+        processing_mode="force",
+    )
+
+    assert success is True
+    assert "强制执行全部勾选规则" in message
+    doc = fitz.open(out)
+    try:
+        assert not (doc.metadata.get("author") or "").strip()
+    finally:
+        doc.close()
