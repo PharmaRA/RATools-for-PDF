@@ -275,3 +275,67 @@ def test_process_document_force_executes_all_selected_rules(tmp_path):
         assert not (doc.metadata.get("author") or "").strip()
     finally:
         doc.close()
+
+
+
+class _FakeExternalLinkPage:
+    def __init__(self, link):
+        self._link = link
+        self.update_calls = []
+
+    def get_links(self):
+        return [self._link]
+
+    def update_link(self, link):
+        self.update_calls.append(dict(link))
+
+
+def test_open_new_window_patches_raw_link_without_rewriting_file_path(monkeypatch):
+    link = {
+        "kind": fitz.LINK_GOTOR,
+        "xref": 42,
+        "file": "../m2/target.pdf",
+        "page": 0,
+        "zoom": 0.0,
+    }
+    page = _FakeExternalLinkPage(link)
+    patched = []
+
+    monkeypatch.setattr(PDFProcessor, "_force_link_new_window", lambda _doc, xref: patched.append(xref))
+
+    changed = PDFProcessor._apply_hyperlink_actions(
+        object(),
+        page,
+        {"link_open_new_window"},
+        {fitz.LINK_GOTOR},
+    )
+
+    assert changed is True
+    assert patched == [42]
+    assert page.update_calls == []
+    assert link["file"] == "../m2/target.pdf"
+
+
+def test_link_zoom_still_uses_update_link(monkeypatch):
+    link = {
+        "kind": fitz.LINK_GOTO,
+        "xref": 43,
+        "page": 0,
+        "zoom": 2.0,
+    }
+    page = _FakeExternalLinkPage(link)
+    patched = []
+
+    monkeypatch.setattr(PDFProcessor, "_force_link_new_window", lambda _doc, xref: patched.append(xref))
+
+    changed = PDFProcessor._apply_hyperlink_actions(
+        object(),
+        page,
+        {"link_inherit_zoom"},
+        {fitz.LINK_GOTOR},
+    )
+
+    assert changed is True
+    assert link["zoom"] == 0.0
+    assert len(page.update_calls) == 1
+    assert patched == []

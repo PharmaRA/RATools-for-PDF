@@ -1586,6 +1586,7 @@ class PDFProcessor:
         links = page_links if page_links is not None else page.get_links()
         for link in links:
             link_modified = False
+            force_new_window = False
             kind = link.get("kind", fitz.LINK_NONE)
 
             if "link_abs_to_rel_path" in options and kind in file_like_link_kinds:
@@ -1604,16 +1605,18 @@ class PDFProcessor:
 
             if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
                 if not link.get("newWindow"):
-                    link["newWindow"] = True
-                    link_modified = True
+                    force_new_window = True
 
-            if not link_modified:
-                continue
+            if link_modified:
+                page.update_link(link)
+                changed = True
 
-            page.update_link(link)
-            if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+            if force_new_window:
+                # Do not call update_link() just to set NewWindow. On some Windows/PyMuPDF
+                # combinations, rebuilding external-file links can normalize relative /F paths
+                # into absolute paths. Patch the raw action object instead so /F and /UF stay intact.
                 PDFProcessor._force_link_new_window(doc, link.get("xref", 0))
-            changed = True
+                changed = True
 
         return changed
 
