@@ -1202,51 +1202,6 @@ class MainWindow(QMainWindow):
         quick_actions.addWidget(self.queue_meta_label, 1)
         import_layout.addLayout(quick_actions)
 
-        word_card = QFrame()
-        word_card.setObjectName("wordCard")
-        word_layout = QVBoxLayout(word_card)
-        word_layout.setContentsMargins(12, 10, 12, 10)
-        word_layout.setSpacing(8)
-        word_header = QHBoxLayout()
-        word_header.setContentsMargins(0, 0, 0, 0)
-        word_title = QLabel("Word 转 eCTD PDF")
-        word_title.setObjectName("sectionTitleSmall")
-        word_hint = QLabel("支持 .doc/.docx 批量与文件夹递归")
-        word_hint.setObjectName("sectionHint")
-        word_header.addWidget(word_title)
-        word_header.addStretch()
-        word_header.addWidget(word_hint)
-        word_layout.addLayout(word_header)
-
-        word_actions = QHBoxLayout()
-        word_actions.setContentsMargins(0, 0, 0, 0)
-        word_actions.setSpacing(8)
-        self.btn_add_word_files = QPushButton("选择 Word 文件")
-        self.btn_add_word_files.setObjectName("secondaryBtn")
-        self.btn_add_word_folder = QPushButton("选择 Word 文件夹")
-        self.btn_add_word_folder.setObjectName("secondaryBtn")
-        self.cb_word_pdfa = QCheckBox("PDF/A")
-        self.cb_word_pdfa.setObjectName("compactCheck")
-        self.cb_word_pdfa.setToolTip("转换时传递 Word ExportAsFixedFormat 的 UseISO19005_1 参数")
-        self.btn_word_report = QPushButton("查看转换报告")
-        self.btn_word_report.setObjectName("actionBtn")
-        self.btn_word_report.setEnabled(False)
-        self.btn_start_word_conversion = QPushButton("Word 转 eCTD PDF")
-        self.btn_start_word_conversion.setObjectName("actionBtn")
-        self.btn_start_word_conversion.setEnabled(False)
-        word_actions.addWidget(self.btn_add_word_files)
-        word_actions.addWidget(self.btn_add_word_folder)
-        word_actions.addWidget(self.cb_word_pdfa)
-        word_actions.addStretch()
-        word_actions.addWidget(self.btn_word_report)
-        word_actions.addWidget(self.btn_start_word_conversion)
-        word_layout.addLayout(word_actions)
-
-        self.word_queue_label = QLabel("未选择 Word 文件")
-        self.word_queue_label.setObjectName("mutedLabel")
-        word_layout.addWidget(self.word_queue_label)
-        import_layout.addWidget(word_card)
-
         list_container = QFrame()
         list_container.setObjectName("listContainer")
         list_layout = QVBoxLayout(list_container)
@@ -2039,9 +1994,6 @@ class MainWindow(QMainWindow):
         #sectionHint { color: #64748B; font-size: 12px; }
         #dropZone { border: 2px dashed #B8C6DB; border-radius: 14px; background-color: #F8FBFF; color: #52606D; font-weight: 600; }
         #dropZone:hover { border-color: #60A5FA; background-color: #EFF6FF; color: #1D4ED8; }
-        #wordCard { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }
-        #sectionTitleSmall { font-size: 13px; font-weight: 700; color: #0F172A; border: none; }
-        #compactCheck { color: #475569; font-weight: 600; border: none; spacing: 6px; }
         #secondaryBtn { padding: 8px 14px; border: 1px solid #DCE3EA; border-radius: 9px; background-color: white; color: #334155; font-weight: 600; }
         #secondaryBtn:hover { background-color: #F8FAFC; border-color: #CBD5E1; }
         #mutedLabel { color: #64748B; font-size: 12px; }

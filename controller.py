@@ -18,14 +18,6 @@ else:
     update_checker = None
 from pdf_processor import PDFProcessor
 from view import LogDialog
-from word_converter import (
-    WordConversionError,
-    build_word_output_path,
-    collect_word_files,
-    convert_word_to_pdf,
-    get_word_ectd_options,
-    precheck_word_structure,
-)
 
 
 def _process_document_task(file_path, out_path, options, processing_mode="smart"):
@@ -580,119 +572,6 @@ class PreCheckWorker(QThread):
             self.error_precheck.emit(str(e))
 
 
-class WordConversionWorker(QThread):
-    progress = Signal(int, str, str)
-    finished_word = Signal(str, list)
-    error_word = Signal(str)
-
-    def __init__(self, files, output_dir, common_base="", pdfa=False):
-        super().__init__()
-        self.files = list(files)
-        self.output_dir = output_dir
-        self.common_base = common_base
-        self.pdfa = bool(pdfa)
-        self.options = get_word_ectd_options()
-
-    def run(self):
-        try:
-            started_at = datetime.now()
-            success_count = 0
-            generated_pdfs = []
-
-            for index, file_path in enumerate(self.files):
-                final_pdf = build_word_output_path(file_path, self.output_dir, self.common_base)
-                raw_pdf = f"{final_pdf}.word_raw.pdf"
-                self.progress.emit(
-                    index,
-                    "正在转换...",
-                    f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始 Word 转 eCTD PDF: {file_path}\n"
-                    f"    输出文件: {final_pdf}",
-                )
-
-                try:
-                    report = precheck_word_structure(file_path)
-                    self.progress.emit(
-                        index,
-                        "Word预检完成",
-                        f"[{datetime.now().strftime('%H:%M:%S')}] {os.path.basename(file_path)}\n"
-                        f"    状态: Word预检完成\n{_indent_log_block(report.to_text())}",
-                    )
-
-                    convert_word_to_pdf(file_path, raw_pdf, pdfa=self.pdfa)
-                    # Word conversion uses a curated eCTD post-processing profile. Force mode keeps
-                    # those Word-specific defaults deterministic instead of letting PDF precheck skip them.
-                    success, message = PDFProcessor.process_document(
-                        raw_pdf,
-                        final_pdf,
-                        self.options,
-                        processing_mode="force",
-                    )
-                    if not success:
-                        raise WordConversionError(message, code="pdf_postprocess_failed")
-
-                    pdf_report = PDFProcessor.build_precheck_report(final_pdf)
-                    pdf_status = "PDF预检通过"
-                    pdf_detail = "未发现当前可自动处理的明显问题"
-                    suggestions = pdf_report.get("suggestions", {}) if pdf_report.get("available") else {}
-                    if not pdf_report.get("available"):
-                        pdf_status = "PDF预检失败"
-                        pdf_detail = pdf_report.get("error") or "无法读取PDF结构"
-                    elif suggestions:
-                        pdf_status = "PDF预检需复核"
-                        pdf_detail = "、".join(
-                            item.get("title", "")
-                            for item in suggestions.values()
-                            if item.get("title")
-                        )
-
-                    generated_pdfs.append(final_pdf)
-                    success_count += 1
-                    self.progress.emit(
-                        index,
-                        "转换完成",
-                        f"[{datetime.now().strftime('%H:%M:%S')}] {file_path}\n"
-                        f"    状态: 转换完成\n"
-                        f"    输出文件: {final_pdf}\n"
-                        f"    结果: {message}\n"
-                        f"    自动预检: {pdf_status} - {pdf_detail}",
-                    )
-                except WordConversionError as exc:
-                    self.progress.emit(
-                        index,
-                        "转换失败",
-                        f"[{datetime.now().strftime('%H:%M:%S')}] {file_path}\n"
-                        f"    状态: 转换失败\n"
-                        f"    输出文件: {final_pdf}\n"
-                        f"    错误类型: {exc.code}\n"
-                        f"    结果: {exc.message}",
-                    )
-                except Exception as exc:
-                    self.progress.emit(
-                        index,
-                        "转换失败",
-                        f"[{datetime.now().strftime('%H:%M:%S')}] {file_path}\n"
-                        f"    状态: 转换失败\n"
-                        f"    输出文件: {final_pdf}\n"
-                        f"    结果: {exc}",
-                    )
-                finally:
-                    if os.path.exists(raw_pdf):
-                        try:
-                            os.remove(raw_pdf)
-                        except Exception:
-                            pass
-
-            elapsed_sec = int((datetime.now() - started_at).total_seconds())
-            summary = f"Word 转 eCTD PDF 结束。共成功转换 {success_count} / {len(self.files)} 个文件。总耗时 {elapsed_sec}s。"
-            self.finished_word.emit(summary, generated_pdfs)
-        except Exception as exc:
-            self.error_word.emit(str(exc))
-
-
-def _indent_log_block(text):
-    return "\n".join(f"    {line}" for line in str(text or "").splitlines())
-
-
 class IOActionWorker(QThread):
     """
     高级 IO 操作后台线程：处理书签、链接等需要长时间读写的批量导入/导出操作
@@ -793,7 +672,6 @@ class MainController(QObject):
         super().__init__()
         self.view = view
         self.loaded_files = []
-        self.word_files = []
         self.process_logs = ""
         self.last_output_dir = ""
         self.processing_started_at = None
@@ -822,7 +700,6 @@ class MainController(QObject):
         self.worker = None
         self.precheck_worker = None
         self.precheck_files = []
-        self.word_worker = None
         self.update_worker = None
         app = QCoreApplication.instance()
         if app:
@@ -833,10 +710,6 @@ class MainController(QObject):
         self.view.drop_zone.mousePressEvent = self.open_file_dialog
         self.view.btn_add_files.clicked.connect(self.open_file_picker)
         self.view.add_folder_btn.clicked.connect(self.add_folder)
-        self.view.btn_add_word_files.clicked.connect(self.open_word_file_picker)
-        self.view.btn_add_word_folder.clicked.connect(self.add_word_folder)
-        self.view.btn_start_word_conversion.clicked.connect(self.start_word_conversion)
-        self.view.btn_word_report.clicked.connect(self.show_log_dialog)
         self.view.btn_clear.clicked.connect(self.clear_list)
         self.view.btn_preset_china.clicked.connect(lambda: self.view.toggle_preset("china"))
         self.view.btn_preset_us.clicked.connect(lambda: self.view.toggle_preset("us"))
@@ -1532,38 +1405,6 @@ class MainController(QObject):
         if file_paths:
             self.add_files(file_paths)
 
-    def open_word_file_picker(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self.view,
-            "选择 Word 文件",
-            "",
-            "Word Files (*.doc *.docx);;All Files (*)"
-        )
-        if file_paths:
-            self.add_word_files(file_paths)
-
-    def add_word_folder(self):
-        folder_path = QFileDialog.getExistingDirectory(self.view, "选择包含 Word 文件的文件夹")
-        if folder_path:
-            self.add_word_files([folder_path])
-
-    def add_word_files(self, paths):
-        if self.word_worker and self.word_worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在转换", "请等待当前 Word 转换结束后再添加文件。")
-            return
-
-        word_files = collect_word_files(paths)
-        to_add = [path for path in word_files if path not in self.word_files]
-        if not to_add:
-            if paths:
-                self.view.show_info_message("ℹ️ 提示", "添加的文件或文件夹中没有新的 Word 文件，或文件已存在。")
-            return
-
-        self.word_files.extend(to_add)
-        self.view.word_queue_label.setText(f"已选择 {len(self.word_files)} 个 Word 文件")
-        self.view.btn_start_word_conversion.setEnabled(True)
-        self.view.btn_word_report.setEnabled(bool(self.process_logs))
-
     def add_files(self, paths):
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再添加文件。")
@@ -1679,9 +1520,6 @@ class MainController(QObject):
         if self.worker and self.worker.isRunning():
             self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再清空待处理队列。")
             return
-        if self.word_worker and self.word_worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在转换", "请等待当前 Word 转换结束后再清空待处理队列。")
-            return
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再清空待处理队列。")
             return
@@ -1697,57 +1535,6 @@ class MainController(QObject):
             self._mark_precheck_stale()
             self.view.update_counters_ui(0)
             self.process_logs = ""
-
-    def start_word_conversion(self):
-        if self.word_worker and self.word_worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在转换", "当前 Word 转换任务仍在运行。")
-            return
-        if self.worker and self.worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在处理", "请等待当前 PDF 批处理结束后再转换 Word。")
-            return
-        if self._is_precheck_running():
-            self.view.show_warning_message("⚠️ 正在预检", "请等待当前 PDF 预检结束后再转换 Word。")
-            return
-        if not self.word_files:
-            self.view.show_warning_message("⚠️ 警告", "请至少添加一个 Word 文件。")
-            return
-
-        default_output_dir = self.view.settings_dialog.default_output_edit.text().strip()
-        start_dir = default_output_dir if default_output_dir and os.path.isdir(default_output_dir) else os.path.expanduser("~")
-        user_selected_dir = QFileDialog.getExistingDirectory(
-            self.view,
-            "选择 Word 转换输出根目录",
-            start_dir,
-        )
-        if not user_selected_dir:
-            return
-
-        out_dir = os.path.join(user_selected_dir, "RATools_Output")
-        self.last_output_dir = out_dir
-        try:
-            dirs = [os.path.dirname(os.path.abspath(f)) for f in self.word_files]
-            common_base = os.path.commonpath(dirs)
-        except ValueError:
-            common_base = ""
-
-        self.process_logs += f"\n{'=' * 56}\nWord 转 eCTD PDF 开始：{len(self.word_files)} 个文件\n{'=' * 56}\n"
-        self.view.btn_start_word_conversion.setEnabled(False)
-        self.view.btn_add_word_files.setEnabled(False)
-        self.view.btn_add_word_folder.setEnabled(False)
-        self.view.btn_word_report.setEnabled(True)
-        self.view.word_queue_label.setText(f"正在转换 {len(self.word_files)} 个 Word 文件...")
-
-        self.word_worker = WordConversionWorker(
-            self.word_files,
-            out_dir,
-            common_base=common_base,
-            pdfa=self.view.cb_word_pdfa.isChecked(),
-        )
-        self.word_worker.progress.connect(self.update_word_progress)
-        self.word_worker.finished_word.connect(self.word_conversion_finished)
-        self.word_worker.error_word.connect(self.word_conversion_error)
-        self.word_worker.finished.connect(self.word_worker.deleteLater)
-        self.word_worker.start()
 
     def start_processing(self, processing_files=None, retry_failed=False):
         if self.worker and self.worker.isRunning():
@@ -2031,40 +1818,6 @@ class MainController(QObject):
             self.process_logs += f"{log_msg}\n"
 
         self._refresh_processing_hint(status_text=status_text, file_path=file_path)
-
-    def update_word_progress(self, _row_index, status_text, log_msg):
-        if log_msg:
-            self.process_logs += f"{log_msg}\n"
-        self.view.word_queue_label.setText(status_text)
-        self.view.btn_word_report.setEnabled(True)
-
-    def word_conversion_finished(self, summary, generated_pdfs):
-        self.process_logs += f"\n{'=' * 56}\nWord 转 eCTD PDF 结束\n{summary}\n{'=' * 56}\n"
-        self.view.btn_add_word_files.setEnabled(True)
-        self.view.btn_add_word_folder.setEnabled(True)
-        self.view.btn_start_word_conversion.setEnabled(bool(self.word_files))
-        self.view.btn_word_report.setEnabled(True)
-        self.word_worker = None
-
-        if generated_pdfs:
-            self.add_files(generated_pdfs)
-            self.word_files = []
-            self.view.word_queue_label.setText(f"{summary} 已将 {len(generated_pdfs)} 个 PDF 加入队列。")
-            self.view.btn_start_word_conversion.setEnabled(False)
-            self.view.show_success_message("✅ Word 转换完成", f"{summary}\n\n已将生成 PDF 加入现有队列。")
-        else:
-            self.view.word_queue_label.setText(summary)
-            self.view.show_warning_message("⚠️ Word 转换结束", f"{summary}\n\n未生成可加入队列的 PDF。")
-
-    def word_conversion_error(self, error_msg):
-        self.process_logs += f"\n{'!' * 56}\n[Word转换错误] {error_msg}\n{'!' * 56}\n"
-        self.view.btn_add_word_files.setEnabled(True)
-        self.view.btn_add_word_folder.setEnabled(True)
-        self.view.btn_start_word_conversion.setEnabled(bool(self.word_files))
-        self.view.btn_word_report.setEnabled(True)
-        self.word_worker = None
-        self.view.word_queue_label.setText("Word 转换失败")
-        self.view.show_error_message("❌ Word 转换失败", error_msg)
 
     def precheck_finished(self, summary):
         self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
