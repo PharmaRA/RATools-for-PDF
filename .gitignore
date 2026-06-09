@@ -7,6 +7,8 @@ settings.ini
 /build_pyinstaller
 /*.spec
 /.worktrees
+/.venv
 test_*
+!test_word_converter.py
 /docs
 /tests
