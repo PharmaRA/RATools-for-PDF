@@ -1281,12 +1281,13 @@ class MainWindow(QMainWindow):
         self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.setIndentation(14)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAllColumnsShowFocus(True)
         self.tree.header().setMinimumSectionSize(90)
         self.tree.header().resizeSection(1, 380)
 
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
-        self.tree.setStyleSheet("show-decoration-selected: 1;")
         list_layout.addWidget(self.tree)
         import_layout.addWidget(list_container, 1)
 
@@ -2046,11 +2047,17 @@ class MainWindow(QMainWindow):
         #mutedLabel { color: #64748B; font-size: 12px; }
         #listHeader { border-bottom: 1px solid #E5E7EB; background-color: #F8FAFC; border-top-left-radius: 16px; border-top-right-radius: 16px; }
 
-        QTreeWidget { border: none; background-color: white; color: #334155; outline: none; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; alternate-background-color: #FBFDFF; }
+        QTreeWidget { show-decoration-selected: 1; border: none; background-color: white; color: #334155; outline: none; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; alternate-background-color: #FBFDFF; }
         QTreeWidget::item { padding: 7px; border-bottom: 1px solid #F1F5F9; }
+        QTreeWidget::item:hover:!selected { background-color: #F8FAFC; color: #334155; }
         QTreeWidget::item:selected { background-color: #E8F1FF; color: #155EEF; }
+        QTreeWidget::branch { background-color: white; border: none; }
+        QTreeWidget::branch:alternate { background-color: #FBFDFF; }
+        QTreeWidget::branch:hover { background-color: #F8FAFC; }
+        QTreeWidget::branch:has-siblings:!adjoins-item,
+        QTreeWidget::branch:has-siblings:adjoins-item,
+        QTreeWidget::branch:!has-children:!has-siblings:adjoins-item { border-image: none; image: none; }
         QTreeWidget::branch:selected { background-color: #E8F1FF; }
-        QTreeWidget::branch:hover { background: transparent; }
         QTreeWidget::branch:selected:hover { background-color: #E8F1FF; }
         QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #64748B; font-weight: 600; text-align: left; }
 
