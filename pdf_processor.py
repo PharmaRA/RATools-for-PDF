@@ -955,7 +955,7 @@ class PDFProcessor:
                 "forced_unsupported": [],
                 "suggested": [],
                 "precheck_available": None,
-                "log": "处理模式: 强制执行全部勾选规则",
+                "log": "处理模式: 全部处理（强制执行全部勾选规则）",
             }
 
         actionable_selected = selected_options - PDFProcessor.NON_PROCESSING_OPTIONS

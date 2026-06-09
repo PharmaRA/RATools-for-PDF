@@ -1419,12 +1419,12 @@ class MainWindow(QMainWindow):
         self.risk_hint_label = QLabel("")
         self.risk_hint_label.setObjectName("footerHint")
         self.processing_mode_group = QButtonGroup(self)
-        self.radio_smart_processing = QRadioButton("智能处理：仅处理预检发现的问题")
+        self.radio_smart_processing = QRadioButton("智能处理")
         self.radio_smart_processing.setObjectName("modeRadio")
-        self.radio_smart_processing.setToolTip("仅执行已勾选且预检发现问题的规则；无法可靠预检的勾选规则仍会执行")
-        self.radio_force_processing = QRadioButton("强制执行全部勾选规则")
+        self.radio_smart_processing.setToolTip("处理前先按已勾选规则进行预检，仅处理预检发现需要修改的规则，速度更快。无法可靠预检的勾选规则仍会执行。")
+        self.radio_force_processing = QRadioButton("全部处理")
         self.radio_force_processing.setObjectName("modeRadio")
-        self.radio_force_processing.setToolTip("保留当前行为：执行所有已勾选处理规则")
+        self.radio_force_processing.setToolTip("强制执行全部已勾选规则，不做预检筛选，处理更彻底但耗时更长。")
         self.radio_smart_processing.setChecked(True)
         self.processing_mode_group.addButton(self.radio_smart_processing)
         self.processing_mode_group.addButton(self.radio_force_processing)
@@ -1645,8 +1645,8 @@ class MainWindow(QMainWindow):
 
     def get_processing_mode_label(self):
         if self.get_processing_mode() == "force":
-            return "强制执行全部勾选规则"
-        return "智能处理：仅处理预检发现的问题"
+            return "全部处理"
+        return "智能处理"
 
     def _set_preset_button_state(self, preset_key):
         self.preset_btn_group.setExclusive(False)
