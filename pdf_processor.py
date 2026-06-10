@@ -6,11 +6,72 @@ import shutil
 import csv
 import json
 import re
+import time
 from urllib.parse import unquote, urlparse
 from pathlib import Path
 
 from app_paths import get_resource_path
 from font_embedding_providers import get_font_embedding_provider
+
+
+class _PhaseProfiler:
+    """轻量阶段计时器。通过环境变量 RATOOLS_PROFILE=1 开启。
+
+    用法:
+        prof = _PhaseProfiler(page_count)
+        with prof.phase("预检"):
+            ...
+        msg = prof.summary()  # 关闭时返回空字符串
+    """
+
+    def __init__(self, page_count=0):
+        self.enabled = str(os.environ.get("RATOOLS_PROFILE", "")).strip().lower() in ("1", "true", "yes", "on")
+        self.page_count = page_count
+        self._phases = []  # [(name, seconds), ...]
+        self._t0 = time.perf_counter() if self.enabled else 0.0
+        self._tag = f"[PID {os.getpid()}]"
+
+    def _log(self, text):
+        # 即时打印到 stderr 并 flush，保证卡住时也能看到已完成/正在进行的阶段
+        try:
+            sys.stderr.write(text + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+    class _Timer:
+        def __init__(self, profiler, name):
+            self.profiler = profiler
+            self.name = name
+            self.start = 0.0
+
+        def __enter__(self):
+            if self.profiler.enabled:
+                self.start = time.perf_counter()
+                self.profiler._log(f"⏱{self.profiler._tag} ▶ 开始: {self.name}")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            if self.profiler.enabled:
+                elapsed = time.perf_counter() - self.start
+                self.profiler._phases.append((self.name, elapsed))
+                status = "✔ 结束" if exc_type is None else "✖ 异常"
+                self.profiler._log(f"⏱{self.profiler._tag} {status}: {self.name} 耗时 {elapsed:.2f}s")
+            return False
+
+    def phase(self, name):
+        return _PhaseProfiler._Timer(self, name)
+
+    def set_page_count(self, page_count):
+        self.page_count = page_count
+
+    def summary(self):
+        if not self.enabled or not self._phases:
+            return ""
+        total = time.perf_counter() - self._t0
+        parts = [f"{name} {sec:.2f}s" for name, sec in self._phases]
+        head = f"⏱ 计时[{self.page_count}页 总{total:.2f}s]"
+        return head + ": " + " | ".join(parts)
 
 
 class PDFProcessor:
@@ -1239,7 +1300,7 @@ class PDFProcessor:
                         new_toc[i][0] = prev_lvl + 1
 
         doc.set_toc(new_toc)
-        doc.save(output_path, garbage=3, deflate=True)
+        doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
         doc.close()
 
 
@@ -1306,7 +1367,7 @@ class PDFProcessor:
                 except Exception:
                     pass  # 忽略错误坐标导致无法注入的脏链接
 
-        doc.save(output_path, garbage=3, deflate=True)
+        doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
         doc.close()
 
     @staticmethod
@@ -1676,12 +1737,16 @@ class PDFProcessor:
     # ====================================================
     @staticmethod
     def process_document(input_path, output_path, options, processing_mode="smart"):
+        prof = _PhaseProfiler()
         try:
-            mode_resolution = PDFProcessor.resolve_processing_options(input_path, options, processing_mode)
+            with prof.phase("预检/选项解析"):
+                mode_resolution = PDFProcessor.resolve_processing_options(input_path, options, processing_mode)
             options = set(mode_resolution["options"])
             mode_log = mode_resolution.get("log", "")
 
-            doc = fitz.open(input_path)
+            with prof.phase("打开文档"):
+                doc = fitz.open(input_path)
+            prof.set_page_count(doc.page_count)
             applied_changes = []
             change_counts = {}
             link_file_kind = getattr(fitz, "LINK_FILE", None)
@@ -1747,7 +1812,8 @@ class PDFProcessor:
             if "page_size_a4" in options or "page_size_letter" in options:
                 target_rect = PDFProcessor._paper_rect_exact("a4") if "page_size_a4" in options else PDFProcessor._paper_rect_exact(
                     "letter")
-                resized_pages = PDFProcessor._resize_pages_with_padding(doc, target_rect)
+                with prof.phase("页面尺寸标准化"):
+                    resized_pages = PDFProcessor._resize_pages_with_padding(doc, target_rect)
                 if resized_pages > 0:
                     changed = True
                     PDFProcessor._mark_change(applied_changes, "页面尺寸标准化")
@@ -1927,33 +1993,38 @@ class PDFProcessor:
                                  "link_black_border", "link_bordered_to_blue_border", "link_unbordered_blue_to_blue_border",
                                  "link_remove_border"]
             if any(opt in options for opt in hyperlink_options):
-                for page in doc:
-                    page_state = PDFProcessor._collect_page_state(page)
-                    if PDFProcessor._apply_hyperlink_actions(
-                        doc,
-                        page,
-                        options,
-                        file_like_link_kinds,
-                        page_links=page_state["links"],
-                    ):
-                        changed = True
-                        PDFProcessor._mark_change(applied_changes, "超链接动作已更新")
-                    if PDFProcessor._apply_hyperlink_styles(
-                        doc,
-                        page,
-                        options,
-                        link_objs=page_state["link_objs"],
-                        link_rects=page_state["link_rects"],
-                    ):
-                        changed = True
-                        PDFProcessor._mark_change(applied_changes, "超链接外观已更新")
+                with prof.phase("超链接遍历"):
+                    for page in doc:
+                        page_state = PDFProcessor._collect_page_state(page)
+                        if PDFProcessor._apply_hyperlink_actions(
+                            doc,
+                            page,
+                            options,
+                            file_like_link_kinds,
+                            page_links=page_state["links"],
+                        ):
+                            changed = True
+                            PDFProcessor._mark_change(applied_changes, "超链接动作已更新")
+                        if PDFProcessor._apply_hyperlink_styles(
+                            doc,
+                            page,
+                            options,
+                            link_objs=page_state["link_objs"],
+                            link_rects=page_state["link_rects"],
+                        ):
+                            changed = True
+                            PDFProcessor._mark_change(applied_changes, "超链接外观已更新")
 
             cleanup_options = ["cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black",
                                "cleanup_remove_invalid_links", "cleanup_remove_invalid_links_and_text_black",
                                "cleanup_remove_unknown_action_links",
                                "cleanup_remove_dynamic_content", "cleanup_remove_attachments", "cleanup_remove_tags", "cleanup_remove_annotations",
                                "cleanup_remove_metadata", "cleanup_remove_all_links_bookmarks"]
-            if any(opt in options for opt in cleanup_options):
+            _cleanup_active = any(opt in options for opt in cleanup_options)
+            _cleanup_ctx = prof.phase("清理遍历") if _cleanup_active else None
+            if _cleanup_ctx is not None:
+                _cleanup_ctx.__enter__()
+            if _cleanup_active:
                 external_uri_opts = {"cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black"}
                 selected_cleanup_opts = {opt for opt in options if opt in cleanup_options}
 
@@ -2145,17 +2216,22 @@ class PDFProcessor:
                                 changed = True
                                 PDFProcessor._mark_change(applied_changes, "已将链接文本恢复为黑色")
 
+                if _cleanup_ctx is not None:
+                    _cleanup_ctx.__exit__(None, None, None)
+                    _cleanup_ctx = None
+
                 if "cleanup_remove_annotations" in options:
-                    for page in doc:
-                        annots = list(page.annots() or [])
-                        for annot in annots:
-                            try:
-                                page.delete_annot(annot)
-                                changed = True
-                                PDFProcessor._mark_change(applied_changes, "已删除PDF注释")
-                                PDFProcessor._increase_change_count(change_counts, "已删除PDF注释")
-                            except Exception:
-                                pass
+                    with prof.phase("删除注释遍历"):
+                        for page in doc:
+                            annots = list(page.annots() or [])
+                            for annot in annots:
+                                try:
+                                    page.delete_annot(annot)
+                                    changed = True
+                                    PDFProcessor._mark_change(applied_changes, "已删除PDF注释")
+                                    PDFProcessor._increase_change_count(change_counts, "已删除PDF注释")
+                                except Exception:
+                                    pass
 
                 if "cleanup_remove_dynamic_content" in options:
                     doc.xref_set_key(catalog_xref, "Names", "null");
@@ -2187,16 +2263,18 @@ class PDFProcessor:
             if changed:
                 if needs_qpdf_rewrite:
                     temp_pdf = str(output_path) + ".tmp.pdf"
-                    doc.save(temp_pdf, garbage=3, deflate=True)
-                    doc.close()
+                    with prof.phase("保存(deflate+garbage2+objstms)"):
+                        doc.save(temp_pdf, garbage=2, deflate=True, use_objstms=1)
+                        doc.close()
                     try:
-                        PDFProcessor._rewrite_with_qpdf(
-                            temp_pdf,
-                            output_path,
-                            force_version=force_pdf_version,
-                            linearize=is_linear,
-                            decrypt_restrictions=remove_pdf_restrictions,
-                        )
+                        with prof.phase("qpdf重写"):
+                            PDFProcessor._rewrite_with_qpdf(
+                                temp_pdf,
+                                output_path,
+                                force_version=force_pdf_version,
+                                linearize=is_linear,
+                                decrypt_restrictions=remove_pdf_restrictions,
+                            )
                         if remove_pdf_restrictions:
                             PDFProcessor._mark_change(applied_changes, "已解除PDF权限限制")
                         if force_pdf_version:
@@ -2207,8 +2285,9 @@ class PDFProcessor:
                         if os.path.exists(temp_pdf):
                             os.remove(temp_pdf)
                 else:
-                    doc.save(output_path, garbage=3, deflate=True)
-                    doc.close()
+                    with prof.phase("保存(deflate+garbage2+objstms)"):
+                        doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
+                        doc.close()
             else:
                 doc.close()
                 if needs_qpdf_rewrite:
@@ -2234,6 +2313,9 @@ class PDFProcessor:
                 result_msg = "✅ 处理成功；无实际修改"
             if mode_log:
                 result_msg = f"{result_msg}；{mode_log}"
+            prof_summary = prof.summary()
+            if prof_summary:
+                result_msg = f"{result_msg}\n    {prof_summary}"
             return True, result_msg
 
         except FileNotFoundError as e:
