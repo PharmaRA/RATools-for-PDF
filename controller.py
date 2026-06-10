@@ -261,11 +261,14 @@ class ProcessWorker(QThread):
             proc.join(timeout=1)
 
     def _remove_partial_output(self, out_path):
-        if os.path.exists(out_path):
-            try:
-                os.remove(out_path)
-            except Exception:
-                pass
+        # 正式输出文件，以及子进程被强制终止时可能残留的中间临时文件
+        # （pdf_processor 处理流程会先写 out_path + ".tmp.pdf" 再交给 qpdf）。
+        for path in (out_path, f"{out_path}.tmp.pdf"):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
     def _close_task_connection(self, task):
         try:
@@ -285,6 +288,9 @@ class ProcessWorker(QThread):
                 self._remove_partial_output(task["out_path"])
 
         status = "处理完成" if success else "处理失败"
+        if not success:
+            self._remove_partial_output(task["out_path"])
+
         self.progress.emit(
             task["index"],
             status,
