@@ -51,8 +51,16 @@ class PDFProcessor:
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
         result = subprocess.run(cmd, startupinfo=startupinfo, capture_output=True, text=True)
+        # qpdf 退出码约定：0=成功，3=有警告但已成功生成输出，2=有错误。
+        # 结构不够规范的 PDF 在线性化/版本转换时常返回 3，输出文件实际可用，不应判为失败。
+        if result.returncode == 3 and os.path.exists(output_pdf):
+            return
+
         if result.returncode != 0:
-            raise RuntimeError(f"qpdf 执行失败: {result.stderr}")
+            detail = (result.stderr or "").strip() or (result.stdout or "").strip()
+            if not detail:
+                detail = f"qpdf 返回码 {result.returncode}，未提供详细信息"
+            raise RuntimeError(f"qpdf 执行失败: {detail}")
 
     @staticmethod
     def _format_qpdf_error(error):
