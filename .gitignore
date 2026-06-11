@@ -8,5 +8,6 @@ settings.ini
 /*.spec
 /.worktrees
 test_*
-/docs
 /tests
+!/tests/
+!/tests/test_*.py

@@ -1257,21 +1257,35 @@ class PDFProcessor:
     # 导出与导入书签 (CSV)
     @staticmethod
     def export_bookmarks(pdf_path, csv_path):
-        """将书签导出为 CSV (格式: 级别, 标题, 页码)"""
+        """Export bookmarks to CSV with enough action data for round-trip import."""
         doc = fitz.open(pdf_path)
         toc = doc.get_toc(simple=False)
-        # 必须使用 utf-8-sig，防止 Excel 打开中文乱码
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(['Level', 'Title', 'Page'])
+            writer.writerow(['Level', 'Title', 'Page', 'Kind', 'Uri', 'File', 'TargetPage', 'ToX', 'ToY', 'Zoom', 'NewWindow'])
             for item in toc:
-                lvl, title, page, _ = item
-                writer.writerow([lvl, title, page])
+                lvl, title, page, dest = item
+                if not isinstance(dest, dict):
+                    dest = {}
+                point = dest.get('to')
+                writer.writerow([
+                    lvl,
+                    title,
+                    page,
+                    dest.get('kind', fitz.LINK_NONE),
+                    dest.get('uri', ''),
+                    dest.get('file', ''),
+                    dest.get('page', ''),
+                    getattr(point, 'x', ''),
+                    getattr(point, 'y', ''),
+                    dest.get('zoom', ''),
+                    dest.get('newWindow', False),
+                ])
         doc.close()
 
     @staticmethod
     def import_bookmarks(pdf_path, csv_path, output_path):
-        """读取 CSV 结构并强制写入 PDF 书签，带有防断层与防越界保护"""
+        """Import bookmarks from CSV while remaining compatible with the old 3-column format."""
         doc = fitz.open(pdf_path)
         new_toc = []
 
@@ -1282,14 +1296,50 @@ class PDFProcessor:
                     lvl = int(row.get('Level', 1))
                     title = row.get('Title', '')
                     page = int(row.get('Page', 1))
-
-                    # 防越界：强制限制在真实页码范围内
                     page = max(1, min(page, doc.page_count))
-                    new_toc.append([lvl, title, page])
-                except ValueError:
-                    continue  # 跳过无法解析格式的脏数据行
 
-        # 防断层算法：拉平非法的书签级别跨越 (例如: 1 -> 3 会报错，强制转为 1 -> 2)
+                    kind_text = str(row.get('Kind', '') or '').strip()
+                    if not kind_text:
+                        new_toc.append([lvl, title, page])
+                        continue
+
+                    kind = int(kind_text)
+                    if kind == fitz.LINK_URI:
+                        dest = {
+                            'kind': fitz.LINK_URI,
+                            'uri': row.get('Uri', ''),
+                        }
+                    elif kind == fitz.LINK_GOTO:
+                        target_page = int(row.get('TargetPage', page - 1) or (page - 1))
+                        dest = {
+                            'kind': fitz.LINK_GOTO,
+                            'page': max(0, min(target_page, doc.page_count - 1)),
+                            'to': fitz.Point(float(row.get('ToX', 72.0) or 72.0), float(row.get('ToY', 36.0) or 36.0)),
+                            'zoom': float(row.get('Zoom', 0.0) or 0.0),
+                        }
+                    elif kind == fitz.LINK_GOTOR:
+                        target_page = int(row.get('TargetPage', 0) or 0)
+                        dest = {
+                            'kind': fitz.LINK_GOTOR,
+                            'file': row.get('File', ''),
+                            'page': max(0, target_page),
+                            'to': fitz.Point(float(row.get('ToX', 72.0) or 72.0), float(row.get('ToY', 36.0) or 36.0)),
+                            'zoom': float(row.get('Zoom', 0.0) or 0.0),
+                            'newWindow': str(row.get('NewWindow', 'false')).lower() == 'true',
+                        }
+                    elif kind == fitz.LINK_LAUNCH:
+                        dest = {
+                            'kind': fitz.LINK_LAUNCH,
+                            'file': row.get('File', ''),
+                            'newWindow': str(row.get('NewWindow', 'false')).lower() == 'true',
+                        }
+                    else:
+                        dest = {'kind': fitz.LINK_NONE}
+
+                    new_toc.append([lvl, title, page, dest])
+                except (ValueError, TypeError):
+                    continue
+
         if new_toc:
             for i in range(len(new_toc)):
                 if i == 0:
