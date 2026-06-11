@@ -33,22 +33,30 @@ def _process_document_task_pipe(file_path, out_path, options, processing_mode, c
         conn.close()
 
 
-def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, common_base=""):
+def _safe_relative_subdir(file_path, common_base):
+    if not common_base:
+        return ''
+    try:
+        rel_dir = os.path.relpath(os.path.dirname(os.path.abspath(file_path)), common_base)
+    except ValueError:
+        return ''
+    rel_norm = os.path.normpath(rel_dir)
+    if rel_norm in ('.', ''):
+        return ''
+    if rel_norm.startswith('..') or os.path.isabs(rel_norm):
+        safe_leaf = os.path.basename(os.path.dirname(os.path.abspath(file_path))) or 'external'
+        return os.path.join('_external', safe_leaf)
+    return rel_norm
+
+
+def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, common_base=''):
     base_name = os.path.basename(file_path)
     name_no_ext, _ = os.path.splitext(base_name)
-    suffix = "bookmarks.csv" if data_kind == "bookmarks" else "links.json"
+    suffix = 'bookmarks.csv' if data_kind == 'bookmarks' else 'links.json'
 
-    rel_dir = ""
-    if common_base:
-        try:
-            rel_dir = os.path.relpath(os.path.dirname(os.path.abspath(file_path)), common_base)
-        except ValueError:
-            rel_dir = ""
-        if rel_dir == ".":
-            rel_dir = ""
-
+    rel_dir = _safe_relative_subdir(file_path, common_base)
     data_parent = os.path.join(target_dir, rel_dir) if rel_dir else target_dir
-    data_path = os.path.join(data_parent, f"{name_no_ext}_{suffix}")
+    data_path = os.path.join(data_parent, f'{name_no_ext}_{suffix}')
 
     output_path = None
     if output_dir:
