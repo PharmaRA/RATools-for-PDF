@@ -11,3 +11,5 @@ test_*
 /tests
 !/tests/
 !/tests/test_*.py
+/docs
+/tests

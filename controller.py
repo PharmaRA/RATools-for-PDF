@@ -2142,7 +2142,10 @@ class MainController(QObject):
             self.log_dialog.btn_export.clicked.connect(self.export_logs)
             self.log_dialog.btn_export_precheck.clicked.connect(self.export_precheck_results)
 
-        self.log_dialog.set_log_text(self.process_logs if self.process_logs else "暂无处理日志...")
+        self.log_dialog.set_log_data(
+            self.process_logs if self.process_logs else "暂无处理日志...",
+            self.process_log_rows,
+        )
         self.log_dialog.btn_export_precheck.setEnabled(bool(self.last_precheck_results))
         self.log_dialog.btn_export_precheck.setToolTip(
             "导出最近一次批量预检结果" if self.last_precheck_results else "请先执行一次批量预检"

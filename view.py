@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
-    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox, QRadioButton
+    QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox, QRadioButton,
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QSplitter
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QSettings
 from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
@@ -17,6 +18,12 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from app_features import ENABLE_UPDATE_CHECK
 from app_version import get_display_version
 from app_paths import get_app_dir, get_resource_path
+from log_view_model import (
+    build_log_summary_items,
+    filter_log_summary_items,
+    log_status_tags,
+    split_log_blocks,
+)
 
 
 def is_win11():
@@ -107,22 +114,74 @@ class FramelessDraggableDialog(QDialog):
             #dialogSecondaryBtn:pressed {
                 background-color: #F1F5F9;
             }
+            #dialogSecondaryBtn:checked {
+                background-color: #E8F1FF;
+                border-color: #93C5FD;
+                color: #155EEF;
+            }
             #dialogSectionTitle {
                 color: #94A3B8;
                 font-size: 12px;
                 font-weight: 700;
                 border: none;
             }
-            #logTextEdit {
-                background-color: #0F172A;
-                border: 1px solid #1E293B;
-                border-radius: 10px;
-                padding: 12px;
-                color: #E2E8F0;
+            #logSummaryTable {
+                background-color: white;
+                alternate-background-color: #FBFDFF;
+                color: #334155;
+                border: none;
+                border-radius: 0;
+                gridline-color: #E5E7EB;
+                selection-background-color: #E8F1FF;
+                selection-color: #155EEF;
+                outline: none;
+            }
+            #logSummaryTable::item {
+                padding: 7px;
+                border-bottom: 1px solid #F1F5F9;
+            }
+            #logSummaryTable::item:selected {
+                background-color: #E8F1FF;
+                color: #155EEF;
+            }
+            #logSummaryTable QHeaderView::section {
+                background-color: #F8FAFC;
+                border: none;
+                border-bottom: 1px solid #DCE3EA;
+                padding: 8px;
+                color: #64748B;
+                font-weight: 700;
+            }
+            #logSummaryTable QTableCornerButton::section {
+                background-color: #F8FAFC;
+                border: none;
+                border-bottom: 1px solid #DCE3EA;
+            }
+            #logSummaryFrame {
+                background-color: white;
+                border: 1px solid #DCE3EA;
+                border-radius: 8px;
+            }
+            #logSplitter::handle:vertical {
+                background-color: transparent;
+                border: none;
+                height: 10px;
+                margin: 2px 0;
+            }
+            #logSplitter::handle:vertical:hover {
+                background-color: #E8F1FF;
+                border-radius: 5px;
+            }
+            #logDetailTextEdit {
+                background-color: #F8FAFC;
+                border: 1px solid #DCE3EA;
+                border-radius: 8px;
+                padding: 10px;
+                color: #334155;
                 font-family: Consolas, 'Courier New', monospace;
                 font-size: 12px;
-                selection-background-color: #1D4ED8;
-                selection-color: white;
+                selection-background-color: #DBEAFE;
+                selection-color: #1E3A8A;
             }
             #aboutHeroCard {
                 background-color: #F8FBFF;
@@ -459,6 +518,8 @@ class LogDialog(FramelessDraggableDialog):
         self.raw_log_text = ""
         self.filter_mode = "all"
         self.log_blocks = []
+        self.summary_items = []
+        self.filtered_items = []
 
         self.content_layout.setSpacing(12)
 
@@ -498,11 +559,46 @@ class LogDialog(FramelessDraggableDialog):
         self.search_edit.textChanged.connect(self.refresh_view)
         self.content_layout.addWidget(self.search_edit)
 
+        log_splitter = QSplitter(Qt.Vertical)
+        log_splitter.setObjectName("logSplitter")
+
+        table_frame = QFrame()
+        table_frame.setObjectName("logSummaryFrame")
+        table_layout = QVBoxLayout(table_frame)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
+
+        self.summary_table = QTableWidget()
+        self.summary_table.setObjectName("logSummaryTable")
+        self.summary_table.setFrameShape(QFrame.NoFrame)
+        self.summary_table.setColumnCount(6)
+        self.summary_table.setHorizontalHeaderLabels(["时间", "状态", "文件", "耗时", "输出", "结果/变化"])
+        self.summary_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.summary_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.summary_table.setAlternatingRowColors(True)
+        self.summary_table.setSortingEnabled(True)
+        self.summary_table.setShowGrid(False)
+        self.summary_table.verticalHeader().setVisible(False)
+        self.summary_table.horizontalHeader().setStretchLastSection(True)
+        self.summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.summary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.summary_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.summary_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.summary_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.summary_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.summary_table.itemSelectionChanged.connect(self._show_selected_detail)
+        table_layout.addWidget(self.summary_table)
+        log_splitter.addWidget(table_frame)
+
         self.text_edit = QTextEdit()
-        self.text_edit.setObjectName("logTextEdit")
+        self.text_edit.setObjectName("logDetailTextEdit")
         self.text_edit.setReadOnly(True)
         self.text_edit.setLineWrapMode(QTextEdit.NoWrap)
-        self.content_layout.addWidget(self.text_edit)
+        log_splitter.addWidget(self.text_edit)
+        log_splitter.setStretchFactor(0, 3)
+        log_splitter.setStretchFactor(1, 2)
+        self.content_layout.addWidget(log_splitter)
 
         btn_layout = QHBoxLayout()
         self.btn_export = QPushButton("⬇️ 导出日志")
@@ -524,16 +620,22 @@ class LogDialog(FramelessDraggableDialog):
     def _create_stat_card(self, parent_layout, title):
         card = QFrame()
         card.setStyleSheet(
-            "background-color: transparent; border: none;"
+            "background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;"
         )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(8, 4, 8, 4)
+        card_layout.setContentsMargins(10, 6, 10, 6)
         card_layout.setSpacing(4)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 700;")
+        title_label.setStyleSheet(
+            "color: #64748B; font-size: 11px; font-weight: 700; "
+            "border: none; background: transparent; padding: 0;"
+        )
         value_label = QLabel("0")
-        value_label.setStyleSheet("color: #0F172A; font-size: 20px; font-weight: 700;")
+        value_label.setStyleSheet(
+            "color: #0F172A; font-size: 20px; font-weight: 700; "
+            "border: none; background: transparent; padding: 0;"
+        )
 
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
@@ -542,23 +644,7 @@ class LogDialog(FramelessDraggableDialog):
 
     @staticmethod
     def _split_log_blocks(raw_text):
-        blocks = []
-        current = []
-        for raw_line in raw_text.splitlines():
-            line = raw_line.rstrip()
-            if not line:
-                if current:
-                    blocks.append("\n".join(current))
-                    current = []
-                continue
-            if re.match(r"^\[\d{2}:\d{2}:\d{2}\]", line) and current:
-                blocks.append("\n".join(current))
-                current = [line]
-                continue
-            current.append(line)
-        if current:
-            blocks.append("\n".join(current))
-        return blocks
+        return split_log_blocks(raw_text)
 
     @staticmethod
     def _highlight_html(text, query):
@@ -578,21 +664,11 @@ class LogDialog(FramelessDraggableDialog):
     def _build_log_block_info(block_text):
         status_match = re.search(r"^\s*状态:\s*(.+)$", block_text, re.MULTILINE)
         status = status_match.group(1).strip() if status_match else ""
-        tags = set()
-
-        if status in {"处理完成", "操作成功", "无需处理"}:
-            tags.add("success")
-        if status in {"处理失败", "操作失败", "预检失败"} or "[致命错误]" in block_text or "[预检错误]" in block_text:
-            tags.add("failure")
-        if status in {"已跳过", "已停止", "未匹配跳过"}:
-            tags.add("skip")
-        if status in {"建议处理", "需要复核", "无需处理", "预检失败"} or "预检" in block_text:
-            tags.add("precheck")
 
         return {
             "text": block_text,
             "status": status,
-            "tags": tags,
+            "tags": log_status_tags(status, block_text),
         }
 
     def set_filter_mode(self, mode):
@@ -602,20 +678,24 @@ class LogDialog(FramelessDraggableDialog):
         self.refresh_view()
 
     def set_log_text(self, raw_text):
+        self.set_log_data(raw_text, [])
+
+    def set_log_data(self, raw_text, structured_rows=None):
         self.raw_log_text = raw_text or ""
         self.log_blocks = [
             self._build_log_block_info(block)
             for block in self._split_log_blocks(self.raw_log_text)
         ]
+        self.summary_items = build_log_summary_items(self.raw_log_text, structured_rows or [])
         self._update_stats()
         self.refresh_view()
 
     def _update_stats(self):
-        total = sum(1 for block in self.log_blocks if block["status"])
-        success = sum(1 for block in self.log_blocks if block["status"] in {"处理完成", "操作成功", "无需处理"})
-        failure = sum(1 for block in self.log_blocks if block["status"] in {"处理失败", "操作失败", "预检失败"})
-        precheck = sum(1 for block in self.log_blocks if block["status"] == "建议处理")
-        skip = sum(1 for block in self.log_blocks if block["status"] in {"已跳过", "已停止", "未匹配跳过"})
+        total = len(self.summary_items)
+        success = sum(1 for item in self.summary_items if "success" in item["tags"])
+        failure = sum(1 for item in self.summary_items if "failure" in item["tags"])
+        precheck = sum(1 for item in self.summary_items if item["status"] == "建议处理")
+        skip = sum(1 for item in self.summary_items if "skip" in item["tags"])
 
         self.stat_total_value.setText(str(total))
         self.stat_success_value.setText(str(success))
@@ -625,47 +705,93 @@ class LogDialog(FramelessDraggableDialog):
 
     def refresh_view(self):
         query = self.search_edit.text().strip()
-        filtered_blocks = []
-        for block in self.log_blocks:
-            if self.filter_mode != "all" and self.filter_mode not in block["tags"]:
-                continue
-            if query and query.lower() not in block["text"].lower():
-                continue
-            filtered_blocks.append(block)
+        self.filtered_items = filter_log_summary_items(self.summary_items, self.filter_mode, query)
+        self._populate_summary_table(self.filtered_items)
 
-        if not filtered_blocks:
+        if not self.filtered_items:
             self.text_edit.setHtml(
                 "<div style='color:#94A3B8; font-family:Consolas,\'Courier New\',monospace; font-size:12px;'>暂无匹配日志...</div>"
             )
             return
 
-        block_html = []
-        for block in filtered_blocks:
-            tags = block["tags"]
-            if "failure" in tags:
-                border = "#7F1D1D"
-                bg = "#1F1418"
-            elif "skip" in tags:
-                border = "#92400E"
-                bg = "#1F1A12"
-            elif "precheck" in tags:
-                border = "#1D4ED8"
-                bg = "#111827"
-            elif "success" in tags:
-                border = "#065F46"
-                bg = "#0F1B17"
-            else:
-                border = "#334155"
-                bg = "#0F172A"
+        self.summary_table.selectRow(0)
+        self._show_detail_for_item(self.filtered_items[0])
 
-            highlighted = self._highlight_html(block["text"], query)
-            block_html.append(
-                f"<div style='margin-bottom:10px; padding:10px 12px; background:{bg}; border:1px solid {border}; border-radius:10px;'>"
-                f"<pre style='margin:0; white-space:pre-wrap; color:#E2E8F0; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
-                "</div>"
-            )
+    def _populate_summary_table(self, items):
+        self.summary_table.setSortingEnabled(False)
+        self.summary_table.setRowCount(len(items))
+        for row_index, item in enumerate(items):
+            values = [
+                item["time"],
+                item["status"],
+                item["file_name"],
+                item["duration_text"],
+                item["output_name"],
+                item["result"],
+            ]
+            for column_index, value in enumerate(values):
+                table_item = QTableWidgetItem(str(value or ""))
+                if column_index == 0:
+                    table_item.setData(Qt.UserRole, item)
+                if column_index in (0, 1, 3):
+                    table_item.setTextAlignment(Qt.AlignCenter)
+                if column_index == 1:
+                    self._apply_status_table_style(table_item, item.get("tags", set()))
+                table_item.setToolTip(str(value or ""))
+                self.summary_table.setItem(row_index, column_index, table_item)
+        self.summary_table.setSortingEnabled(True)
 
-        self.text_edit.setHtml("".join(block_html))
+    @staticmethod
+    def _apply_status_table_style(table_item, tags):
+        if "failure" in tags:
+            table_item.setForeground(QColor("#B42318"))
+            table_item.setBackground(QColor("#FEF3F2"))
+        elif "skip" in tags:
+            table_item.setForeground(QColor("#92400E"))
+            table_item.setBackground(QColor("#FFF7ED"))
+        elif "precheck" in tags:
+            table_item.setForeground(QColor("#155EEF"))
+            table_item.setBackground(QColor("#EFF6FF"))
+        elif "success" in tags:
+            table_item.setForeground(QColor("#047857"))
+            table_item.setBackground(QColor("#ECFDF3"))
+
+    def _show_selected_detail(self):
+        selected = self.summary_table.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        first_item = self.summary_table.item(row, 0)
+        if first_item:
+            self._show_detail_for_item(first_item.data(Qt.UserRole))
+
+    def _show_detail_for_item(self, item):
+        if not item:
+            return
+        query = self.search_edit.text().strip()
+        tags = item.get("tags", set())
+        if "failure" in tags:
+            accent = "#B42318"
+            bg = "#FEF3F2"
+        elif "skip" in tags:
+            accent = "#F59E0B"
+            bg = "#FFF7ED"
+        elif "precheck" in tags:
+            accent = "#2563EB"
+            bg = "#EFF6FF"
+        elif "success" in tags:
+            accent = "#10B981"
+            bg = "#ECFDF3"
+        else:
+            accent = "#94A3B8"
+            bg = "#FFFFFF"
+
+        highlighted = self._highlight_html(item.get("detail", ""), query)
+        self.text_edit.setHtml(
+            f"<div style='padding:10px 12px; background:{bg}; border:1px solid #DCE3EA; border-left:4px solid {accent}; border-radius:8px;'>"
+            f"<pre style='margin:0; white-space:pre-wrap; color:#334155; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
+            "</div>"
+        )
 
 
 class SettingsDialog(FramelessDraggableDialog):
