@@ -178,11 +178,61 @@ def _render_logs_as_csv_rows(log_text):
     return rows
 
 
+def _log_time_to_seconds(value):
+    try:
+        hh, mm, ss = value.split(":")
+        return int(hh) * 3600 + int(mm) * 60 + int(ss)
+    except Exception:
+        return None
+
+
+def _structured_log_row_from_event(event, start_events=None):
+    status_text = event.get("status", "")
+    if status_text not in ("处理完成", "处理失败", "已跳过", "已停止"):
+        return None
+
+    file_path = event.get("file_path", "")
+    output_path = event.get("out_path", "") or file_path
+    event_time = event.get("time", "")
+    start_info = (start_events or {}).get(file_path, {})
+    start_seconds = _log_time_to_seconds(start_info.get("time", ""))
+    end_seconds = _log_time_to_seconds(event_time)
+    duration_sec = ""
+    if start_seconds is not None and end_seconds is not None:
+        duration_sec = end_seconds - start_seconds
+        if duration_sec < 0:
+            duration_sec += 24 * 3600
+
+    result_text = event.get("message", "")
+    changes = ""
+    if "修改项：" in result_text:
+        changes = result_text.split("修改项：", 1)[1].strip()
+
+    row = {
+        "time": event_time,
+        "file_original": file_path,
+        "file_output": output_path,
+        "status": status_text,
+        "success": "true" if status_text == "处理完成" else "false",
+        "duration_sec": duration_sec,
+        "changes": changes,
+    }
+
+    return row
+
+
+def _select_log_rows_for_export(structured_rows, log_text):
+    if structured_rows:
+        return list(structured_rows)
+    return _render_logs_as_csv_rows(log_text)
+
+
 class ProcessWorker(QThread):
     """
     后台处理线程：负责核心的 PDF 批量规则应用，防止 UI 卡死
     """
     progress = Signal(int, str, str)  # row_index, status_text, log_message
+    structured_progress = Signal(object)
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
@@ -246,10 +296,17 @@ class ProcessWorker(QThread):
 
     def _start_process_task(self, index, file_path, rename_ectd):
         base_name, out_path = self._build_output_path(index, file_path, rename_ectd)
+        now = datetime.now().strftime('%H:%M:%S')
+        self.structured_progress.emit({
+            "type": "start",
+            "time": now,
+            "file_path": file_path,
+            "out_path": out_path,
+        })
         self.progress.emit(
             index,
             "正在处理...",
-            f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
+            f"\n[{now}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
         parent_conn, child_conn = mp.Pipe(duplex=False)
         proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, self.processing_mode, child_conn))
@@ -320,27 +377,54 @@ class ProcessWorker(QThread):
         if not success:
             self._remove_partial_output(task["out_path"])
 
+        now = datetime.now().strftime('%H:%M:%S')
+        self.structured_progress.emit({
+            "type": "terminal",
+            "time": now,
+            "file_path": task["file_path"],
+            "out_path": out_path,
+            "status": status,
+            "message": msg,
+        })
         self.progress.emit(
             task["index"],
             status,
-            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}",
+            f"[{now}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}",
         )
         return success
 
     def _emit_stopped_task(self, task):
         self._remove_partial_output(task["out_path"])
+        now = datetime.now().strftime('%H:%M:%S')
+        self.structured_progress.emit({
+            "type": "terminal",
+            "time": now,
+            "file_path": task["file_path"],
+            "out_path": task["out_path"],
+            "status": "已停止",
+            "message": "用户手动停止处理",
+        })
         self.progress.emit(
             task["index"],
             "已停止",
-            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: 用户手动停止处理",
+            f"[{now}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: 用户手动停止处理",
         )
 
     def _emit_skipped_task(self, task, reason="已跳过当前文件"):
         self._remove_partial_output(task["out_path"])
+        now = datetime.now().strftime('%H:%M:%S')
+        self.structured_progress.emit({
+            "type": "terminal",
+            "time": now,
+            "file_path": task["file_path"],
+            "out_path": task["out_path"],
+            "status": "已跳过",
+            "message": reason,
+        })
         self.progress.emit(
             task["index"],
             "已跳过",
-            f"[{datetime.now().strftime('%H:%M:%S')}] {task['file_path']}\n    状态: 已跳过\n    输出文件: {task['out_path']}\n    原因: {reason}",
+            f"[{now}] {task['file_path']}\n    状态: 已跳过\n    输出文件: {task['out_path']}\n    原因: {reason}",
         )
 
     def _run_serial(self):
@@ -708,6 +792,8 @@ class MainController(QObject):
         self.view = view
         self.loaded_files = []
         self.process_logs = ""
+        self.process_log_rows = []
+        self.process_log_starts = {}
         self.last_output_dir = ""
         self.processing_started_at = None
         self.processing_total = 0
@@ -1570,6 +1656,8 @@ class MainController(QObject):
             self._mark_precheck_stale()
             self.view.update_counters_ui(0)
             self.process_logs = ""
+            self.process_log_rows = []
+            self.process_log_starts = {}
 
     def start_processing(self, processing_files=None, retry_failed=False):
         if self.worker and self.worker.isRunning():
@@ -1713,6 +1801,7 @@ class MainController(QObject):
             processing_mode=processing_mode,
         )
         self.worker.progress.connect(self.update_progress)
+        self.worker.structured_progress.connect(self.record_process_log_event)
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
         self.worker.start()
@@ -1854,6 +1943,20 @@ class MainController(QObject):
             self.process_logs += f"{log_msg}\n"
 
         self._refresh_processing_hint(status_text=status_text, file_path=file_path)
+
+    def record_process_log_event(self, event):
+        if not isinstance(event, dict):
+            return
+        file_path = event.get("file_path", "")
+        if not file_path:
+            return
+        if event.get("type") == "start":
+            self.process_log_starts[file_path] = dict(event)
+            return
+        row = _structured_log_row_from_event(event, self.process_log_starts)
+        if row:
+            self.process_log_rows.append(row)
+            self.process_log_starts.pop(file_path, None)
 
     def precheck_finished(self, summary):
         self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
@@ -2088,7 +2191,7 @@ class MainController(QObject):
                     with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                         writer = csv.DictWriter(f, fieldnames=["time", "file_original", "file_output", "status", "success", "duration_sec", "changes"])
                         writer.writeheader()
-                        writer.writerows(_render_logs_as_csv_rows(self.process_logs))
+                        writer.writerows(_select_log_rows_for_export(self.process_log_rows, self.process_logs))
                 else:
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(self.process_logs)
