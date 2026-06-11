@@ -341,13 +341,21 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 
 ## 测试
 
-项目包含基于 `unittest` / `pytest` 的回归测试，覆盖 PDF 处理规则、预检、日志导出、更新检查、构建脚本和 UI 关键行为。
+项目包含基于 `unittest` 的最小回归测试集，优先覆盖：
+
+- 书签导入/导出 round-trip
+- 链接导入/导出 round-trip
+- 批量导出路径与文件名保护逻辑
+- 日志 CSV 导出结构化记录
+- 智能处理模式的不可预检规则行为
 
 运行全部测试：
 
 ```bash
-python -m pytest
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+GitHub Actions 在打包前也会执行同一条回归测试命令。
 
 说明：部分涉及 qpdf 的测试需要本机存在可用的 `qpdf`。
 
