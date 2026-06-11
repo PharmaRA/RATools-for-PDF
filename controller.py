@@ -49,6 +49,27 @@ def _safe_relative_subdir(file_path, common_base):
     return rel_norm
 
 
+def _normalized_ectd_name(base_name, fallback_index):
+    name, ext = os.path.splitext(base_name)
+    normalized = name.lower().replace(' ', '-')
+    normalized = re.sub(r'[^a-z0-9_-]', '', normalized)
+    if not normalized:
+        normalized = f'doc_{fallback_index:03d}'
+    return f'{normalized}{ext.lower()}'
+
+
+def _collect_ectd_rename_plan(file_paths):
+    rename_pairs = []
+    target_names = {}
+    for i, file_path in enumerate(file_paths, start=1):
+        base_name = os.path.basename(file_path)
+        new_name = _normalized_ectd_name(base_name, i)
+        if new_name != base_name:
+            rename_pairs.append((base_name, new_name))
+        target_names.setdefault(new_name, []).append(file_path)
+    collisions = {name: paths for name, paths in target_names.items() if len(paths) > 1}
+    return rename_pairs, collisions
+
 def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, common_base=''):
     base_name = os.path.basename(file_path)
     name_no_ext, _ = os.path.splitext(base_name)
@@ -1581,17 +1602,18 @@ class MainController(QObject):
             return
 
         if "filename_ectd_format" in selected_options:
-            rename_pairs = []
-            for i, file_path in enumerate(self.loaded_files, start=1):
-                base_name = os.path.basename(file_path)
-                name, ext = os.path.splitext(base_name)
-                normalized = name.lower().replace(" ", "-")
-                normalized = re.sub(r'[^a-z0-9_-]', '', normalized)
-                if not normalized:
-                    normalized = f"doc_{i:03d}"
-                new_name = f"{normalized}{ext.lower()}"
-                if new_name != base_name:
-                    rename_pairs.append((base_name, new_name))
+            rename_pairs, collisions = _collect_ectd_rename_plan(processing_files)
+
+            if collisions:
+                details = "\n".join([
+                    f"{name}: {len(paths)} files"
+                    for name, paths in sorted(collisions.items())
+                ])
+                self.view.show_error_message(
+                    "Filename collision",
+                    f"eCTD formatting would generate duplicate output names; processing was stopped:\n{details}",
+                )
+                return
 
             if rename_pairs:
                 details = "\n".join([
