@@ -37,6 +37,33 @@ class PDFProcessorRoundTripTests(unittest.TestCase):
             self.assertEqual(tuple(toc[1][3].get("to")), (144.0, 288.0))
             self.assertEqual(toc[1][3].get("zoom"), 2.0)
 
+    def test_link_export_import_preserves_internal_target_coordinates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            json_path = os.path.join(tmp, "links.json")
+            output_pdf = os.path.join(tmp, "output.pdf")
+
+            doc = fitz.open()
+            doc.new_page()
+            doc.new_page()
+            doc[0].insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": fitz.Rect(70, 60, 180, 80),
+                "page": 1,
+                "to": fitz.Point(144, 288),
+            })
+            doc.save(source_pdf)
+            doc.close()
+
+            PDFProcessor.export_links(source_pdf, json_path)
+            PDFProcessor.import_links(source_pdf, json_path, output_pdf)
+
+            restored = fitz.open(output_pdf)
+            link = restored[0].get_links()[0]
+            restored.close()
+
+            self.assertEqual(tuple(link.get("to")), (144.0, 288.0))
+
 
 if __name__ == "__main__":
     unittest.main()

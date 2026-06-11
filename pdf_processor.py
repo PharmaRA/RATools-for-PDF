@@ -1357,21 +1357,24 @@ class PDFProcessor:
     # 导出与导入超链接 (JSON)
     @staticmethod
     def export_links(pdf_path, json_path):
-        """将超链接的物理坐标与动作类型提取至 JSON 文件"""
+        """Export links to JSON with enough destination data for round-trip import."""
         doc = fitz.open(pdf_path)
         all_links = []
 
         for page in doc:
             for link in page.get_links():
                 rect = link['from']
+                target_point = link.get('to')
                 link_dict = {
-                    'page_index': page.number,  # PyMuPDF 中页面索引从 0 开始
+                    'page_index': page.number,
                     'rect': [rect.x0, rect.y0, rect.x1, rect.y1],
                     'kind': link.get('kind', fitz.LINK_NONE),
                     'uri': link.get('uri', ''),
                     'file': link.get('file', ''),
-                    'target_page': link.get('page', 0),  # 仅 GOTO 有效
-                    'zoom': link.get('zoom', 0.0)
+                    'target_page': link.get('page', 0),
+                    'zoom': link.get('zoom', 0.0),
+                    'to': [getattr(target_point, 'x', 0.0), getattr(target_point, 'y', 0.0)] if target_point else None,
+                    'new_window': bool(link.get('newWindow', False)),
                 }
                 all_links.append(link_dict)
 
@@ -1381,14 +1384,13 @@ class PDFProcessor:
 
     @staticmethod
     def import_links(pdf_path, json_path, output_path):
-        """清除原有链接，根据 JSON 精准复原超链接布局"""
+        """Rebuild links from JSON while preserving internal destinations and new-window flags."""
         doc = fitz.open(pdf_path)
         link_file_kind = getattr(fitz, "LINK_FILE", None)
 
         with open(json_path, 'r', encoding='utf-8') as f:
             links_data = json.load(f)
 
-        # 先清空原有超链接，防止重复叠加
         for page in doc:
             for link in page.get_links():
                 page.delete_link(link)
@@ -1400,7 +1402,6 @@ class PDFProcessor:
                 rect = fitz.Rect(ld['rect'])
                 kind = ld['kind']
 
-                # 构建 PyMuPDF 所需的动作字典
                 new_link = {"kind": kind, "from": rect}
                 if kind == fitz.LINK_URI:
                     new_link["uri"] = ld.get('uri', '')
@@ -1409,13 +1410,20 @@ class PDFProcessor:
                 elif kind in [fitz.LINK_GOTO, fitz.LINK_GOTOR]:
                     new_link["page"] = ld.get('target_page', 0)
                     new_link["zoom"] = ld.get('zoom', 0.0)
+                    to_value = ld.get('to')
+                    if isinstance(to_value, (list, tuple)) and len(to_value) >= 2:
+                        new_link["to"] = fitz.Point(float(to_value[0]), float(to_value[1]))
                     if kind == fitz.LINK_GOTOR:
                         new_link["file"] = ld.get('file', '')
+                        new_link["newWindow"] = bool(ld.get('new_window', False))
+                elif kind == fitz.LINK_LAUNCH:
+                    new_link["file"] = ld.get('file', '')
+                    new_link["newWindow"] = bool(ld.get('new_window', False))
 
                 try:
                     page.insert_link(new_link)
                 except Exception:
-                    pass  # 忽略错误坐标导致无法注入的脏链接
+                    pass
 
         doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
         doc.close()
