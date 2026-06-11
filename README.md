@@ -313,9 +313,9 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 
 ### 5. Nuitka 说明
 
-仓库中仍保留 `build_nuitka.bat` 作为可选方案。如果你更看重正式发布时的启动效率，可以再尝试 `Nuitka`；如果你更看重打包速度和成功率，优先使用 `PyInstaller onedir`。
+仓库中仍保留 `build_nuitka.bat` 作为可选构建路径，但正式发布流程仍优先使用 `PyInstaller onedir`。如果维护或启用 Nuitka 路径，需要确认它与当前的 `icon.ico`、`plugins/` 目录和 Python 依赖保持同步；未完成验证时，请不要将其作为正式发布流程。
 
-`build_nuitka.bat` 当前也会将输出目录自动命名为 `main_v版本号.dist`，便于区分不同构建版本；`main.exe` 文件名保持不变。
+`build_nuitka.bat` 会先检查 `main.py`、`icon.ico` 和 `plugins/` 是否存在，再尝试执行 Nuitka 构建；输出目录会自动命名为 `main_v版本号.dist`，便于区分不同构建版本，`main.exe` 文件名保持不变。
 
 ## qpdf 说明
 

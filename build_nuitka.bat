@@ -4,9 +4,21 @@ setlocal
 set "ROOT_DIR=%~dp0"
 set "OUT_DIR=%ROOT_DIR%build"
 set "MAIN_FILE=%ROOT_DIR%main.py"
+set "ICON_FILE=%ROOT_DIR%icon.ico"
+set "PLUGINS_DIR=%ROOT_DIR%plugins"
 
 if not exist "%MAIN_FILE%" (
     echo [ERROR] Cannot find main.py in %ROOT_DIR%
+    exit /b 1
+)
+
+if not exist "%ICON_FILE%" (
+    echo [ERROR] Cannot find icon.ico in %ROOT_DIR%
+    exit /b 1
+)
+
+if not exist "%PLUGINS_DIR%" (
+    echo [ERROR] Cannot find plugins directory in %ROOT_DIR%
     exit /b 1
 )
 
@@ -45,8 +57,8 @@ python -m nuitka "%MAIN_FILE%" ^
   --include-module=app_paths ^
   --include-data-files="%ROOT_DIR%LICENSE=LICENSE" ^
   --include-data-files="%ROOT_DIR%THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md" ^
-  --include-data-files="%ROOT_DIR%icon.png=icon.png" ^
-  --include-data-dir="%ROOT_DIR%plugins=plugins" ^
+  --include-data-files="%ICON_FILE%=icon.ico" ^
+  --include-data-dir="%PLUGINS_DIR%=plugins" ^
   --output-dir="%OUT_DIR%" ^
   --company-name="%APP_COMPANY%" ^
   --product-name="%APP_NAME%" ^
