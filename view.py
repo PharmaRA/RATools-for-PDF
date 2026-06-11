@@ -1039,7 +1039,7 @@ class MainWindow(QMainWindow):
                 "icon": "📄",
                 "title": "页面与字体标准化",
                 "options": [
-                    {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到A4纸张尺寸，尽量保留全部内容"},
+                    {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "无法通过预检精确判断是否需要处理；智能模式下若勾选仍会执行"},
                     {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"}
                 ]
             },
@@ -1082,7 +1082,7 @@ class MainWindow(QMainWindow):
                     {"id": "cleanup_remove_tags", "title": "移除结构化标签", "desc": "删除PDF结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
                     {"id": "cleanup_remove_annotations", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
                     {"id": "cleanup_remove_metadata", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等PieceInfo和Metadata"},
-                    {"id": "cleanup_remove_all_links_bookmarks", "title": "移除全部链接和书签", "desc": "一键清除文档内所有的导航书签与页面超链接"}
+                    {"id": "cleanup_remove_all_links_bookmarks", "title": "移除全部链接和书签", "desc": "仅删除页面链接与书签，不删除普通批注"}
                 ]
             },
             {

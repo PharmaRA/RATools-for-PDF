@@ -64,6 +64,18 @@ class PDFProcessorRoundTripTests(unittest.TestCase):
 
             self.assertEqual(tuple(link.get("to")), (144.0, 288.0))
 
+    def test_smart_mode_reports_unsupported_options_as_forced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            doc = fitz.open()
+            doc.new_page(width=595, height=842)
+            doc.save(source_pdf)
+            doc.close()
+
+            result = PDFProcessor.resolve_processing_options(source_pdf, {"page_size_a4"}, "smart")
+
+            self.assertIn("page_size_a4", result["forced_unsupported"])
+
 
 if __name__ == "__main__":
     unittest.main()
