@@ -1,5 +1,13 @@
 ﻿import unittest
 
+import os
+import tempfile
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import controller
+from PySide6.QtWidgets import QApplication
 from controller import (
     _build_io_paths_for_file,
     _collect_ectd_rename_plan,
@@ -8,9 +16,118 @@ from controller import (
     _select_log_rows_for_export,
     _structured_log_row_from_event,
 )
+from view import IODataWizardDialog
 
 
 class ControllerGuardTests(unittest.TestCase):
+    def test_io_action_metadata_describes_bookmark_export(self):
+        self.assertTrue(hasattr(controller, "_io_action_metadata"))
+        meta = controller._io_action_metadata("export_bookmarks")
+
+        self.assertEqual(meta["data_kind"], "bookmarks")
+        self.assertEqual(meta["data_label"], "书签")
+        self.assertEqual(meta["data_type"], "CSV")
+        self.assertTrue(meta["is_export"])
+        self.assertEqual(meta["action_name"], "导出")
+
+    def test_io_preview_rows_report_import_matches_and_missing_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_dir = os.path.join(tmp, "source")
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(os.path.join(source_dir, "a"))
+            os.makedirs(os.path.join(source_dir, "b"))
+            os.makedirs(os.path.join(data_dir, "a"))
+
+            file_a = os.path.join(source_dir, "a", "report.pdf")
+            file_b = os.path.join(source_dir, "b", "report.pdf")
+            open(file_a, "wb").close()
+            open(file_b, "wb").close()
+            open(os.path.join(data_dir, "a", "report_bookmarks.csv"), "w", encoding="utf-8").close()
+
+            self.assertTrue(hasattr(controller, "_build_io_preview_rows"))
+            rows = controller._build_io_preview_rows(
+                [file_a, file_b],
+                "import_bookmarks",
+                data_dir,
+                common_base=source_dir,
+            )
+
+            self.assertEqual(rows[0]["status"], "已匹配")
+            self.assertTrue(rows[0]["data_path"].endswith(os.path.join("a", "report_bookmarks.csv")))
+            self.assertEqual(rows[1]["status"], "未找到")
+            self.assertTrue(rows[1]["data_path"].endswith(os.path.join("b", "report_bookmarks.csv")))
+
+    def test_io_preview_rows_support_bookmarks_and_links_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = os.path.join(tmp, "report.pdf")
+            open(file_path, "wb").close()
+
+            rows = controller._build_io_preview_rows(
+                [file_path],
+                ["export_bookmarks", "export_links"],
+                tmp,
+                common_base=tmp,
+            )
+
+            self.assertEqual([row["data_label"] for row in rows], ["书签", "链接"])
+            self.assertTrue(rows[0]["data_path"].endswith("report_bookmarks.csv"))
+            self.assertTrue(rows[1]["data_path"].endswith("report_links.json"))
+
+    def test_io_worker_exports_bookmarks_and_links_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = os.path.join(tmp, "report.pdf")
+            open(file_path, "wb").close()
+
+            worker = controller.IOActionWorker(
+                ["export_bookmarks", "export_links"],
+                [file_path],
+                tmp,
+                common_base=tmp,
+            )
+
+            with patch("controller.PDFProcessor.export_bookmarks") as export_bookmarks, \
+                    patch("controller.PDFProcessor.export_links") as export_links:
+                worker.run()
+
+            export_bookmarks.assert_called_once_with(file_path, os.path.join(tmp, "report_bookmarks.csv"))
+            export_links.assert_called_once_with(file_path, os.path.join(tmp, "report_links.json"))
+
+    def test_io_worker_imports_bookmarks_and_links_as_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_dir = os.path.join(tmp, "source")
+            data_dir = os.path.join(tmp, "data")
+            output_dir = os.path.join(tmp, "out")
+            os.makedirs(source_dir)
+            os.makedirs(data_dir)
+            file_path = os.path.join(source_dir, "report.pdf")
+            csv_path = os.path.join(data_dir, "report_bookmarks.csv")
+            json_path = os.path.join(data_dir, "report_links.json")
+            output_pdf = os.path.join(output_dir, "report.pdf")
+            open(file_path, "wb").close()
+            open(csv_path, "w", encoding="utf-8").close()
+            open(json_path, "w", encoding="utf-8").close()
+
+            worker = controller.IOActionWorker(
+                ["import_bookmarks", "import_links"],
+                [file_path],
+                data_dir,
+                output_dir=output_dir,
+                common_base=source_dir,
+            )
+
+            with patch("controller.PDFProcessor.import_bookmarks") as import_bookmarks, \
+                    patch("controller.PDFProcessor.import_links") as import_links:
+                worker.run()
+
+            import_bookmarks.assert_called_once()
+            import_links.assert_called_once()
+            self.assertEqual(import_bookmarks.call_args.args[0], file_path)
+            self.assertEqual(import_bookmarks.call_args.args[1], csv_path)
+            self.assertNotEqual(import_bookmarks.call_args.args[2], output_pdf)
+            self.assertEqual(import_links.call_args.args[0], import_bookmarks.call_args.args[2])
+            self.assertEqual(import_links.call_args.args[1], json_path)
+            self.assertEqual(import_links.call_args.args[2], output_pdf)
+
     def test_io_paths_do_not_escape_target_dir_when_file_is_outside_common_base(self):
         data_path, output_path = _build_io_paths_for_file(
             r"C:\other\report.pdf",
@@ -153,6 +270,57 @@ class ControllerGuardTests(unittest.TestCase):
         )
 
         self.assertEqual(row["duration_sec"], 5)
+
+    def test_io_wizard_empty_state_replaces_preview_table_until_directory_is_selected(self):
+        app = QApplication.instance() or QApplication([])
+        dialog = IODataWizardDialog("bookmarks", 1, lambda _action, _path: [])
+        dialog.show()
+        app.processEvents()
+
+        self.assertEqual(dialog.radio_bookmarks.text(), "书签 CSV")
+        self.assertEqual(dialog.radio_export.text(), "导出数据")
+        self.assertEqual(dialog.btn_browse.text(), "选择目录")
+        self.assertEqual(dialog.btn_confirm.text(), "开始导出")
+        self.assertFalse(dialog.preview_table.isVisible())
+        self.assertTrue(dialog.preview_empty_label.isVisible())
+        self.assertIn("选择数据目录后", dialog.preview_empty_label.text())
+
+    def test_io_wizard_import_preview_updates_summary_and_primary_button(self):
+        rows = [
+            {"file_name": "matched.pdf", "status": "已匹配", "data_path": "D:/data/matched_bookmarks.csv"},
+            {"file_name": "missing.pdf", "status": "未找到", "data_path": "D:/data/missing_bookmarks.csv"},
+        ]
+        app = QApplication.instance() or QApplication([])
+        dialog = IODataWizardDialog("bookmarks", 2, lambda _action, _path: rows)
+        dialog.show()
+
+        dialog.radio_import.setChecked(True)
+        dialog.dir_edit.setText("D:/data")
+        app.processEvents()
+
+        self.assertEqual(dialog.btn_confirm.text(), "开始导入")
+        self.assertTrue(dialog.preview_table.isVisible())
+        self.assertFalse(dialog.preview_empty_label.isVisible())
+        self.assertIn("已匹配 1 / 2", dialog.summary_label.text())
+        self.assertTrue(dialog.btn_confirm.isEnabled())
+
+    def test_io_wizard_allows_bookmarks_and_links_to_be_selected_together(self):
+        app = QApplication.instance() or QApplication([])
+        dialog = IODataWizardDialog("bookmarks", 1, lambda _actions, _path: [
+            {"file_name": "report.pdf", "data_label": "书签", "status": "将生成", "data_path": "D:/data/report_bookmarks.csv"},
+            {"file_name": "report.pdf", "data_label": "链接", "status": "将生成", "data_path": "D:/data/report_links.json"},
+        ])
+        dialog.show()
+
+        dialog.radio_links.setChecked(True)
+        dialog.dir_edit.setText("D:/data")
+        app.processEvents()
+
+        self.assertTrue(dialog.radio_bookmarks.isChecked())
+        self.assertTrue(dialog.radio_links.isChecked())
+        self.assertEqual(dialog.get_action_types(), ["export_bookmarks", "export_links"])
+        self.assertEqual(dialog.preview_table.rowCount(), 2)
+        self.assertIn("2 个数据文件", dialog.summary_label.text())
 
 
 if __name__ == "__main__":

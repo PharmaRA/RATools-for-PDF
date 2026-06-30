@@ -510,6 +510,283 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
         self.btn_open_acrobat.setEnabled(True)
 
 
+class IODataWizardDialog(FramelessDraggableDialog):
+    def __init__(self, default_data_kind="bookmarks", file_count=0, preview_callback=None, parent=None):
+        super().__init__("书签与链接数据导入/导出", parent)
+        self.resize(760, 540)
+        self.preview_callback = preview_callback
+        self.file_count = file_count
+
+        self.content_layout.setSpacing(12)
+
+        title = QLabel("配置数据任务")
+        title.setStyleSheet("color: #0F172A; font-size: 17px; font-weight: 700;")
+        self.content_layout.addWidget(title)
+
+        intro = QLabel(f"当前队列包含 {file_count} 个 PDF。先选择要处理的数据和方向，再确认目录匹配结果。")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #64748B; font-size: 12px;")
+        self.content_layout.addWidget(intro)
+
+        choice_style = """
+            QPushButton {
+                color: #334155;
+                background-color: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: 600;
+                text-align: center;
+            }
+            QPushButton:checked {
+                color: #155EEF;
+                background-color: #E8F1FF;
+                border-color: #93C5FD;
+            }
+            QPushButton:hover {
+                background-color: #F1F5F9;
+            }
+        """
+
+        options_row = QHBoxLayout()
+        options_row.setSpacing(12)
+
+        data_block = QVBoxLayout()
+        data_block.setSpacing(6)
+        data_title = QLabel("数据类型")
+        data_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        data_choices = QHBoxLayout()
+        data_choices.setSpacing(8)
+        self.data_group = QButtonGroup(self)
+        self.radio_bookmarks = QPushButton("书签 CSV")
+        self.radio_links = QPushButton("链接 JSON")
+        self.data_group.setExclusive(False)
+        self.data_group.addButton(self.radio_bookmarks)
+        self.data_group.addButton(self.radio_links)
+        for btn in [self.radio_bookmarks, self.radio_links]:
+            btn.setCheckable(True)
+            btn.setStyleSheet(choice_style)
+            btn.setCursor(Qt.PointingHandCursor)
+            data_choices.addWidget(btn)
+        data_block.addWidget(data_title)
+        data_block.addLayout(data_choices)
+
+        direction_block = QVBoxLayout()
+        direction_block.setSpacing(6)
+        direction_title = QLabel("操作方向")
+        direction_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        direction_choices = QHBoxLayout()
+        direction_choices.setSpacing(8)
+        self.direction_group = QButtonGroup(self)
+        self.radio_export = QPushButton("导出数据")
+        self.radio_import = QPushButton("导入数据")
+        self.direction_group.addButton(self.radio_export)
+        self.direction_group.addButton(self.radio_import)
+        for btn in [self.radio_export, self.radio_import]:
+            btn.setCheckable(True)
+            btn.setStyleSheet(choice_style)
+            btn.setCursor(Qt.PointingHandCursor)
+            direction_choices.addWidget(btn)
+        direction_block.addWidget(direction_title)
+        direction_block.addLayout(direction_choices)
+
+        options_row.addLayout(data_block, 1)
+        options_row.addLayout(direction_block, 1)
+        self.content_layout.addLayout(options_row)
+
+        directory_card = QFrame()
+        directory_card.setStyleSheet(
+            "QFrame { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }"
+            "QLabel { border: none; background: transparent; }"
+        )
+        directory_layout = QVBoxLayout(directory_card)
+        directory_layout.setContentsMargins(12, 10, 12, 10)
+        directory_layout.setSpacing(8)
+        directory_title = QLabel("数据目录")
+        directory_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        directory_layout.addWidget(directory_title)
+
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(8)
+        self.dir_edit = QLineEdit()
+        self.dir_edit.setObjectName("settingsPathEdit")
+        self.dir_edit.setPlaceholderText("选择 CSV/JSON 数据目录")
+        self.dir_edit.setFixedHeight(36)
+        self.btn_browse = QPushButton("选择目录")
+        self.btn_browse.setObjectName("dialogSecondaryBtn")
+        self.btn_browse.setFixedHeight(36)
+        dir_row.addWidget(self.dir_edit, 1)
+        dir_row.addWidget(self.btn_browse)
+        directory_layout.addLayout(dir_row)
+
+        self.output_hint = QLabel("")
+        self.output_hint.setWordWrap(True)
+        self.output_hint.setStyleSheet("color: #64748B; font-size: 12px;")
+        directory_layout.addWidget(self.output_hint)
+        self.content_layout.addWidget(directory_card)
+
+        preview_title_row = QHBoxLayout()
+        preview_title_row.setSpacing(10)
+        preview_title = QLabel("匹配预览")
+        preview_title.setStyleSheet("color: #0F172A; font-size: 13px; font-weight: 700;")
+        preview_title_row.addWidget(preview_title)
+        preview_title_row.addStretch()
+        self.content_layout.addLayout(preview_title_row)
+
+        self.summary_label = QLabel("等待选择数据目录")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "color: #475569; background-color: #F8FAFC; border: 1px solid #E2E8F0; "
+            "border-radius: 8px; padding: 7px 10px; font-size: 12px;"
+        )
+        self.content_layout.addWidget(self.summary_label)
+
+        self.preview_empty_label = QLabel("选择数据目录后，将在这里显示每个 PDF 的数据文件匹配结果。")
+        self.preview_empty_label.setAlignment(Qt.AlignCenter)
+        self.preview_empty_label.setWordWrap(True)
+        self.preview_empty_label.setMinimumHeight(150)
+        self.preview_empty_label.setStyleSheet(
+            "color: #64748B; background-color: #F8FAFC; border: 1px dashed #CBD5E1; "
+            "border-radius: 8px; padding: 18px; font-size: 12px;"
+        )
+        self.content_layout.addWidget(self.preview_empty_label, 1)
+
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(4)
+        self.preview_table.setHorizontalHeaderLabels(["PDF", "类型", "状态", "数据文件"])
+        self.preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.preview_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.preview_table.setAlternatingRowColors(True)
+        self.preview_table.verticalHeader().setVisible(False)
+        self.preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.preview_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.preview_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.preview_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.preview_table.setMinimumHeight(170)
+        self.preview_table.setStyleSheet(
+            "QTableWidget { border: 1px solid #E2E8F0; border-radius: 8px; gridline-color: #E5E7EB; }"
+            "QHeaderView::section { background-color: #F8FAFC; border: none; border-bottom: 1px solid #E2E8F0; padding: 7px; color: #475569; font-weight: 700; }"
+        )
+        self.content_layout.addWidget(self.preview_table, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self.btn_cancel = QPushButton("取消")
+        self.btn_cancel.setObjectName("dialogSecondaryBtn")
+        self.btn_cancel.setFixedHeight(32)
+        self.btn_confirm = QPushButton("开始导出")
+        self.btn_confirm.setObjectName("dialogPrimaryBtn")
+        self.btn_confirm.setFixedHeight(32)
+        self.btn_confirm.setEnabled(False)
+        btn_row.addWidget(self.btn_cancel)
+        btn_row.addWidget(self.btn_confirm)
+        self.content_layout.addLayout(btn_row)
+
+        self.radio_bookmarks.setChecked(default_data_kind != "links")
+        self.radio_links.setChecked(default_data_kind == "links")
+        self.radio_export.setChecked(True)
+
+        for btn in [self.radio_bookmarks, self.radio_links, self.radio_export, self.radio_import]:
+            btn.toggled.connect(self.refresh_preview)
+        self.dir_edit.textChanged.connect(self.refresh_preview)
+        self.btn_browse.clicked.connect(self.browse_directory)
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_confirm.clicked.connect(self.accept)
+        self.refresh_preview()
+
+    def get_action_type(self):
+        action_types = self.get_action_types()
+        return action_types[0] if action_types else ""
+
+    def get_action_types(self):
+        direction = "import" if self.radio_import.isChecked() else "export"
+        action_types = []
+        if self.radio_bookmarks.isChecked():
+            action_types.append(f"{direction}_bookmarks")
+        if self.radio_links.isChecked():
+            action_types.append(f"{direction}_links")
+        return action_types
+
+    def get_selected_directory(self):
+        return self.dir_edit.text().strip()
+
+    def browse_directory(self):
+        data_type = "JSON" if self.radio_links.isChecked() else "CSV"
+        action_name = "导入" if self.radio_import.isChecked() else "导出"
+        selected = QFileDialog.getExistingDirectory(self, f"请选择 {data_type} 数据{action_name}目录")
+        if selected:
+            self.dir_edit.setText(selected)
+
+    def refresh_preview(self):
+        action_types = self.get_action_types()
+        selected_count = len(action_types)
+        data_kind = "书签和链接" if selected_count == 2 else ("链接" if self.radio_links.isChecked() else "书签")
+        data_type = "JSON" if self.radio_links.isChecked() else "CSV"
+        is_export = self.radio_export.isChecked()
+        dir_path = self.get_selected_directory()
+        self.btn_confirm.setText("开始导出" if is_export else "开始导入")
+        if selected_count == 0:
+            self.preview_table.setRowCount(0)
+            self.preview_table.hide()
+            self.preview_empty_label.setText("请至少选择一种数据类型。")
+            self.preview_empty_label.show()
+            self.summary_label.setText("未选择数据类型")
+            self.btn_confirm.setEnabled(False)
+            return
+
+        data_type_text = "CSV/JSON" if selected_count == 2 else data_type
+        self.output_hint.setText(
+            f"将在所选目录生成与 PDF 文件名匹配的 {data_type_text} 文件，并保留相对目录层级。"
+            if is_export
+            else "将从所选目录读取匹配的数据文件；导入后的 PDF 保存到 RATools_导入完成。"
+        )
+
+        if not dir_path:
+            self.preview_table.setRowCount(0)
+            self.preview_table.hide()
+            self.preview_empty_label.setText("选择数据目录后，将在这里显示每个 PDF 的数据文件匹配结果。")
+            self.preview_empty_label.show()
+            self.summary_label.setText("等待选择数据目录")
+            self.btn_confirm.setEnabled(False)
+            return
+
+        try:
+            rows = self.preview_callback(action_types, dir_path) if self.preview_callback else []
+        except Exception as exc:
+            self.preview_table.setRowCount(0)
+            self.preview_table.hide()
+            self.preview_empty_label.setText(f"无法生成预览：{exc}")
+            self.preview_empty_label.show()
+            self.summary_label.setText(f"无法生成预览：{exc}")
+            self.btn_confirm.setEnabled(False)
+            return
+
+        self.preview_empty_label.hide()
+        self.preview_table.show()
+        self.preview_table.setRowCount(len(rows))
+        matched = 0
+        for row_idx, row in enumerate(rows):
+            status = row.get("status", "")
+            if status == "已匹配":
+                matched += 1
+            values = [row.get("file_name", ""), row.get("data_label", data_kind), status, row.get("data_path", "")]
+            for col_idx, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if status == "未找到":
+                    item.setForeground(QColor(180, 83, 9))
+                elif status in ["已匹配", "将生成"]:
+                    item.setForeground(QColor(22, 101, 52))
+                self.preview_table.setItem(row_idx, col_idx, item)
+
+        if is_export:
+            self.summary_label.setText(f"将为 {self.file_count} 个 PDF 导出{data_kind}数据，共 {len(rows)} 个数据文件。")
+            self.btn_confirm.setEnabled(len(rows) > 0)
+        else:
+            missing = len(rows) - matched
+            self.summary_label.setText(f"已匹配 {matched} / {len(rows)} 个 {data_type} 文件；未找到 {missing} 个，执行时会跳过。")
+            self.btn_confirm.setEnabled(matched > 0)
+
+
 class LogDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
         super().__init__("📝 处理日志记录", parent)
@@ -1415,16 +1692,14 @@ class MainWindow(QMainWindow):
         self.settings_pages = []
 
         btn_style = "background-color: #F3F4F6; color: #374151; border-radius: 6px; padding: 6px 12px; font-weight: bold; border: 1px solid #D1D5DB;"
-        self.btn_export_bookmarks = QPushButton("📤 批量导出书签 (CSV)")
-        self.btn_import_bookmarks = QPushButton("📥 批量导入书签 (CSV)")
-        self.btn_export_links = QPushButton("📤 批量导出链接 (JSON)")
-        self.btn_import_links = QPushButton("📥 批量导入链接 (JSON)")
+        self.btn_bookmark_io_wizard = QPushButton("导入/导出书签数据...")
+        self.btn_link_io_wizard = QPushButton("导入/导出链接数据...")
         self.btn_embed_missing_fonts = QPushButton("🛠 嵌入缺失字体")
         self.btn_embed_missing_fonts.setObjectName("secondaryBtn")
         self.btn_embed_missing_fonts.setCursor(Qt.PointingHandCursor)
         self.btn_embed_missing_fonts.setToolTip("打开选中的 PDF，并在 Acrobat 中手动执行印前检查的“嵌入缺失的字体”。")
 
-        for btn in [self.btn_export_bookmarks, self.btn_import_bookmarks, self.btn_export_links, self.btn_import_links]:
+        for btn in [self.btn_bookmark_io_wizard, self.btn_link_io_wizard]:
             btn.setStyleSheet(btn_style)
             btn.setCursor(Qt.PointingHandCursor)
 
@@ -1451,8 +1726,7 @@ class MainWindow(QMainWindow):
                 page_layout.addWidget(self._create_section_label("导出/导入书签"))
                 btn_layout = QVBoxLayout()
                 btn_layout.setSpacing(8)
-                btn_layout.addWidget(self.btn_export_bookmarks)
-                btn_layout.addWidget(self.btn_import_bookmarks)
+                btn_layout.addWidget(self.btn_bookmark_io_wizard)
                 page_layout.addLayout(btn_layout)
 
             elif mod["title"] == "超链接处理":
@@ -1460,8 +1734,7 @@ class MainWindow(QMainWindow):
                 page_layout.addWidget(self._create_section_label("导出/导入链接"))
                 btn_layout = QVBoxLayout()
                 btn_layout.setSpacing(8)
-                btn_layout.addWidget(self.btn_export_links)
-                btn_layout.addWidget(self.btn_import_links)
+                btn_layout.addWidget(self.btn_link_io_wizard)
                 page_layout.addLayout(btn_layout)
 
             page_layout.addStretch()

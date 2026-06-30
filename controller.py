@@ -5,6 +5,7 @@ import platform
 import subprocess
 import multiprocessing as mp
 import webbrowser
+import tempfile
 from pathlib import Path
 from datetime import date, datetime
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem, QMenu
@@ -17,7 +18,7 @@ if ENABLE_UPDATE_CHECK:
 else:
     update_checker = None
 from pdf_processor import PDFProcessor
-from view import LogDialog
+from view import IODataWizardDialog, LogDialog
 
 
 def _process_document_task(file_path, out_path, options, processing_mode="smart"):
@@ -85,6 +86,51 @@ def _build_io_paths_for_file(file_path, data_kind, target_dir, output_dir=None, 
         output_path = os.path.join(output_parent, base_name)
 
     return data_path, output_path
+
+
+def _io_action_metadata(action_type):
+    is_bookmarks = "bookmarks" in action_type
+    is_export = "export" in action_type
+    return {
+        "data_kind": "bookmarks" if is_bookmarks else "links",
+        "data_label": "书签" if is_bookmarks else "链接",
+        "data_type": "CSV" if is_bookmarks else "JSON",
+        "is_export": is_export,
+        "action_name": "导出" if is_export else "导入",
+    }
+
+
+def _normalize_io_action_types(action_type):
+    if isinstance(action_type, (list, tuple)):
+        return list(action_type)
+    return [action_type]
+
+
+def _build_io_preview_rows(files, action_type, target_dir, common_base=""):
+    rows = []
+    for current_action_type in _normalize_io_action_types(action_type):
+        meta = _io_action_metadata(current_action_type)
+        for file_path in files:
+            data_path, _ = _build_io_paths_for_file(
+                file_path,
+                meta["data_kind"],
+                target_dir,
+                common_base=common_base,
+            )
+            if meta["is_export"]:
+                status = "将生成"
+            else:
+                status = "已匹配" if os.path.exists(data_path) else "未找到"
+            rows.append({
+                "action_type": current_action_type,
+                "data_kind": meta["data_kind"],
+                "data_label": meta["data_label"],
+                "file_path": file_path,
+                "file_name": os.path.basename(file_path),
+                "data_path": data_path,
+                "status": status,
+            })
+    return rows
 
 
 def _render_logs_as_csv_rows(log_text):
@@ -701,7 +747,8 @@ class IOActionWorker(QThread):
 
     def __init__(self, action_type, files, target_dir, output_dir=None, common_base=""):
         super().__init__()
-        self.action_type = action_type
+        self.action_types = _normalize_io_action_types(action_type)
+        self.action_type = self.action_types[0] if self.action_types else ""
         self.files = list(files)
         self.target_dir = target_dir
         self.output_dir = output_dir
@@ -714,58 +761,79 @@ class IOActionWorker(QThread):
 
                 self.progress.emit(row_idx, "正在执行...",
                                    f"[{datetime.now().strftime('%H:%M:%S')}] 正在处理: {base_name}")
-                success, msg = False, ""
+                success, messages = False, []
 
-                if self.action_type == 'export_bookmarks':
-                    csv_path, _ = _build_io_paths_for_file(
-                        file_path, "bookmarks", self.target_dir, common_base=self.common_base
-                    )
-                    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-                    PDFProcessor.export_bookmarks(file_path, csv_path)
-                    success, msg = True, "✅ 导出书签成功"
+                if self.action_type.startswith("export"):
+                    for action_type in self.action_types:
+                        meta = _io_action_metadata(action_type)
+                        data_path, _ = _build_io_paths_for_file(
+                            file_path, meta["data_kind"], self.target_dir, common_base=self.common_base
+                        )
+                        os.makedirs(os.path.dirname(data_path), exist_ok=True)
+                        if action_type == 'export_bookmarks':
+                            PDFProcessor.export_bookmarks(file_path, data_path)
+                            messages.append("✅ 导出书签成功")
+                        elif action_type == 'export_links':
+                            PDFProcessor.export_links(file_path, data_path)
+                            messages.append("✅ 导出链接成功")
+                    success = bool(messages)
 
-                elif self.action_type == 'import_bookmarks':
-                    csv_path, out_pdf = _build_io_paths_for_file(
-                        file_path, "bookmarks", self.target_dir, self.output_dir, self.common_base
-                    )
-                    if not os.path.exists(csv_path):
-                        success, msg = False, "⚠️ 未找到匹配的CSV文件"
-                    else:
-                        if not out_pdf:
-                            raise ValueError("导入书签时缺少输出目录")
-                        out_pdf_path = out_pdf
-                        os.makedirs(os.path.dirname(out_pdf_path), exist_ok=True)
-                        PDFProcessor.import_bookmarks(file_path, csv_path, out_pdf_path)
-                        success, msg = True, "✅ 导入书签成功"
+                elif self.action_type.startswith("import"):
+                    matched_actions = []
+                    final_out_pdf = None
+                    for action_type in self.action_types:
+                        meta = _io_action_metadata(action_type)
+                        data_path, out_pdf = _build_io_paths_for_file(
+                            file_path, meta["data_kind"], self.target_dir, self.output_dir, self.common_base
+                        )
+                        final_out_pdf = final_out_pdf or out_pdf
+                        if os.path.exists(data_path):
+                            matched_actions.append((action_type, data_path))
+                        else:
+                            messages.append(f"⚠️ 未找到匹配的{meta['data_type']}文件")
 
-                elif self.action_type == 'export_links':
-                    json_path, _ = _build_io_paths_for_file(
-                        file_path, "links", self.target_dir, common_base=self.common_base
-                    )
-                    os.makedirs(os.path.dirname(json_path), exist_ok=True)
-                    PDFProcessor.export_links(file_path, json_path)
-                    success, msg = True, "✅ 导出链接成功"
+                    if matched_actions:
+                        if not final_out_pdf:
+                            raise ValueError("导入书签或链接时缺少输出目录")
+                        os.makedirs(os.path.dirname(final_out_pdf), exist_ok=True)
+                        current_source = file_path
+                        temp_paths = []
+                        try:
+                            for action_index, (action_type, data_path) in enumerate(matched_actions):
+                                is_last_action = action_index == len(matched_actions) - 1
+                                if is_last_action:
+                                    current_output = final_out_pdf
+                                else:
+                                    fd, current_output = tempfile.mkstemp(suffix=".pdf", prefix="ratools_io_")
+                                    os.close(fd)
+                                    temp_paths.append(current_output)
 
-                elif self.action_type == 'import_links':
-                    json_path, out_pdf = _build_io_paths_for_file(
-                        file_path, "links", self.target_dir, self.output_dir, self.common_base
-                    )
-                    if not os.path.exists(json_path):
-                        success, msg = False, "⚠️ 未找到匹配的JSON文件"
-                    else:
-                        if not out_pdf:
-                            raise ValueError("导入链接时缺少输出目录")
-                        out_pdf_path = out_pdf
-                        os.makedirs(os.path.dirname(out_pdf_path), exist_ok=True)
-                        PDFProcessor.import_links(file_path, json_path, out_pdf_path)
-                        success, msg = True, "✅ 导入链接成功"
+                                if action_type == 'import_bookmarks':
+                                    PDFProcessor.import_bookmarks(current_source, data_path, current_output)
+                                    messages.append("✅ 导入书签成功")
+                                elif action_type == 'import_links':
+                                    PDFProcessor.import_links(current_source, data_path, current_output)
+                                    messages.append("✅ 导入链接成功")
+                                current_source = current_output
+                            success = True
+                        finally:
+                            for temp_path in temp_paths:
+                                try:
+                                    if os.path.exists(temp_path):
+                                        os.remove(temp_path)
+                                except OSError:
+                                    pass
+
+                msg = "；".join(messages)
 
                 status = "操作成功" if success else "操作失败"
                 if "未找到匹配" in msg:
                     status = "未匹配跳过"
+                    if success:
+                        status = "操作成功"
                 self.progress.emit(row_idx, status, f"   ↳ 结果: {msg}")
 
-            action_name = "导出" if "export" in self.action_type else "导入"
+            action_name = "导出" if self.action_type.startswith("export") else "导入"
             self.finished_action.emit(f"批量高级 '{action_name}' 任务执行完成。")
 
         except Exception as e:
@@ -851,10 +919,8 @@ class MainController(QObject):
         if ENABLE_UPDATE_CHECK:
             self.view.btn_top_about.clicked.connect(self._wire_about_dialog_updates)
 
-        self.view.btn_export_bookmarks.clicked.connect(lambda: self.handle_io_action('export_bookmarks'))
-        self.view.btn_import_bookmarks.clicked.connect(lambda: self.handle_io_action('import_bookmarks'))
-        self.view.btn_export_links.clicked.connect(lambda: self.handle_io_action('export_links'))
-        self.view.btn_import_links.clicked.connect(lambda: self.handle_io_action('import_links'))
+        self.view.btn_bookmark_io_wizard.clicked.connect(lambda: self.handle_io_wizard("bookmarks"))
+        self.view.btn_link_io_wizard.clicked.connect(lambda: self.handle_io_wizard("links"))
 
         self.setup_exclusive_options()
 
@@ -1853,25 +1919,63 @@ class MainController(QObject):
         self.precheck_worker.finished.connect(self.precheck_worker.deleteLater)
         self.precheck_worker.start()
 
-    def handle_io_action(self, action_type):
+    def _get_loaded_files_common_base(self):
+        try:
+            dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
+            return os.path.commonpath(dirs)
+        except ValueError:
+            return ""
+
+    def handle_io_wizard(self, default_data_kind):
         if not self.loaded_files:
             self.view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
             return
 
-        is_export = "export" in action_type
-        data_type = "CSV" if "bookmarks" in action_type else "JSON"
-        action_name = "导出" if is_export else "导入"
-        common_base = ""
+        common_base = self._get_loaded_files_common_base()
 
-        try:
-            dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
-            common_base = os.path.commonpath(dirs)
-        except ValueError:
-            common_base = ""
+        def build_preview(action_type, dir_path):
+            return _build_io_preview_rows(self.loaded_files, action_type, dir_path, common_base)
 
-        dir_path = QFileDialog.getExistingDirectory(self.view, f"请选择 {data_type} 数据{action_name}的目录")
+        dialog = IODataWizardDialog(
+            default_data_kind=default_data_kind,
+            file_count=len(self.loaded_files),
+            preview_callback=build_preview,
+            parent=self.view,
+        )
+        if not dialog.exec():
+            return
+
+        self.handle_io_action(
+            dialog.get_action_types(),
+            dir_path=dialog.get_selected_directory(),
+            common_base=common_base,
+            confirmed=True,
+        )
+
+    def handle_io_action(self, action_type, dir_path=None, common_base=None, confirmed=False):
+        if not self.loaded_files:
+            self.view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
+            return
+
+        action_types = _normalize_io_action_types(action_type)
+        meta = _io_action_metadata(action_types[0])
+        is_export = meta["is_export"]
+        data_type = "CSV/JSON" if len(action_types) > 1 else meta["data_type"]
+        action_name = meta["action_name"]
+
+        if common_base is None:
+            common_base = self._get_loaded_files_common_base()
+
+        if dir_path is None:
+            dir_path = QFileDialog.getExistingDirectory(self.view, f"请选择 {data_type} 数据{action_name}的目录")
         if not dir_path:
             return
+
+        if confirmed and not is_export:
+            rows = _build_io_preview_rows(self.loaded_files, action_types, dir_path, common_base)
+            if not any(row["status"] == "已匹配" for row in rows):
+                self.view.show_warning_message("⚠️ 未找到数据文件", f"所选目录中没有匹配的 {data_type} 文件。")
+                return
 
         out_dir = None
         if not is_export:
@@ -1880,7 +1984,7 @@ class MainController(QObject):
             out_dir_path.mkdir(exist_ok=True)
             out_dir = str(out_dir_path)
 
-        self.io_worker = IOActionWorker(action_type, self.loaded_files, dir_path, out_dir, common_base)
+        self.io_worker = IOActionWorker(action_types, self.loaded_files, dir_path, out_dir, common_base)
         self.io_worker.progress.connect(self.update_progress)
         self.io_worker.finished_action.connect(self.on_io_action_finished)
         self.io_worker.error_action.connect(self.on_io_action_error)
