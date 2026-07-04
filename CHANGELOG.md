@@ -14,6 +14,7 @@ The format is inspired by Keep a Changelog, but kept intentionally lightweight f
 - Minimal GitHub Actions CI workflow
 - Minimal repository regression tests for app paths, version display, and update checker behavior
 - GitHub issue templates and pull request template
+- README project screenshot, FAQ, and screenshot asset guidance
 
 ### Changed
 

@@ -4,6 +4,15 @@
 
 项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并使用 `qpdf` 完成版本转换、线性化与权限限制解除等结构级优化。项目源码采用 `GNU AGPL v3`，第三方组件声明见 `THIRD_PARTY_NOTICES.md`。
 
+![RATools-for-PDF 主界面](docs/assets/screenshots/main-window.png)
+
+## 项目导航
+
+- 使用问题与已知限制：[FAQ.md](FAQ.md)
+- 贡献说明：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题报告：[SECURITY.md](SECURITY.md)
+- 版本记录：[CHANGELOG.md](CHANGELOG.md)
+
 ## 项目特性
 
 - 面向 RA / eCTD 场景的 PDF 批量处理桌面工具
@@ -359,6 +368,10 @@ python -m unittest discover -s tests -p "test_*.py" -v
 GitHub Actions 会运行同一条回归测试命令：
 
 说明：仓库中的部分现有测试会覆盖 PDF 处理和 qpdf 相关路径；如后续补充更重的集成测试，建议继续沿用同一条 `unittest discover` 命令作为统一入口。
+
+## FAQ
+
+- 常见问题、已知限制和维护边界见 [FAQ.md](FAQ.md)
 
 ## Contributing
 
