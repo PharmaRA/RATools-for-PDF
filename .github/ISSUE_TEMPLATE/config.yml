@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue / 安全问题
+    url: https://github.com/PharmaRA/RATools-for-PDF/security/policy
+    about: Please report unpatched security issues privately instead of opening a public issue.

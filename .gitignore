@@ -1,4 +1,6 @@
-/__pycache__
+__pycache__/
+*.pyc
+.pytest_cache/
 /.idea
 settings.ini
 /ra_test
@@ -7,9 +9,3 @@ settings.ini
 /build_pyinstaller
 /*.spec
 /.worktrees
-test_*
-/tests
-!/tests/
-!/tests/test_*.py
-/docs
-/tests

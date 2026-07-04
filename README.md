@@ -172,7 +172,7 @@
 - PySide6
 - PyMuPDF (`fitz`)
 - qpdf（版本转换与线性化依赖）
-- pytest / unittest（自动化回归测试）
+- unittest（最小自动化回归测试）
 
 ## 项目结构
 
@@ -187,8 +187,8 @@ RATools-for-PDF/
 ├─ controller.py      # 控制层，负责事件绑定、任务调度、线程处理
 ├─ pdf_processor.py   # PDF 核心处理引擎
 ├─ update_checker.py  # GitHub Releases 更新检查逻辑
+├─ .github/workflows/ # GitHub Actions CI 配置
 ├─ tests/             # 回归测试
-├─ test_*.py          # 单元测试与构建脚本测试
 ├─ docs/              # 设计记录、计划与归档资料
 ├─ build_pyinstaller.bat
 ├─ build_nuitka.bat
@@ -343,13 +343,12 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 
 ## 测试
 
-项目包含基于 `unittest` 的最小回归测试集，优先覆盖：
+项目包含基于 `unittest` 的最小回归测试集，当前优先覆盖：
 
-- 书签导入/导出 round-trip
-- 链接导入/导出 round-trip
-- 批量导出路径与文件名保护逻辑
-- 日志 CSV 导出结构化记录
-- 智能处理模式的不可预检规则行为
+- 应用版本显示
+- 运行目录与资源目录解析
+- 更新检查中的版本解析与结果判断
+- 现有回归测试中已覆盖的 PDF 处理、日志导出和批量 IO 行为
 
 运行全部测试：
 
@@ -357,9 +356,20 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-GitHub Actions 在打包前也会执行同一条回归测试命令。
+GitHub Actions 会运行同一条回归测试命令：
 
-说明：部分涉及 qpdf 的测试需要本机存在可用的 `qpdf`。
+说明：仓库中的部分现有测试会覆盖 PDF 处理和 qpdf 相关路径；如后续补充更重的集成测试，建议继续沿用同一条 `unittest discover` 命令作为统一入口。
+
+## Contributing
+
+欢迎提交 Issue 和 Pull Request。开始前建议先阅读 `CONTRIBUTING.md`、`SECURITY.md` 与 `CODE_OF_CONDUCT.md`。
+
+仓库已提供以下协作入口：
+
+- Bug 反馈：`.github/ISSUE_TEMPLATE/bug_report.md`
+- 功能建议：`.github/ISSUE_TEMPLATE/feature_request.md`
+- Pull Request 模板：`.github/PULL_REQUEST_TEMPLATE.md`
+- 变更记录：`CHANGELOG.md`
 
 ## Third-Party Notices
 
