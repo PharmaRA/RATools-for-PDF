@@ -9,9 +9,10 @@ from PySide6.QtWidgets import (
     QFrame, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QCheckBox, QScrollArea, QButtonGroup,
     QDialog, QTextEdit, QSizePolicy, QFileDialog, QLineEdit, QSpinBox, QRadioButton,
-    QTableWidget, QTableWidgetItem, QAbstractItemView, QSplitter
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QSplitter, QApplication,
+    QToolButton, QAbstractSpinBox
 )
-from PySide6.QtCore import Qt, Signal, QPoint, QSettings
+from PySide6.QtCore import Qt, Signal, QPoint, QSettings, QTimer
 from PySide6.QtGui import QIcon, QColor  # 引入 QIcon
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
@@ -23,6 +24,13 @@ from log_view_model import (
     filter_log_summary_items,
     log_status_tags,
     split_log_blocks,
+)
+from theme import (
+    active_palette,
+    apply_windows_title_bar_theme,
+    build_app_qss,
+    log_status_colors,
+    ThemeManager,
 )
 
 
@@ -50,216 +58,7 @@ class FramelessDraggableDialog(QDialog):
         if sys.platform == "win32" and platform.release() == "11":
             self._remove_win11_transparent_border()
 
-        self.setStyleSheet("""
-            #dialogBg {
-                background-color: white;
-                border: 1px solid #DCE3EA;
-                border-radius: 10px;
-            }
-            #dialogTitleBar {
-                background-color: #F8FAFC;
-                border: none;
-                border-bottom: 1px solid #E5E7EB;
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }
-            #dialogTitle {
-                font-weight: 700;
-                color: #1F2937;
-                font-size: 13px;
-                border: none;
-            }
-            #dialogCloseBtn {
-                background: transparent;
-                border: none;
-                font-size: 14px;
-                color: #9CA3AF;
-                border-radius: 6px;
-            }
-            #dialogCloseBtn:hover {
-                background-color: #E5E7EB;
-                color: #EF4444;
-            }
-            #dialogContent {
-                border: none;
-                background-color: transparent;
-            }
-            #dialogPrimaryBtn {
-                background-color: #2563EB;
-                color: white;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: 700;
-                border: none;
-            }
-            #dialogPrimaryBtn:hover {
-                background-color: #1D4ED8;
-            }
-            #dialogPrimaryBtn:pressed {
-                background-color: #1E40AF;
-            }
-            #dialogSecondaryBtn {
-                background-color: white;
-                color: #475569;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: 700;
-                border: 1px solid #D1D5DB;
-            }
-            #dialogSecondaryBtn:hover {
-                background-color: #F8FAFC;
-                border-color: #9CA3AF;
-                color: #334155;
-            }
-            #dialogSecondaryBtn:pressed {
-                background-color: #F1F5F9;
-            }
-            #dialogSecondaryBtn:checked {
-                background-color: #E8F1FF;
-                border-color: #93C5FD;
-                color: #155EEF;
-            }
-            #dialogSectionTitle {
-                color: #94A3B8;
-                font-size: 12px;
-                font-weight: 700;
-                border: none;
-            }
-            #logSummaryTable {
-                background-color: white;
-                alternate-background-color: #FBFDFF;
-                color: #334155;
-                border: none;
-                border-radius: 0;
-                gridline-color: #E5E7EB;
-                selection-background-color: #E8F1FF;
-                selection-color: #155EEF;
-                outline: none;
-            }
-            #logSummaryTable::item {
-                padding: 7px;
-                border-bottom: 1px solid #F1F5F9;
-            }
-            #logSummaryTable::item:selected {
-                background-color: #E8F1FF;
-                color: #155EEF;
-            }
-            #logSummaryTable QHeaderView::section {
-                background-color: #F8FAFC;
-                border: none;
-                border-bottom: 1px solid #DCE3EA;
-                padding: 8px;
-                color: #64748B;
-                font-weight: 700;
-            }
-            #logSummaryTable QTableCornerButton::section {
-                background-color: #F8FAFC;
-                border: none;
-                border-bottom: 1px solid #DCE3EA;
-            }
-            #logSummaryFrame {
-                background-color: white;
-                border: 1px solid #DCE3EA;
-                border-radius: 8px;
-            }
-            #logSplitter::handle:vertical {
-                background-color: transparent;
-                border: none;
-                height: 10px;
-                margin: 2px 0;
-            }
-            #logSplitter::handle:vertical:hover {
-                background-color: #E8F1FF;
-                border-radius: 5px;
-            }
-            #logDetailTextEdit {
-                background-color: #F8FAFC;
-                border: 1px solid #DCE3EA;
-                border-radius: 8px;
-                padding: 10px;
-                color: #334155;
-                font-family: Consolas, 'Courier New', monospace;
-                font-size: 12px;
-                selection-background-color: #DBEAFE;
-                selection-color: #1E3A8A;
-            }
-            #aboutHeroCard {
-                background-color: #F8FBFF;
-                border: 1px solid #D7E7F8;
-                border-radius: 10px;
-            }
-            #aboutInfoCard {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 10px;
-            }
-            #aboutBrandTitle {
-                font-size: 22px;
-                font-weight: 700;
-                color: #1D4ED8;
-                border: none;
-            }
-            #aboutBadge {
-                background-color: white;
-                color: #2563EB;
-                border: 1px solid #BFDBFE;
-                border-radius: 999px;
-                padding: 4px 10px;
-                font-weight: 600;
-            }
-            #aboutTitle {
-                color: #111827;
-                font-size: 13px;
-                font-weight: 700;
-                border: none;
-            }
-            #aboutText {
-                color: #475569;
-                font-size: 12px;
-                line-height: 1.8;
-                border: none;
-            }
-            #aboutIntro {
-                color: #374151;
-                font-size: 13px;
-                line-height: 1.7;
-                border: none;
-            }
-            #dangerHint {
-                color: #B42318;
-                background-color: #FEF3F2;
-                border: 1px solid #FECACA;
-                border-radius: 8px;
-                padding: 8px 10px;
-            }
-            #settingsPathCard {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 10px;
-            }
-            #settingsPathHint {
-                color: #64748B;
-                font-size: 12px;
-                border: none;
-            }
-            #settingsPathEdit {
-                background-color: white;
-                border: 1px solid #DCE3EA;
-                border-radius: 8px;
-                padding: 8px 10px;
-                color: #334155;
-                selection-background-color: #DBEAFE;
-                selection-color: #1E3A8A;
-            }
-            #settingsPathStatus {
-                font-size: 12px;
-                border: none;
-                padding: 0 2px;
-            }
-            #settingsPathStatus[state="empty"] { color: #94A3B8; }
-            #settingsPathStatus[state="valid"] { color: #2563EB; }
-            #settingsPathStatus[state="invalid"] { color: #DC2626; font-weight: 600; }
-        """)
+        # 视觉样式全部来自应用级中央 QSS (theme.py)，此处不再本地硬编码颜色。
 
         self.main_layout = QVBoxLayout(self)
 
@@ -280,7 +79,7 @@ class FramelessDraggableDialog(QDialog):
             shadow = QGraphicsDropShadowEffect(self)
             shadow.setBlurRadius(36)
             shadow.setOffset(0, 8)
-            shadow.setColor(QColor(15, 23, 42, 60))
+            shadow.setColor(QColor(*active_palette().shadow_rgba))
             self.bg_frame.setGraphicsEffect(shadow)
 
         bg_layout = QVBoxLayout(self.bg_frame)
@@ -388,7 +187,7 @@ class CustomMessageBox(FramelessDraggableDialog):
         content_h_layout.setSpacing(16)
 
         icon_lbl = QLabel(icon_char)
-        icon_lbl.setStyleSheet("font-size: 36px; border: none; background: transparent;")
+        icon_lbl.setObjectName("msgIcon")
         icon_lbl.setAlignment(Qt.AlignTop)
 
         msg_lbl = QLabel(message_text)
@@ -396,13 +195,9 @@ class CustomMessageBox(FramelessDraggableDialog):
         msg_lbl.setWordWrap(True)
         if is_multiline_block:
             msg_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            msg_lbl.setStyleSheet(
-                "color: #334155; font-size: 12px; border: 1px solid #E2E8F0; "
-                "background-color: #F8FAFC; border-radius: 8px; padding: 10px; "
-                "font-family: Consolas, 'Courier New', monospace; line-height: 1.5;"
-            )
+            msg_lbl.setObjectName("msgTextBlock")
         else:
-            msg_lbl.setStyleSheet("color: #374151; font-size: 13px; border: none; line-height: 1.5;")
+            msg_lbl.setObjectName("msgText")
         msg_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         content_h_layout.addWidget(icon_lbl)
@@ -417,20 +212,17 @@ class CustomMessageBox(FramelessDraggableDialog):
 
         if show_cancel:
             self.btn_cancel = QPushButton("取 消")
+            self.btn_cancel.setObjectName("dialogSecondaryBtn")
             self.btn_cancel.setFixedSize(80, 32)
-            self.btn_cancel.setStyleSheet(
-                "background-color: #F3F4F6; color: #374151; border-radius: 6px; font-weight: bold; border: 1px solid #D1D5DB;")
             self.btn_cancel.clicked.connect(self.reject)
             btn_layout.addWidget(self.btn_cancel)
 
         self.btn_ok = QPushButton("确 定")
         self.btn_ok.setFixedSize(80, 32)
         if msg_type in ["error", "warning"]:
-            self.btn_ok.setStyleSheet(
-                "background-color: #EF4444; color: white; border-radius: 6px; font-weight: bold; border: none;")
+            self.btn_ok.setObjectName("dialogDangerBtn")
         else:
-            self.btn_ok.setStyleSheet(
-                "background-color: #2563EB; color: white; border-radius: 6px; font-weight: bold; border: none;")
+            self.btn_ok.setObjectName("dialogPrimaryBtn")
         self.btn_ok.clicked.connect(self.accept)
         btn_layout.addWidget(self.btn_ok)
 
@@ -449,7 +241,7 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
             "点击下方按钮后会打开选中的 PDF，对话框会保持打开，便于你对照步骤操作。"
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #374151; font-size: 13px; line-height: 1.5;")
+        intro.setObjectName("dialogBody")
         self.content_layout.addWidget(intro)
 
         steps = QLabel(
@@ -461,18 +253,14 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
         )
         steps.setWordWrap(True)
         steps.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        steps.setStyleSheet(
-            "color: #334155; font-size: 12px; border: 1px solid #E2E8F0; "
-            "background-color: #F8FAFC; border-radius: 8px; padding: 10px; "
-            "font-family: Consolas, 'Courier New', monospace; line-height: 1.5;"
-        )
+        steps.setObjectName("dialogCodeBlock")
         self.content_layout.addWidget(steps)
 
         file_count = len(self.pdf_paths)
         self.status_label = QLabel(f"已选中 {file_count} 个 PDF。")
         self.status_label.setWordWrap(True)
         self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.status_label.setStyleSheet("color: #64748B; font-size: 12px;")
+        self.status_label.setObjectName("dialogMuted")
         self.content_layout.addWidget(self.status_label)
         self.content_layout.addStretch()
 
@@ -504,9 +292,10 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
         except Exception as exc:
             ok, message = False, f"无法打开 Acrobat：{exc}"
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(
-            "color: #047857; font-size: 12px;" if ok else "color: #B91C1C; font-size: 12px;"
-        )
+        self.status_label.setObjectName("dialogStatus")
+        self.status_label.setProperty("state", "success" if ok else "error")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
         self.btn_open_acrobat.setEnabled(True)
 
 
@@ -520,33 +309,13 @@ class IODataWizardDialog(FramelessDraggableDialog):
         self.content_layout.setSpacing(12)
 
         title = QLabel("配置数据任务")
-        title.setStyleSheet("color: #0F172A; font-size: 17px; font-weight: 700;")
+        title.setObjectName("dialogHeading")
         self.content_layout.addWidget(title)
 
         intro = QLabel(f"当前队列包含 {file_count} 个 PDF。先选择要处理的数据和方向，再确认目录匹配结果。")
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #64748B; font-size: 12px;")
+        intro.setObjectName("dialogMuted")
         self.content_layout.addWidget(intro)
-
-        choice_style = """
-            QPushButton {
-                color: #334155;
-                background-color: #F8FAFC;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-weight: 600;
-                text-align: center;
-            }
-            QPushButton:checked {
-                color: #155EEF;
-                background-color: #E8F1FF;
-                border-color: #93C5FD;
-            }
-            QPushButton:hover {
-                background-color: #F1F5F9;
-            }
-        """
 
         options_row = QHBoxLayout()
         options_row.setSpacing(12)
@@ -554,7 +323,7 @@ class IODataWizardDialog(FramelessDraggableDialog):
         data_block = QVBoxLayout()
         data_block.setSpacing(6)
         data_title = QLabel("数据类型")
-        data_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        data_title.setObjectName("dialogCaption")
         data_choices = QHBoxLayout()
         data_choices.setSpacing(8)
         self.data_group = QButtonGroup(self)
@@ -565,7 +334,7 @@ class IODataWizardDialog(FramelessDraggableDialog):
         self.data_group.addButton(self.radio_links)
         for btn in [self.radio_bookmarks, self.radio_links]:
             btn.setCheckable(True)
-            btn.setStyleSheet(choice_style)
+            btn.setObjectName("choiceToggleBtn")
             btn.setCursor(Qt.PointingHandCursor)
             data_choices.addWidget(btn)
         data_block.addWidget(data_title)
@@ -574,7 +343,7 @@ class IODataWizardDialog(FramelessDraggableDialog):
         direction_block = QVBoxLayout()
         direction_block.setSpacing(6)
         direction_title = QLabel("操作方向")
-        direction_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        direction_title.setObjectName("dialogCaption")
         direction_choices = QHBoxLayout()
         direction_choices.setSpacing(8)
         self.direction_group = QButtonGroup(self)
@@ -584,7 +353,7 @@ class IODataWizardDialog(FramelessDraggableDialog):
         self.direction_group.addButton(self.radio_import)
         for btn in [self.radio_export, self.radio_import]:
             btn.setCheckable(True)
-            btn.setStyleSheet(choice_style)
+            btn.setObjectName("choiceToggleBtn")
             btn.setCursor(Qt.PointingHandCursor)
             direction_choices.addWidget(btn)
         direction_block.addWidget(direction_title)
@@ -595,15 +364,12 @@ class IODataWizardDialog(FramelessDraggableDialog):
         self.content_layout.addLayout(options_row)
 
         directory_card = QFrame()
-        directory_card.setStyleSheet(
-            "QFrame { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }"
-            "QLabel { border: none; background: transparent; }"
-        )
+        directory_card.setObjectName("wizardCard")
         directory_layout = QVBoxLayout(directory_card)
         directory_layout.setContentsMargins(12, 10, 12, 10)
         directory_layout.setSpacing(8)
         directory_title = QLabel("数据目录")
-        directory_title.setStyleSheet("color: #475569; font-size: 12px; font-weight: 700;")
+        directory_title.setObjectName("dialogCaption")
         directory_layout.addWidget(directory_title)
 
         dir_row = QHBoxLayout()
@@ -621,37 +387,32 @@ class IODataWizardDialog(FramelessDraggableDialog):
 
         self.output_hint = QLabel("")
         self.output_hint.setWordWrap(True)
-        self.output_hint.setStyleSheet("color: #64748B; font-size: 12px;")
+        self.output_hint.setObjectName("dialogMuted")
         directory_layout.addWidget(self.output_hint)
         self.content_layout.addWidget(directory_card)
 
         preview_title_row = QHBoxLayout()
         preview_title_row.setSpacing(10)
         preview_title = QLabel("匹配预览")
-        preview_title.setStyleSheet("color: #0F172A; font-size: 13px; font-weight: 700;")
+        preview_title.setObjectName("dialogSubTitle")
         preview_title_row.addWidget(preview_title)
         preview_title_row.addStretch()
         self.content_layout.addLayout(preview_title_row)
 
         self.summary_label = QLabel("等待选择数据目录")
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet(
-            "color: #475569; background-color: #F8FAFC; border: 1px solid #E2E8F0; "
-            "border-radius: 8px; padding: 7px 10px; font-size: 12px;"
-        )
+        self.summary_label.setObjectName("dialogInfoPanel")
         self.content_layout.addWidget(self.summary_label)
 
         self.preview_empty_label = QLabel("选择数据目录后，将在这里显示每个 PDF 的数据文件匹配结果。")
         self.preview_empty_label.setAlignment(Qt.AlignCenter)
         self.preview_empty_label.setWordWrap(True)
         self.preview_empty_label.setMinimumHeight(150)
-        self.preview_empty_label.setStyleSheet(
-            "color: #64748B; background-color: #F8FAFC; border: 1px dashed #CBD5E1; "
-            "border-radius: 8px; padding: 18px; font-size: 12px;"
-        )
+        self.preview_empty_label.setObjectName("dialogEmptyPanel")
         self.content_layout.addWidget(self.preview_empty_label, 1)
 
         self.preview_table = QTableWidget()
+        self.preview_table.setObjectName("previewTable")
         self.preview_table.setColumnCount(4)
         self.preview_table.setHorizontalHeaderLabels(["PDF", "类型", "状态", "数据文件"])
         self.preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -663,10 +424,6 @@ class IODataWizardDialog(FramelessDraggableDialog):
         self.preview_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.preview_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.preview_table.setMinimumHeight(170)
-        self.preview_table.setStyleSheet(
-            "QTableWidget { border: 1px solid #E2E8F0; border-radius: 8px; gridline-color: #E5E7EB; }"
-            "QHeaderView::section { background-color: #F8FAFC; border: none; border-bottom: 1px solid #E2E8F0; padding: 7px; color: #475569; font-weight: 700; }"
-        )
         self.content_layout.addWidget(self.preview_table, 1)
 
         btn_row = QHBoxLayout()
@@ -772,10 +529,11 @@ class IODataWizardDialog(FramelessDraggableDialog):
             values = [row.get("file_name", ""), row.get("data_label", data_kind), status, row.get("data_path", "")]
             for col_idx, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
+                palette = active_palette()
                 if status == "未找到":
-                    item.setForeground(QColor(180, 83, 9))
+                    item.setForeground(QColor(palette.warning_text))
                 elif status in ["已匹配", "将生成"]:
-                    item.setForeground(QColor(22, 101, 52))
+                    item.setForeground(QColor(palette.success_text))
                 self.preview_table.setItem(row_idx, col_idx, item)
 
         if is_export:
@@ -896,23 +654,15 @@ class LogDialog(FramelessDraggableDialog):
 
     def _create_stat_card(self, parent_layout, title):
         card = QFrame()
-        card.setStyleSheet(
-            "background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;"
-        )
+        card.setObjectName("statCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 6, 10, 6)
         card_layout.setSpacing(4)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(
-            "color: #64748B; font-size: 11px; font-weight: 700; "
-            "border: none; background: transparent; padding: 0;"
-        )
+        title_label.setObjectName("statCardTitle")
         value_label = QLabel("0")
-        value_label.setStyleSheet(
-            "color: #0F172A; font-size: 20px; font-weight: 700; "
-            "border: none; background: transparent; padding: 0;"
-        )
+        value_label.setObjectName("statCardValue")
 
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
@@ -986,8 +736,9 @@ class LogDialog(FramelessDraggableDialog):
         self._populate_summary_table(self.filtered_items)
 
         if not self.filtered_items:
+            pal = active_palette()
             self.text_edit.setHtml(
-                "<div style='color:#94A3B8; font-family:Consolas,\'Courier New\',monospace; font-size:12px;'>暂无匹配日志...</div>"
+                f"<div style='color:{pal.text_faint}; font-family:Consolas,\'Courier New\',monospace; font-size:12px;'>暂无匹配日志...</div>"
             )
             return
 
@@ -1020,18 +771,11 @@ class LogDialog(FramelessDraggableDialog):
 
     @staticmethod
     def _apply_status_table_style(table_item, tags):
-        if "failure" in tags:
-            table_item.setForeground(QColor("#B42318"))
-            table_item.setBackground(QColor("#FEF3F2"))
-        elif "skip" in tags:
-            table_item.setForeground(QColor("#92400E"))
-            table_item.setBackground(QColor("#FFF7ED"))
-        elif "precheck" in tags:
-            table_item.setForeground(QColor("#155EEF"))
-            table_item.setBackground(QColor("#EFF6FF"))
-        elif "success" in tags:
-            table_item.setForeground(QColor("#047857"))
-            table_item.setBackground(QColor("#ECFDF3"))
+        pal = active_palette()
+        accent, bg, text = log_status_colors(pal, tags)
+        if tags & {"failure", "skip", "precheck", "success"}:
+            table_item.setForeground(QColor(text))
+            table_item.setBackground(QColor(bg))
 
     def _show_selected_detail(self):
         selected = self.summary_table.selectedItems()
@@ -1047,26 +791,13 @@ class LogDialog(FramelessDraggableDialog):
             return
         query = self.search_edit.text().strip()
         tags = item.get("tags", set())
-        if "failure" in tags:
-            accent = "#B42318"
-            bg = "#FEF3F2"
-        elif "skip" in tags:
-            accent = "#F59E0B"
-            bg = "#FFF7ED"
-        elif "precheck" in tags:
-            accent = "#2563EB"
-            bg = "#EFF6FF"
-        elif "success" in tags:
-            accent = "#10B981"
-            bg = "#ECFDF3"
-        else:
-            accent = "#94A3B8"
-            bg = "#FFFFFF"
+        pal = active_palette()
+        accent, bg, _text = log_status_colors(pal, tags)
 
         highlighted = self._highlight_html(item.get("detail", ""), query)
         self.text_edit.setHtml(
-            f"<div style='padding:10px 12px; background:{bg}; border:1px solid #DCE3EA; border-left:4px solid {accent}; border-radius:8px;'>"
-            f"<pre style='margin:0; white-space:pre-wrap; color:#334155; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
+            f"<div style='padding:10px 12px; background:{bg}; border:1px solid {pal.border}; border-left:4px solid {accent}; border-radius:8px;'>"
+            f"<pre style='margin:0; white-space:pre-wrap; color:{pal.text_body}; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
             "</div>"
         )
 
@@ -1078,23 +809,16 @@ class SettingsDialog(FramelessDraggableDialog):
 
         self.content_layout.setSpacing(16)
 
-        cb_style = """
-            QCheckBox { font-size: 13px; color: #374151; spacing: 8px; border: none; }
-            QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #D1D5DB; background: white; margin-top: 1px;}
-            QCheckBox::indicator:checked { background: #2563EB; border-color: #2563EB; }
-        """
-
+        # 复选框视觉由中央 QSS 统一定义；覆盖原文件项用 dangerCheck 标红。
         self.cb_auto_open = QCheckBox("处理完成后自动打开输出文件夹")
         self.cb_auto_open.setChecked(True)
-        self.cb_auto_open.setStyleSheet(cb_style)
 
         self.cb_overwrite = QCheckBox("覆盖原始文件 (不推荐)")
         self.cb_overwrite.setChecked(False)
-        self.cb_overwrite.setStyleSheet(cb_style.replace("color: #374151;", "color: #EF4444;"))
+        self.cb_overwrite.setObjectName("dangerCheck")
 
         self.cb_parallel_processing = QCheckBox("启用并行处理")
         self.cb_parallel_processing.setChecked(False)
-        self.cb_parallel_processing.setStyleSheet(cb_style)
 
         self.parallel_max_workers = max(2, min(os.cpu_count() or 2, 4))
         self.spin_parallel_workers = QSpinBox()
@@ -1103,7 +827,65 @@ class SettingsDialog(FramelessDraggableDialog):
         self.spin_parallel_workers.setEnabled(False)
         self.spin_parallel_workers.setObjectName("settingsWorkerSpin")
         self.spin_parallel_workers.setSuffix(" 个任务")
-        self.cb_parallel_processing.toggled.connect(self.spin_parallel_workers.setEnabled)
+        self.spin_parallel_workers.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+        self.parallel_worker_stepper = QFrame()
+        self.parallel_worker_stepper.setObjectName("settingsSpinStepper")
+        stepper_layout = QVBoxLayout(self.parallel_worker_stepper)
+        stepper_layout.setContentsMargins(0, 0, 0, 0)
+        stepper_layout.setSpacing(0)
+
+        self.btn_parallel_worker_up = QToolButton()
+        self.btn_parallel_worker_down = QToolButton()
+        for btn, direction, arrow_type in [
+            (self.btn_parallel_worker_up, "up", Qt.UpArrow),
+            (self.btn_parallel_worker_down, "down", Qt.DownArrow),
+        ]:
+            btn.setObjectName("settingsSpinStepBtn")
+            btn.setProperty("direction", direction)
+            btn.setArrowType(arrow_type)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setEnabled(False)
+            stepper_layout.addWidget(btn)
+
+        self.btn_parallel_worker_up.clicked.connect(self.spin_parallel_workers.stepUp)
+        self.btn_parallel_worker_down.clicked.connect(self.spin_parallel_workers.stepDown)
+        self.cb_parallel_processing.toggled.connect(self.set_parallel_worker_controls_enabled)
+
+        title = QLabel("外观主题")
+        title.setObjectName("dialogSectionTitle")
+        self.content_layout.addWidget(title)
+
+        theme_card = QFrame()
+        theme_card.setObjectName("settingsPathCard")
+        theme_layout = QVBoxLayout(theme_card)
+        theme_layout.setContentsMargins(12, 12, 12, 12)
+        theme_layout.setSpacing(10)
+
+        theme_hint = QLabel("默认跟随系统深浅色，也可手动锁定为亮色或暗色。")
+        theme_hint.setWordWrap(True)
+        theme_hint.setObjectName("settingsPathHint")
+        theme_layout.addWidget(theme_hint)
+
+        theme_row = QHBoxLayout()
+        theme_row.setContentsMargins(0, 0, 0, 0)
+        theme_row.setSpacing(8)
+        self.theme_mode_group = QButtonGroup(self)
+        self.theme_mode_group.setExclusive(True)
+        self.theme_buttons = {}
+        for mode, label in [("system", "跟随系统"), ("light", "亮色"), ("dark", "暗色")]:
+            btn = QPushButton(label)
+            btn.setObjectName("themeSegBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            self.theme_mode_group.addButton(btn)
+            self.theme_buttons[mode] = btn
+            theme_row.addWidget(btn)
+        theme_row.addStretch()
+        theme_layout.addLayout(theme_row)
+        self.content_layout.addWidget(theme_card)
 
         title = QLabel("默认保存位置")
         title.setObjectName("dialogSectionTitle")
@@ -1174,7 +956,12 @@ class SettingsDialog(FramelessDraggableDialog):
         worker_label = QLabel("并行数量")
         worker_label.setObjectName("settingsPathHint")
         worker_row.addWidget(worker_label)
-        worker_row.addWidget(self.spin_parallel_workers)
+        worker_spin_layout = QHBoxLayout()
+        worker_spin_layout.setContentsMargins(0, 0, 0, 0)
+        worker_spin_layout.setSpacing(0)
+        worker_spin_layout.addWidget(self.spin_parallel_workers)
+        worker_spin_layout.addWidget(self.parallel_worker_stepper)
+        worker_row.addLayout(worker_spin_layout)
         worker_row.addStretch()
         parallel_layout.addLayout(worker_row)
 
@@ -1213,6 +1000,23 @@ class SettingsDialog(FramelessDraggableDialog):
 
         self.style().unpolish(self.default_output_status)
         self.style().polish(self.default_output_status)
+
+    def get_theme_mode(self):
+        for mode, btn in self.theme_buttons.items():
+            if btn.isChecked():
+                return mode
+        return "system"
+
+    def set_theme_mode(self, mode):
+        if mode not in self.theme_buttons:
+            mode = "system"
+        for key, btn in self.theme_buttons.items():
+            btn.setChecked(key == mode)
+
+    def set_parallel_worker_controls_enabled(self, enabled):
+        self.spin_parallel_workers.setEnabled(enabled)
+        self.btn_parallel_worker_up.setEnabled(enabled)
+        self.btn_parallel_worker_down.setEnabled(enabled)
 
 
 class AboutDialog(FramelessDraggableDialog):
@@ -1338,19 +1142,25 @@ class DropZoneLabel(QLabel):
         super().__init__(text)
         self.setAcceptDrops(True)
 
+    def _set_drag_active(self, active):
+        # 拖拽高亮通过动态属性驱动中央 QSS (#dropZone[dragActive="true"])，
+        # 不再本地硬编码颜色。
+        self.setProperty("dragActive", "true" if active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self.setStyleSheet(
-                "border: 2px dashed #2563EB; background-color: #EFF6FF; border-radius: 12px; color: #2563EB;")
+            self._set_drag_active(True)
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event):
-        self.setStyleSheet("")
+        self._set_drag_active(False)
 
     def dropEvent(self, event):
-        self.setStyleSheet("")
+        self._set_drag_active(False)
         urls = event.mimeData().urls()
         paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
         if paths:
@@ -1415,6 +1225,22 @@ class MainWindow(QMainWindow):
 
         self.all_checkboxes = {}
         self.current_file_count = 0
+
+        # ================= 初始化 QSettings 与主题管理 =================
+        current_dir = get_app_dir()
+        ini_path = os.path.join(current_dir, "settings.ini")
+        self.app_settings = QSettings(ini_path, QSettings.IniFormat)
+
+        # 主题必须先应用到 QApplication，再让窗口级 apply_stylesheet() 做兼容回退；
+        # 否则启动时会给 MainWindow 残留一份本地亮色 QSS，压过应用级暗色主题。
+        app = QApplication.instance()
+        theme_mode = str(self.app_settings.value("Settings/ThemeMode", "system") or "system").lower()
+        if app is not None:
+            self.theme_manager = ThemeManager(app, theme_mode)
+            self.theme_manager.changed.connect(self.apply_native_title_bar_theme)
+            self.theme_manager.apply()
+        else:
+            self.theme_manager = None
 
         self.settings_dialog = SettingsDialog(self)
         self.all_checkboxes["处理完成后自动打开输出文件夹"] = self.settings_dialog.cb_auto_open
@@ -1616,7 +1442,7 @@ class MainWindow(QMainWindow):
         list_header_layout = QHBoxLayout(list_header)
         list_header_layout.setContentsMargins(16, 8, 16, 8)
         self.list_title = QLabel("待处理队列 (0)")
-        self.list_title.setStyleSheet("font-weight: 700; color: #1F2937;")
+        self.list_title.setObjectName("listTitle")
         self.btn_clear = QPushButton("清空列表")
         self.btn_clear.setObjectName("actionBtn")
         list_header_layout.addWidget(self.list_title)
@@ -1668,7 +1494,7 @@ class MainWindow(QMainWindow):
         rh_layout.setSpacing(18)
 
         self.rh_title = QLabel("处理规则选项")
-        self.rh_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.rh_title.setObjectName("rightPanelTitle")
 
         self.selection_summary_label = QLabel("尚未选择任何处理规则")
         self.selection_summary_label.setObjectName("selectionSummary")
@@ -1691,7 +1517,6 @@ class MainWindow(QMainWindow):
         # 存储每一个页面的包装容器
         self.settings_pages = []
 
-        btn_style = "background-color: #F3F4F6; color: #374151; border-radius: 6px; padding: 6px 12px; font-weight: bold; border: 1px solid #D1D5DB;"
         self.btn_bookmark_io_wizard = QPushButton("导入/导出书签数据...")
         self.btn_link_io_wizard = QPushButton("导入/导出链接数据...")
         self.btn_embed_missing_fonts = QPushButton("🛠 嵌入缺失字体")
@@ -1700,7 +1525,7 @@ class MainWindow(QMainWindow):
         self.btn_embed_missing_fonts.setToolTip("打开选中的 PDF，并在 Acrobat 中手动执行印前检查的“嵌入缺失的字体”。")
 
         for btn in [self.btn_bookmark_io_wizard, self.btn_link_io_wizard]:
-            btn.setStyleSheet(btn_style)
+            btn.setObjectName("secondaryBtn")
             btn.setCursor(Qt.PointingHandCursor)
 
         for mod in self.MODULES_DATA:
@@ -1717,7 +1542,7 @@ class MainWindow(QMainWindow):
                 page_layout.addWidget(self._create_section_label("字体手动处理"))
                 font_action_hint = QLabel("如预检提示存在未嵌入字体，请先选中左侧 PDF，再点击下面的按钮跳转 Acrobat 进行处理。")
                 font_action_hint.setWordWrap(True)
-                font_action_hint.setStyleSheet("color: #6B7280; font-size: 11px;")
+                font_action_hint.setObjectName("mutedSmall")
                 page_layout.addWidget(font_action_hint)
                 page_layout.addWidget(self.btn_embed_missing_fonts)
 
@@ -1876,11 +1701,6 @@ class MainWindow(QMainWindow):
         self.switch_settings_page(0)
         self.apply_stylesheet()
 
-        # ================= 初始化 QSettings 持久化存储 =================
-        current_dir = get_app_dir()
-        ini_path = os.path.join(current_dir, "settings.ini")
-        self.app_settings = QSettings(ini_path, QSettings.IniFormat)
-
         self.settings_key_map = {
             "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
             "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
@@ -1893,6 +1713,10 @@ class MainWindow(QMainWindow):
         self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
         self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
         self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+
+        self.settings_dialog.set_theme_mode(theme_mode)
+        for mode, btn in self.settings_dialog.theme_buttons.items():
+            btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
 
         self.load_all_settings()
         self.refresh_selection_summary()
@@ -1981,7 +1805,7 @@ class MainWindow(QMainWindow):
             parallel_workers = 2
         self.settings_dialog.spin_parallel_workers.setValue(parallel_workers)
         self.settings_dialog.cb_parallel_processing.setChecked(parallel_enabled)
-        self.settings_dialog.spin_parallel_workers.setEnabled(parallel_enabled)
+        self.settings_dialog.set_parallel_worker_controls_enabled(parallel_enabled)
 
         processing_mode = str(self.app_settings.value("Settings/ProcessingMode", "smart") or "smart").lower()
         self.radio_force_processing.setChecked(processing_mode == "force")
@@ -2020,6 +1844,19 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "app_settings"):
             return
         self.app_settings.setValue("Settings/ProcessingMode", self.get_processing_mode())
+
+    def on_theme_mode_changed(self, mode):
+        """切换外观主题：更新分段按钮选中态、应用配色并持久化。"""
+        self.settings_dialog.set_theme_mode(mode)
+        if self.theme_manager is not None:
+            self.theme_manager.set_mode(mode)
+        if hasattr(self, "app_settings"):
+            self.app_settings.setValue("Settings/ThemeMode", mode)
+        QTimer.singleShot(0, self.apply_native_title_bar_theme)
+
+    def apply_native_title_bar_theme(self, palette=None):
+        """同步 Windows 原生标题栏颜色；非 Windows 平台会静默跳过。"""
+        apply_windows_title_bar_theme(self, palette or active_palette())
 
     def persist_current_checkbox(self, checkbox):
         if not hasattr(self, "app_settings"):
@@ -2331,7 +2168,7 @@ class MainWindow(QMainWindow):
 
     def _create_section_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #9CA3AF; font-size: 12px; font-weight: bold; margin-bottom: 4px;")
+        lbl.setObjectName("sectionCaption")
         return lbl
 
     def _create_checkbox(self, opt_id, title, desc, checked):
@@ -2352,7 +2189,7 @@ class MainWindow(QMainWindow):
 
         title_lbl = QLabel(title)
         title_lbl.setWordWrap(True)
-        title_lbl.setStyleSheet("font-weight: 500; color: #374151;")
+        title_lbl.setObjectName("optionTitle")
         title_lbl.mousePressEvent = lambda event, checkbox=cb: checkbox.toggle()
 
         top_layout.addWidget(cb, 0, Qt.AlignTop)
@@ -2362,96 +2199,18 @@ class MainWindow(QMainWindow):
         if desc:
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
-            desc_lbl.setStyleSheet("color: #6B7280; font-size: 11px; margin-left: 24px;")
+            desc_lbl.setObjectName("optionDesc")
             layout.addWidget(desc_lbl)
 
         return container
 
     def apply_stylesheet(self):
-        qss = """
-        QMainWindow { background-color: #F4F6F8; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #1F2937; }
-
-        #header, #leftSidebar, #rightSidebar, #footer, #presetBar { background-color: white; }
-        #header { border-bottom: 1px solid #DCE3EA; }
-        #leftSidebar { border-right: 1px solid #E5E7EB; }
-        #rightSidebar { border-left: 1px solid #E5E7EB; }
-        #footer { border-top: 1px solid #DCE3EA; }
-        #presetBar { border-top: 1px solid #E5E7EB; border-bottom: 1px solid #E5E7EB; }
-        #presetLabel { color: #52606D; font-size: 12px; font-weight: 700; }
-        #presetSummary { color: #6B7280; font-size: 12px; }
-
-        #topBtn { background: transparent; border: none; font-weight: 600; color: #4B5563; padding: 6px 12px; border-radius: 6px; }
-        #topBtn:hover { background-color: #F3F4F6; color: #111827; }
-
-        #navTitle { color: #94A3B8; font-size: 11px; font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; }
-        #navBtn { text-align: left; padding: 11px 12px; border: 1px solid transparent; border-radius: 10px; color: #475569; font-weight: 600; background-color: transparent; }
-        #navBtn:hover { background-color: #F8FAFC; border-color: #E2E8F0; }
-        #navBtn:checked { background-color: #E8F1FF; color: #155EEF; font-weight: 700; border-color: #BFDBFE; }
-        #mainView { background-color: #F4F6F8; }
-        #importCard, #listContainer { background-color: white; border: 1px solid #DCE3EA; border-radius: 16px; }
-        #sectionTitle { font-size: 14px; font-weight: 700; color: #0F172A; }
-        #sectionHint { color: #64748B; font-size: 12px; }
-        #dropZone { border: 2px dashed #B8C6DB; border-radius: 14px; background-color: #F8FBFF; color: #52606D; font-weight: 600; }
-        #dropZone:hover { border-color: #60A5FA; background-color: #EFF6FF; color: #1D4ED8; }
-        #secondaryBtn { padding: 8px 14px; border: 1px solid #DCE3EA; border-radius: 9px; background-color: white; color: #334155; font-weight: 600; }
-        #secondaryBtn:hover { background-color: #F8FAFC; border-color: #CBD5E1; }
-        #mutedLabel { color: #64748B; font-size: 12px; }
-        #listHeader { border-bottom: 1px solid #E5E7EB; background-color: #F8FAFC; border-top-left-radius: 16px; border-top-right-radius: 16px; }
-
-        QTreeWidget { show-decoration-selected: 1; border: none; background-color: white; color: #334155; outline: none; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; alternate-background-color: #FBFDFF; }
-        QTreeWidget::item { padding: 7px; border-bottom: 1px solid #F1F5F9; }
-        QTreeWidget::item:hover:!selected { background-color: #F8FAFC; color: #334155; }
-        QTreeWidget::item:selected { background-color: #E8F1FF; color: #155EEF; }
-        QTreeWidget::branch { background-color: white; border: none; }
-        QTreeWidget::branch:alternate { background-color: #FBFDFF; }
-        QTreeWidget::branch:hover { background-color: #F8FAFC; }
-        QTreeWidget::branch:has-siblings:!adjoins-item,
-        QTreeWidget::branch:has-siblings:adjoins-item,
-        QTreeWidget::branch:!has-children:!has-siblings:adjoins-item { border-image: none; image: none; }
-        QTreeWidget::branch:selected { background-color: #E8F1FF; }
-        QTreeWidget::branch:selected:hover { background-color: #E8F1FF; }
-        QHeaderView::section { background-color: white; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; color: #64748B; font-weight: 600; text-align: left; }
-
-        #rightHeader { border-bottom: 1px solid #E5E7EB; }
-        #selectionSummary { color: #475569; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 8px 10px; qproperty-alignment: 'AlignCenter'; }
-        #dangerHint { color: #B42318; background-color: #FEF3F2; border: 1px solid #FECACA; border-radius: 8px; padding: 8px 10px; }
-
-        #settingsScroll { border: none; background-color: transparent; margin: 0; padding: 0; }
-        #settingsScroll > QWidget { background-color: transparent; }
-        #settingsScroll > QWidget > QWidget { background-color: transparent; margin: 0; padding: 0; }
-
-        QScrollBar:vertical { border: none; background: transparent; width: 8px; margin: 0px; }
-        QScrollBar::handle:vertical { background: #CBD5E1; min-height: 30px; border-radius: 4px; }
-        QScrollBar::handle:vertical:hover { background: #94A3B8; }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }
-        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-
-        QScrollBar:horizontal { border: none; background: #EAF0F6; height: 14px; margin: 2px 8px 4px 8px; border-radius: 7px; }
-        QScrollBar::handle:horizontal { background: #94A3B8; min-width: 44px; border-radius: 7px; margin: 1px; }
-        QScrollBar::handle:horizontal:hover { background: #64748B; }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; background: none; }
-        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: #EAF0F6; border-radius: 7px; }
-
-        QCheckBox { outline: none; }
-        QCheckBox:focus { outline: none; }
-        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #CBD5E1; background: white; margin-top: 1px; }
-        QCheckBox::indicator:checked { background: #2563EB; border-color: #2563EB; }
-        #actionBtn { padding: 8px 16px; border: 1px solid #D1D5DB; border-radius: 10px; background-color: white; color: #475569; font-weight: 600; }
-        #actionBtn:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
-        #presetBtn { padding: 6px 14px; border: 1px solid #D1D5DB; border-radius: 8px; background-color: white; color: #475569; font-weight: 600; }
-        #presetBtn:hover { background-color: #F9FAFB; border-color: #9CA3AF; }
-        #presetBtn:checked { background-color: #E8F1FF; border-color: #93C5FD; color: #155EEF; }
-        #presetBtn:focus { outline: none; }
-        #footerSummary { color: #0F172A; font-weight: 700; }
-        #processingHint { color: #155EEF; min-width: 0px; }
-        #footerHint { color: #64748B; min-width: 0px; }
-        #footerHint[danger="true"] { color: #B42318; font-weight: 600; }
-        #startBtn { padding: 10px 24px; background-color: #2563EB; color: white; border-radius: 10px; font-weight: bold; border: none; }
-        #startBtn[stopMode="true"] { background-color: #DC2626; }
-        #startBtn[stopMode="true"]:hover { background-color: #B91C1C; }
-        #startBtn[stopMode="true"]:pressed { background-color: #991B1B; }
-        #startBtn:hover { background-color: #1D4ED8; }
-        #startBtn:pressed { background-color: #1E40AF; }
-        #startBtn:disabled { background-color: #BFDBFE; color: #EFF6FF; }
-        """
-        self.setStyleSheet(qss)
+        # 视觉样式全部集中在 theme.py 的应用级 QSS 中，由 ThemeManager 应用到
+        # QApplication 并级联到本窗口。此处保留方法名以兼容旧调用点：主题未初始化
+        # (如单元测试直接实例化 MainWindow) 时，回退到用当前生效配色本地渲染一次，
+        # 确保窗口不至于完全无样式。
+        app = QApplication.instance()
+        if app is not None and app.styleSheet():
+            # 已由 ThemeManager 设置了应用级样式，无需在窗口层重复。
+            return
+        self.setStyleSheet(build_app_qss(active_palette()))
