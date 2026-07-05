@@ -44,19 +44,19 @@ for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_
 for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_WINDOWS_VERSION; print(*APP_WINDOWS_VERSION, sep=chr(44)+chr(32))"') do set "APP_WINDOWS_VERSION=%%A"
 
 if not defined APP_COMPANY (
-    echo [ERROR] Failed to read APP_COMPANY from app_version.py.
+    echo [ERROR] Failed to read APP_COMPANY from ratools_pdf.config.version.
     exit /b 1
 )
 if not defined APP_NAME (
-    echo [ERROR] Failed to read APP_NAME from app_version.py.
+    echo [ERROR] Failed to read APP_NAME from ratools_pdf.config.version.
     exit /b 1
 )
 if not defined APP_VERSION_STR (
-    echo [ERROR] Failed to read APP_VERSION_STR from app_version.py.
+    echo [ERROR] Failed to read APP_VERSION_STR from ratools_pdf.config.version.
     exit /b 1
 )
 if not defined APP_WINDOWS_VERSION (
-    echo [ERROR] Failed to read APP_WINDOWS_VERSION from app_version.py.
+    echo [ERROR] Failed to read APP_WINDOWS_VERSION from ratools_pdf.config.version.
     exit /b 1
 )
 
@@ -96,7 +96,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call :build_variant "%NO_UPDATE_MAIN_FILE%" "RATools-for-PDF-NoUpdate" "--exclude-module update_checker"
+call :build_variant "%NO_UPDATE_MAIN_FILE%" "RATools-for-PDF-NoUpdate" "--exclude-module ratools_pdf.services.update_checker"
 if errorlevel 1 (
     call :cleanup_version_info
     exit /b 1

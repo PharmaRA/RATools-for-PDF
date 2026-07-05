@@ -1,6 +1,6 @@
 import unittest
 
-import app_version
+from ratools_pdf.config import version as app_version
 
 
 class AppVersionTests(unittest.TestCase):

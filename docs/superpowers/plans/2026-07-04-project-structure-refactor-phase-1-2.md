@@ -1,10 +1,10 @@
-# Project Structure Refactor Phase 1 and 2 Implementation Plan
+# Project Structure Refactor Phase 1, 2, and 3 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the current flat script-style layout into a package-based desktop application structure without changing user-visible behavior.
+**Goal:** Turn the current flat script-style layout into a package-based desktop application structure without changing UI behavior.
 
-**Architecture:** Keep `main.py` and `main_no_update.py` at the repository root so PyInstaller, Nuitka, and existing user habits stay stable. Move implementation modules into a `ratools_pdf` package behind compatibility shims, then split the three oversized modules (`controller.py`, `view.py`, `pdf_processor.py`) by responsibility in a second phase.
+**Architecture:** Keep `main.py` and `main_no_update.py` at the repository root so PyInstaller, Nuitka, and existing user habits stay stable. Move implementation modules into a `ratools_pdf` package, split the three oversized modules (`controller.py`, `view.py`, `pdf_processor.py`) by responsibility, then remove root compatibility shims in Phase 3 after active tests and docs use package imports.
 
 **Tech Stack:** Python 3, PySide6, PyMuPDF (`fitz`), Windows batch build scripts, `unittest`.
 
@@ -26,9 +26,9 @@ This is workable for an early PySide tool, but it now makes file discovery, owne
 - Do not change user-facing behavior.
 - Do not change the generated executable names.
 - Do not move `main.py`, `main_no_update.py`, `build_pyinstaller.bat`, or `build_nuitka.bat` out of the repository root.
-- Do not adopt a `src/` layout in these two phases.
+- Do not adopt a `src/` layout in these phases.
 - Do not rewrite PDF processing algorithms while moving files.
-- Do not remove root-level compatibility modules until a later cleanup phase.
+- Do not remove root-level compatibility modules until Phase 3.
 - Do not start the structural refactor from a base branch older than the `feature/ui-redesign` merge commit.
 
 ## Phase Gates
@@ -49,6 +49,7 @@ Phase 0 is already complete in the current baseline when:
 - 2026-07-05: Phase 2 has moved `PDFProcessor` into `ratools_pdf/pdf/processor.py`, with root `pdf_processor.py` retained as a compatibility shim.
 - 2026-07-05: Phase 2 has split PDF helpers into `ratools_pdf/pdf/qpdf.py`, `precheck.py`, `bookmarks_links.py`, `page_layout.py`, and `hyperlink_styles.py`; `PDFProcessor` now exposes compatibility static wrappers.
 - 2026-07-05: The full regression suite passes with 56 tests after the package refactor.
+- 2026-07-05: Phase 3 removes root compatibility shims, migrates active tests to package imports, and keeps only real entry points and build scripts at the repository root.
 
 Phase 1 is complete when:
 
@@ -61,6 +62,12 @@ Phase 2 is complete when:
 - The three oversized modules are reduced to compatibility shims or small facade modules.
 - Controller helpers, controller workers, UI dialogs/widgets, and PDF processing helpers live in focused package modules.
 - Existing tests pass, and new package-structure tests cover the new import paths.
+
+Phase 3 is complete when:
+
+- Root compatibility shim files are deleted.
+- Active tests and docs import from `ratools_pdf.*` package modules.
+- `main.py`, `main_no_update.py`, build scripts, and the full test suite still work.
 
 ---
 
@@ -2042,15 +2049,93 @@ git commit -m "docs: document refactored package structure"
 - [ ] `git log --oneline --decorate --max-count=2` shows `dc2f274 Merge branch 'feature/ui-redesign'` before Phase 1 starts.
 - [ ] `python -m unittest discover -s tests -p "test_*.py" -v` passes after every task.
 - [ ] `python -m unittest tests.test_theme -v` passes after the UI redesign merge and after moving `theme.py`.
-- [ ] `python -c "import main, main_no_update, controller, view, pdf_processor; print('root imports ok')"` passes after every phase.
-- [ ] `python -c "import theme; from ratools_pdf.ui.theme import ThemeManager; print(theme.ThemeManager is ThemeManager)"` prints `True` after Phase 1 Task 4.
+- [ ] `python -c "import main, main_no_update; print('root entrypoints ok')"` passes after Phase 3.
+- [ ] `python -c "from ratools_pdf.ui.theme import ThemeManager; print(ThemeManager.__name__)"` passes after Phase 3.
 - [ ] `python -c "from ratools_pdf.pdf.processor import PDFProcessor; print(PDFProcessor.__name__)"` passes after Phase 2 Task 5.
 - [ ] `build_pyinstaller.bat` still finds `main.py`, `main_no_update.py`, `icon.ico`, `plugins`, and version metadata.
 - [ ] `build_nuitka.bat` still finds `main.py`, `icon.ico`, `plugins`, and version metadata.
 
-## Deferred Phase 3 Ideas
+## Phase 3: Remove Root Compatibility Shims
 
-- Remove root compatibility shims after one release cycle, if no scripts or docs depend on them.
+Phase 3 is a breaking cleanup that removes the root-level compatibility modules created in Phase 1 and Phase 2. Keep real entry points and release scripts in the repository root:
+
+```text
+main.py
+main_no_update.py
+build_pyinstaller.bat
+build_nuitka.bat
+patch_pe_subsystem.py
+```
+
+Remove these compatibility shims after tests and docs import directly from `ratools_pdf.*`:
+
+```text
+app_features.py
+app_paths.py
+app_version.py
+controller.py
+font_embedding_providers.py
+log_view_model.py
+pdf_processor.py
+theme.py
+update_checker.py
+view.py
+```
+
+### Phase 3 Task 1: Convert Tests To Package Imports
+
+**Files:**
+- Modify: `tests/test_app_paths.py`
+- Modify: `tests/test_app_version.py`
+- Modify: `tests/test_controller_guards.py`
+- Modify: `tests/test_log_view_model.py`
+- Modify: `tests/test_package_structure.py`
+- Modify: `tests/test_theme.py`
+- Modify: `tests/test_update_checker.py`
+
+- [ ] **Step 1: Update package-structure tests so root shim files are expected to be absent.**
+- [ ] **Step 2: Run `python -m unittest tests.test_package_structure.PackageStructureTests.test_root_compatibility_shim_files_are_removed -v` and verify it fails while shim files still exist.**
+- [ ] **Step 3: Replace remaining test imports from root shims with package imports.**
+- [ ] **Step 4: Run `python -m unittest tests.test_package_structure tests.test_app_paths tests.test_app_version tests.test_controller_guards tests.test_log_view_model tests.test_theme tests.test_update_checker -v` and verify any remaining failures point to shim files still existing.**
+
+### Phase 3 Task 2: Delete Root Compatibility Shims
+
+**Files:**
+- Delete: `app_features.py`
+- Delete: `app_paths.py`
+- Delete: `app_version.py`
+- Delete: `controller.py`
+- Delete: `font_embedding_providers.py`
+- Delete: `log_view_model.py`
+- Delete: `pdf_processor.py`
+- Delete: `theme.py`
+- Delete: `update_checker.py`
+- Delete: `view.py`
+
+- [ ] **Step 1: Delete the compatibility shim files.**
+- [ ] **Step 2: Run `rg -n "(^|\s)(import|from)\s+(app_features|app_paths|app_version|controller|font_embedding_providers|log_view_model|pdf_processor|theme|update_checker|view)(\s|\.|$)" -g "*.py"` and verify no application or active test code imports the removed shims.**
+- [ ] **Step 3: Run the focused test command from Task 1 again and verify it passes.**
+
+### Phase 3 Task 3: Update Active Documentation
+
+**Files:**
+- Modify: `README.md`
+- Modify: `docs/superpowers/plans/2026-07-04-project-structure-refactor-phase-1-2.md`
+
+- [ ] **Step 1: Update the README project structure block so root compatibility modules are no longer listed.**
+- [ ] **Step 2: Replace the README maintainer note with a package-import-only note.**
+- [ ] **Step 3: Mark Phase 3 execution status in this plan document.**
+
+### Phase 3 Task 4: Final Verification
+
+- [ ] **Step 1: Run `python -m unittest discover -s tests -p "test_*.py" -v`.**
+- [ ] **Step 2: Run `python -m compileall -q ratools_pdf main.py main_no_update.py patch_pe_subsystem.py`.**
+- [ ] **Step 3: Run `python -c "import main, main_no_update; from ratools_pdf.controllers.main_controller import MainController; from ratools_pdf.ui.main_window import MainWindow; from ratools_pdf.pdf.processor import PDFProcessor; print(MainController.__name__, MainWindow.__name__, PDFProcessor.__name__)"`.**
+- [ ] **Step 4: Run `git diff --check`.**
+- [ ] **Step 5: Run `git status --short --branch` and verify only planned Phase 3 files changed.**
+
+## Deferred Phase 4 Ideas
+
 - Add a `pyproject.toml` with test and packaging metadata.
 - Consider a `src/` layout only after package imports are stable.
 - Split `ratools_pdf/ui/dialogs.py` further into one module per dialog if it remains too large.

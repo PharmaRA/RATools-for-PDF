@@ -1,6 +1,6 @@
 import unittest
 
-from log_view_model import (
+from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
     format_duration,

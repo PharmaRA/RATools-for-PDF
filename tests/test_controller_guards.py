@@ -6,43 +6,36 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import controller
 from PySide6.QtWidgets import QApplication
-from controller import (
+from ratools_pdf.controllers.io_actions import (
     _build_io_paths_for_file,
+    _build_io_preview_rows,
     _collect_ectd_rename_plan,
+    _io_action_metadata,
     _normalized_ectd_name,
+)
+from ratools_pdf.controllers.log_export import (
     _render_logs_as_csv_rows,
     _select_log_rows_for_export,
     _structured_log_row_from_event,
 )
-from ratools_pdf.controllers.io_actions import (
-    _build_io_paths_for_file as package_build_io_paths_for_file,
-    _collect_ectd_rename_plan as package_collect_ectd_rename_plan,
-    _normalized_ectd_name as package_normalized_ectd_name,
-)
-from ratools_pdf.controllers.log_export import (
-    _render_logs_as_csv_rows as package_render_logs_as_csv_rows,
-    _select_log_rows_for_export as package_select_log_rows_for_export,
-)
-from ratools_pdf.controllers.workers import IOActionWorker as PackageIOActionWorker
+from ratools_pdf.controllers.workers import IOActionWorker
 from ratools_pdf.ui.dialogs import IODataWizardDialog
 
 
 class ControllerGuardTests(unittest.TestCase):
-    def test_controller_worker_package_export_matches_root_export(self):
-        self.assertIs(PackageIOActionWorker, controller.IOActionWorker)
+    def test_controller_worker_package_class_is_available(self):
+        self.assertEqual(IOActionWorker.__name__, "IOActionWorker")
 
-    def test_controller_helper_package_exports_match_root_exports(self):
-        self.assertIs(package_build_io_paths_for_file, _build_io_paths_for_file)
-        self.assertIs(package_collect_ectd_rename_plan, _collect_ectd_rename_plan)
-        self.assertIs(package_normalized_ectd_name, _normalized_ectd_name)
-        self.assertIs(package_render_logs_as_csv_rows, _render_logs_as_csv_rows)
-        self.assertIs(package_select_log_rows_for_export, _select_log_rows_for_export)
+    def test_controller_helpers_are_available_from_package_modules(self):
+        self.assertTrue(callable(_build_io_paths_for_file))
+        self.assertTrue(callable(_collect_ectd_rename_plan))
+        self.assertTrue(callable(_normalized_ectd_name))
+        self.assertTrue(callable(_render_logs_as_csv_rows))
+        self.assertTrue(callable(_select_log_rows_for_export))
 
     def test_io_action_metadata_describes_bookmark_export(self):
-        self.assertTrue(hasattr(controller, "_io_action_metadata"))
-        meta = controller._io_action_metadata("export_bookmarks")
+        meta = _io_action_metadata("export_bookmarks")
 
         self.assertEqual(meta["data_kind"], "bookmarks")
         self.assertEqual(meta["data_label"], "书签")
@@ -64,8 +57,7 @@ class ControllerGuardTests(unittest.TestCase):
             open(file_b, "wb").close()
             open(os.path.join(data_dir, "a", "report_bookmarks.csv"), "w", encoding="utf-8").close()
 
-            self.assertTrue(hasattr(controller, "_build_io_preview_rows"))
-            rows = controller._build_io_preview_rows(
+            rows = _build_io_preview_rows(
                 [file_a, file_b],
                 "import_bookmarks",
                 data_dir,
@@ -82,7 +74,7 @@ class ControllerGuardTests(unittest.TestCase):
             file_path = os.path.join(tmp, "report.pdf")
             open(file_path, "wb").close()
 
-            rows = controller._build_io_preview_rows(
+            rows = _build_io_preview_rows(
                 [file_path],
                 ["export_bookmarks", "export_links"],
                 tmp,
@@ -98,7 +90,7 @@ class ControllerGuardTests(unittest.TestCase):
             file_path = os.path.join(tmp, "report.pdf")
             open(file_path, "wb").close()
 
-            worker = controller.IOActionWorker(
+            worker = IOActionWorker(
                 ["export_bookmarks", "export_links"],
                 [file_path],
                 tmp,
@@ -127,7 +119,7 @@ class ControllerGuardTests(unittest.TestCase):
             open(csv_path, "w", encoding="utf-8").close()
             open(json_path, "w", encoding="utf-8").close()
 
-            worker = controller.IOActionWorker(
+            worker = IOActionWorker(
                 ["import_bookmarks", "import_links"],
                 [file_path],
                 data_dir,

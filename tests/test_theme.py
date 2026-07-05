@@ -8,9 +8,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication
 
-import theme
-from theme import DARK, active_palette
-from view import MainWindow
+from ratools_pdf.ui import theme
+from ratools_pdf.ui.main_window import MainWindow
+from ratools_pdf.ui.theme import DARK, active_palette
 
 
 class ThemeStartupTests(unittest.TestCase):
@@ -88,7 +88,7 @@ class ThemeStartupTests(unittest.TestCase):
             dwmapi = FakeDwmApi()
             user32 = FakeUser32()
 
-        with patch("theme.sys.platform", "win32"), patch.object(theme.ctypes, "windll", FakeWindll(), create=True):
+        with patch("ratools_pdf.ui.theme.sys.platform", "win32"), patch.object(theme.ctypes, "windll", FakeWindll(), create=True):
             self.assertTrue(setter(12345, True))
 
         self.assertEqual(1, len(dwm_calls))
@@ -128,7 +128,7 @@ class ThemeStartupTests(unittest.TestCase):
             dwmapi = FakeDwmApi()
             user32 = FakeUser32()
 
-        with patch("theme.sys.platform", "win32"), patch.object(theme.ctypes, "windll", FakeWindll(), create=True):
+        with patch("ratools_pdf.ui.theme.sys.platform", "win32"), patch.object(theme.ctypes, "windll", FakeWindll(), create=True):
             self.assertTrue(theme.apply_windows_title_bar_theme(FakeWidget(), DARK))
 
         values_by_attribute = {call["attribute"]: call["value"] for call in dwm_calls}

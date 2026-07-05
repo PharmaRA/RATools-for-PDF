@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 
 class PackageStructureTests(unittest.TestCase):
@@ -8,49 +9,38 @@ class PackageStructureTests(unittest.TestCase):
 
         self.assertIs(main.run, app.run)
 
-    def test_config_modules_are_available_from_package_and_root(self):
-        import app_features
-        import app_paths
-        import app_version
+    def test_config_modules_are_available_from_package(self):
         from ratools_pdf.config import features, paths, version
 
-        self.assertEqual(app_features.ENABLE_UPDATE_CHECK, features.ENABLE_UPDATE_CHECK)
-        self.assertIs(app_paths.get_app_dir, paths.get_app_dir)
-        self.assertIs(app_paths.get_resource_path, paths.get_resource_path)
-        self.assertEqual(app_version.APP_VERSION_STR, version.APP_VERSION_STR)
+        self.assertIsInstance(features.ENABLE_UPDATE_CHECK, bool)
+        self.assertTrue(callable(paths.get_app_dir))
+        self.assertTrue(callable(paths.get_resource_path))
+        self.assertTrue(version.APP_VERSION_STR)
 
-    def test_service_modules_are_available_from_package_and_root(self):
-        import update_checker
+    def test_service_modules_are_available_from_package(self):
         from ratools_pdf.services import update_checker as package_update_checker
 
-        self.assertIs(update_checker.check_for_updates, package_update_checker.check_for_updates)
-        self.assertIs(update_checker.release_from_github_payload, package_update_checker.release_from_github_payload)
+        self.assertTrue(callable(package_update_checker.check_for_updates))
+        self.assertTrue(callable(package_update_checker.release_from_github_payload))
 
-    def test_ui_helper_modules_are_available_from_package_and_root(self):
-        import log_view_model
-        import theme
+    def test_ui_helper_modules_are_available_from_package(self):
         from ratools_pdf.ui import log_view_model as package_log_view_model
         from ratools_pdf.ui import theme as package_theme
 
-        self.assertIs(log_view_model.build_log_summary_items, package_log_view_model.build_log_summary_items)
-        self.assertIs(log_view_model.filter_log_summary_items, package_log_view_model.filter_log_summary_items)
-        self.assertIs(theme.ThemeManager, package_theme.ThemeManager)
-        self.assertIs(theme.active_palette, package_theme.active_palette)
+        self.assertTrue(callable(package_log_view_model.build_log_summary_items))
+        self.assertTrue(callable(package_log_view_model.filter_log_summary_items))
+        self.assertTrue(callable(package_theme.active_palette))
+        self.assertTrue(package_theme.ThemeManager)
 
-    def test_pdf_helper_modules_are_available_from_package_and_root(self):
-        import font_embedding_providers
+    def test_pdf_helper_modules_are_available_from_package(self):
         from ratools_pdf.pdf import font_embedding_providers as package_font_embedding_providers
 
-        self.assertIs(
-            font_embedding_providers.get_font_embedding_provider,
-            package_font_embedding_providers.get_font_embedding_provider,
-        )
+        self.assertTrue(callable(package_font_embedding_providers.get_font_embedding_provider))
 
-    def test_pdf_processor_is_available_from_package_and_root(self):
-        import pdf_processor
+    def test_pdf_processor_is_available_from_package(self):
         from ratools_pdf.pdf.processor import PDFProcessor
 
-        self.assertIs(pdf_processor.PDFProcessor, PDFProcessor)
+        self.assertEqual(PDFProcessor.__name__, "PDFProcessor")
 
     def test_pdf_helper_modules_are_split_by_responsibility(self):
         from ratools_pdf.pdf import bookmarks_links, hyperlink_styles, page_layout, precheck, qpdf
@@ -61,20 +51,49 @@ class PackageStructureTests(unittest.TestCase):
         self.assertTrue(callable(page_layout.resize_pages_with_padding))
         self.assertTrue(callable(hyperlink_styles.apply_hyperlink_styles))
 
-    def test_main_controller_is_available_from_package_and_root(self):
-        import controller
+    def test_main_controller_is_available_from_package(self):
         from ratools_pdf.controllers.main_controller import MainController
 
-        self.assertIs(controller.MainController, MainController)
+        self.assertEqual(MainController.__name__, "MainController")
 
-    def test_ui_classes_are_available_from_package_and_root(self):
-        import view
+    def test_ui_classes_are_available_from_package(self):
         from ratools_pdf.ui.dialogs import IODataWizardDialog, LogDialog
         from ratools_pdf.ui.main_window import MainWindow
 
-        self.assertIs(view.IODataWizardDialog, IODataWizardDialog)
-        self.assertIs(view.LogDialog, LogDialog)
-        self.assertIs(view.MainWindow, MainWindow)
+        self.assertEqual(IODataWizardDialog.__name__, "IODataWizardDialog")
+        self.assertEqual(LogDialog.__name__, "LogDialog")
+        self.assertEqual(MainWindow.__name__, "MainWindow")
+
+    def test_root_compatibility_shim_files_are_removed(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        shim_names = [
+            "app_features.py",
+            "app_paths.py",
+            "app_version.py",
+            "controller.py",
+            "font_embedding_providers.py",
+            "log_view_model.py",
+            "pdf_processor.py",
+            "theme.py",
+            "update_checker.py",
+            "view.py",
+        ]
+
+        remaining_shims = [name for name in shim_names if (repo_root / name).exists()]
+
+        self.assertEqual([], remaining_shims)
+
+    def test_build_scripts_use_package_module_paths(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        pyinstaller_script = (repo_root / "build_pyinstaller.bat").read_text(encoding="utf-8")
+        nuitka_script = (repo_root / "build_nuitka.bat").read_text(encoding="utf-8")
+
+        self.assertIn("from ratools_pdf.config.version import APP_VERSION_STR", pyinstaller_script)
+        self.assertIn("from ratools_pdf.config.version import APP_VERSION_STR", nuitka_script)
+        self.assertIn("--exclude-module ratools_pdf.services.update_checker", pyinstaller_script)
+        self.assertNotIn("from app_version import", pyinstaller_script)
+        self.assertNotIn("from app_version import", nuitka_script)
+        self.assertNotIn("--exclude-module update_checker", pyinstaller_script)
 
 
 if __name__ == "__main__":

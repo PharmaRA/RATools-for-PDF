@@ -2,12 +2,12 @@ import os
 import unittest
 from unittest import mock
 
-import app_paths
+from ratools_pdf.config import paths as app_paths
 
 
 class AppPathsTests(unittest.TestCase):
     def test_get_app_dir_uses_module_directory_when_not_frozen(self):
-        expected = str(app_paths.Path(app_paths.__file__).resolve().parent)
+        expected = str(app_paths.Path(app_paths.__file__).resolve().parents[2])
         with mock.patch.object(app_paths.sys, "frozen", False, create=True):
             self.assertEqual(app_paths.get_app_dir(), expected)
 

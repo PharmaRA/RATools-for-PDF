@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-import update_checker
+from ratools_pdf.services import update_checker
 
 
 class UpdateCheckerTests(unittest.TestCase):

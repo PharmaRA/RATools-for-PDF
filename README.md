@@ -189,7 +189,7 @@
 RATools-for-PDF/
 ├─ main.py            # 程序入口，委托 ratools_pdf.app.run
 ├─ main_no_update.py  # 无更新版程序入口
-├─ ratools_pdf/       # 应用包，承载配置、服务、UI 辅助与 PDF 辅助模块
+├─ ratools_pdf/       # 应用包，承载配置、控制器、服务、UI 与 PDF 模块
 │  ├─ app.py
 │  ├─ config/
 │  ├─ controllers/
@@ -202,14 +202,6 @@ RATools-for-PDF/
 │  │  └─ hyperlink_styles.py
 │  ├─ services/
 │  └─ ui/
-├─ app_features.py    # 兼容入口，转发到 ratools_pdf.config.features
-├─ app_version.py     # 兼容入口，转发到 ratools_pdf.config.version
-├─ app_paths.py       # 兼容入口，转发到 ratools_pdf.config.paths
-├─ theme.py           # 兼容入口，转发到 ratools_pdf.ui.theme
-├─ view.py            # UI 兼容入口，转发到 ratools_pdf.ui
-├─ controller.py      # 控制层兼容入口，转发到 ratools_pdf.controllers
-├─ pdf_processor.py   # PDF 兼容入口，转发到 ratools_pdf.pdf.processor
-├─ update_checker.py  # 兼容入口，转发到 ratools_pdf.services.update_checker
 ├─ .github/workflows/ # GitHub Actions CI 配置
 ├─ tests/             # 回归测试
 ├─ docs/              # 设计记录、计划与归档资料
@@ -221,7 +213,7 @@ RATools-for-PDF/
 └─ README.md
 ```
 
-新代码应优先从 `ratools_pdf.*` 导入。根目录下的同名模块会继续保留为兼容入口，方便旧测试、脚本和用户工作流在结构迁移期间保持可用。
+应用实现代码统一放在 `ratools_pdf.*` 包内。根目录只保留程序入口、构建脚本、发布资源和项目元数据，不再保留旧的兼容转发模块。
 
 ## 安装与运行
 
@@ -305,7 +297,7 @@ build_pyinstaller.bat
 - 检查并安装 `PyInstaller`
 - 使用 `onedir` 模式分别打包带更新版和 `NoUpdate` 无更新版
 - 自动将生成的 exe 修正为 GUI 子系统
-- 从 `app_version.py` 动态生成临时 Windows 版本信息并写入 exe
+- 从 `ratools_pdf.config.version` 动态生成临时 Windows 版本信息并写入 exe
 - 一并带上 `icon.ico`
 - 一并带上 `plugins/qpdf/` 目录及其运行时 DLL
 - 移除 `qopensslbackend.dll` 以减少部分环境下的启动 DLL 冲突
@@ -331,7 +323,7 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 - 输出目录会自动附带 `_v版本号` 后缀，便于区分不同发布版本；`exe` 文件名保持稳定不带版本号
 - `settings.ini` 会在程序运行后自动生成到可执行文件所在目录
 - 当前打包方案针对 Windows 桌面环境设计，默认不显示控制台窗口
-- `RATools-for-PDF-NoUpdate` 会在打包时排除 `update_checker` 模块，用于对联网更敏感的分发场景
+- `RATools-for-PDF-NoUpdate` 会在打包时排除 `ratools_pdf.services.update_checker` 模块，用于对联网更敏感的分发场景
 
 ### 3. 为什么推荐 `onedir`
 
