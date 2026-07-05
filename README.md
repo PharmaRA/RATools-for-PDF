@@ -187,15 +187,29 @@
 
 ```text
 RATools-for-PDF/
-├─ main.py            # 程序入口
+├─ main.py            # 程序入口，委托 ratools_pdf.app.run
 ├─ main_no_update.py  # 无更新版程序入口
-├─ app_features.py    # 功能开关（如更新能力）
-├─ app_version.py     # 应用版本与发布元数据
-├─ app_paths.py       # 运行目录/资源目录解析
-├─ view.py            # 界面层，负责 UI、预设、设置加载
-├─ controller.py      # 控制层，负责事件绑定、任务调度、线程处理
-├─ pdf_processor.py   # PDF 核心处理引擎
-├─ update_checker.py  # GitHub Releases 更新检查逻辑
+├─ ratools_pdf/       # 应用包，承载配置、服务、UI 辅助与 PDF 辅助模块
+│  ├─ app.py
+│  ├─ config/
+│  ├─ controllers/
+│  ├─ pdf/
+│  │  ├─ processor.py
+│  │  ├─ qpdf.py
+│  │  ├─ precheck.py
+│  │  ├─ bookmarks_links.py
+│  │  ├─ page_layout.py
+│  │  └─ hyperlink_styles.py
+│  ├─ services/
+│  └─ ui/
+├─ app_features.py    # 兼容入口，转发到 ratools_pdf.config.features
+├─ app_version.py     # 兼容入口，转发到 ratools_pdf.config.version
+├─ app_paths.py       # 兼容入口，转发到 ratools_pdf.config.paths
+├─ theme.py           # 兼容入口，转发到 ratools_pdf.ui.theme
+├─ view.py            # UI 兼容入口，转发到 ratools_pdf.ui
+├─ controller.py      # 控制层兼容入口，转发到 ratools_pdf.controllers
+├─ pdf_processor.py   # PDF 兼容入口，转发到 ratools_pdf.pdf.processor
+├─ update_checker.py  # 兼容入口，转发到 ratools_pdf.services.update_checker
 ├─ .github/workflows/ # GitHub Actions CI 配置
 ├─ tests/             # 回归测试
 ├─ docs/              # 设计记录、计划与归档资料
@@ -206,6 +220,8 @@ RATools-for-PDF/
 ├─ icon.ico           # 程序图标
 └─ README.md
 ```
+
+新代码应优先从 `ratools_pdf.*` 导入。根目录下的同名模块会继续保留为兼容入口，方便旧测试、脚本和用户工作流在结构迁移期间保持可用。
 
 ## 安装与运行
 

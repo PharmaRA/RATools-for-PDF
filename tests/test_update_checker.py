@@ -59,7 +59,7 @@ class UpdateCheckerTests(unittest.TestCase):
             published_at="",
         )
 
-        with mock.patch("update_checker.fetch_latest_release", return_value=latest):
+        with mock.patch("ratools_pdf.services.update_checker.fetch_latest_release", return_value=latest):
             result = update_checker.check_for_updates(current_version=(0, 6, 2))
 
         self.assertTrue(result.ok)
@@ -68,7 +68,7 @@ class UpdateCheckerTests(unittest.TestCase):
         self.assertEqual(result.latest_release.version, (0, 6, 3))
 
     def test_check_for_updates_returns_error_result_on_fetch_failure(self):
-        with mock.patch("update_checker.fetch_latest_release", side_effect=OSError("boom")):
+        with mock.patch("ratools_pdf.services.update_checker.fetch_latest_release", side_effect=OSError("boom")):
             result = update_checker.check_for_updates(current_version=(0, 6, 2))
 
         self.assertFalse(result.ok)

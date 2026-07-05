@@ -31,7 +31,7 @@ class AppPathsTests(unittest.TestCase):
             self.assertEqual(app_paths.get_resource_dir(), expected)
 
     def test_get_resource_path_joins_requested_parts(self):
-        with mock.patch("app_paths.get_resource_dir", return_value=r"C:\\Bundle"):
+        with mock.patch("ratools_pdf.config.paths.get_resource_dir", return_value=r"C:\\Bundle"):
             self.assertEqual(
                 app_paths.get_resource_path("plugins", "qpdf", "qpdf.exe"),
                 os.path.join(r"C:\\Bundle", "plugins", "qpdf", "qpdf.exe"),

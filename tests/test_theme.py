@@ -33,7 +33,7 @@ class ThemeStartupTests(unittest.TestCase):
             settings.setValue("Settings/ThemeMode", theme_mode)
             settings.sync()
 
-            with patch("view.get_app_dir", return_value=tmp_dir):
+            with patch("ratools_pdf.ui.main_window.get_app_dir", return_value=tmp_dir):
                 window = MainWindow()
                 self._windows.append(window)
                 return window
@@ -138,7 +138,7 @@ class ThemeStartupTests(unittest.TestCase):
         self.assertEqual(0x003D332E, values_by_attribute[34])
 
     def test_main_window_reapplies_native_title_bar_when_theme_changes(self):
-        with patch("view.apply_windows_title_bar_theme", create=True) as apply_title_bar:
+        with patch("ratools_pdf.ui.main_window.apply_windows_title_bar_theme", create=True) as apply_title_bar:
             window = self._create_window_with_theme("dark")
 
             self.assertTrue(any(
@@ -155,8 +155,8 @@ class ThemeStartupTests(unittest.TestCase):
             ))
 
     def test_theme_change_schedules_native_title_bar_refresh_after_click_event(self):
-        with patch("view.apply_windows_title_bar_theme", create=True), \
-                patch("view.QTimer.singleShot", create=True) as single_shot:
+        with patch("ratools_pdf.ui.main_window.apply_windows_title_bar_theme", create=True), \
+                patch("ratools_pdf.ui.main_window.QTimer.singleShot", create=True) as single_shot:
             window = self._create_window_with_theme("dark")
 
             single_shot.reset_mock()

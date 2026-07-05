@@ -29,15 +29,26 @@ This is workable for an early PySide tool, but it now makes file discovery, owne
 - Do not adopt a `src/` layout in these two phases.
 - Do not rewrite PDF processing algorithms while moving files.
 - Do not remove root-level compatibility modules until a later cleanup phase.
-- Do not start the structural refactor from a base branch that is missing the active `feature/ui-redesign` work.
+- Do not start the structural refactor from a base branch older than the `feature/ui-redesign` merge commit.
 
 ## Phase Gates
 
-Phase 0 is complete when:
+Phase 0 is already complete in the current baseline when:
 
-- `feature/ui-redesign` has no uncommitted work.
-- `main` contains the centralized theme system from that branch: `theme.py`, `tests/test_theme.py`, and the updated `view.py`.
-- The full test suite passes after the UI redesign merge.
+- `main` contains merge commit `dc2f274` (`Merge branch 'feature/ui-redesign'`).
+- `main` contains the centralized theme system: `theme.py`, `tests/test_theme.py`, and the updated `view.py`.
+- The full test suite passes on the post-redesign baseline.
+
+## Current Execution Status
+
+- 2026-07-05: `feature/ui-redesign` is merged into `main` at `dc2f274`.
+- 2026-07-05: Phase 1 package-boundary implementation is in progress on branch `codex/project-structure-refactor`.
+- 2026-07-05: Phase 1 has moved small modules into `ratools_pdf/`, retained root compatibility shims, updated README/build scripts/tests, and passed `python -m unittest discover -s tests -p "test_*.py" -v` with 50 tests.
+- 2026-07-05: Phase 2 has moved controller helpers, workers, and `MainController` into `ratools_pdf/controllers/`, with root `controller.py` retained as a compatibility shim.
+- 2026-07-05: Phase 2 has split `view.py` into `ratools_pdf/ui/platform.py`, `widgets.py`, `dialogs.py`, and `main_window.py`, with root `view.py` retained as a compatibility shim.
+- 2026-07-05: Phase 2 has moved `PDFProcessor` into `ratools_pdf/pdf/processor.py`, with root `pdf_processor.py` retained as a compatibility shim.
+- 2026-07-05: Phase 2 has split PDF helpers into `ratools_pdf/pdf/qpdf.py`, `precheck.py`, `bookmarks_links.py`, `page_layout.py`, and `hyperlink_styles.py`; `PDFProcessor` now exposes compatibility static wrappers.
+- 2026-07-05: The full regression suite passes with 56 tests after the package refactor.
 
 Phase 1 is complete when:
 
@@ -53,21 +64,22 @@ Phase 2 is complete when:
 
 ---
 
-## Known Parallel Branch: `feature/ui-redesign`
+## Completed Prerequisite: `feature/ui-redesign`
 
-The `feature/ui-redesign` branch is currently checked out in `.worktrees/ui-redesign`. Its committed branch tip is already an ancestor of `main`, but that worktree has active uncommitted UI work:
+The `feature/ui-redesign` branch has been merged into `main`. The current baseline contains:
 
 ```text
- M view.py
-?? theme.py
-?? tests/test_theme.py
+dc2f274 Merge branch 'feature/ui-redesign'
+cdee5fe feat: add centralized UI theme system
+theme.py
+tests/test_theme.py
+updated view.py
 ```
 
-That work introduces a centralized theme system and removes large local QSS blocks from `view.py`. Because Phase 2 will split `view.py`, the correct order is:
+That work introduced a centralized theme system and removed large local QSS blocks from `view.py`. Because Phase 2 will split `view.py`, the correct order is now:
 
-1. Finish and merge `feature/ui-redesign`.
-2. Run Phase 1 from the post-redesign `main`.
-3. Run Phase 2 after Phase 1 is green.
+1. Run Phase 1 from the post-redesign `main`.
+2. Run Phase 2 after Phase 1 is green.
 
 Phase 1 must avoid unnecessary edits to `view.py`. Root compatibility shims are enough to keep `view.py` working while helper modules move into `ratools_pdf/`. Phase 2 should split the post-redesign `view.py`, not the older pre-theme version.
 
@@ -156,117 +168,22 @@ RATools-for-PDF/
 
 ---
 
-# Phase 0: Finish and Merge UI Redesign
+# Phase 0: Completed UI Redesign Baseline
 
-## Phase 0 File Map
-
-- Modify: `.worktrees/ui-redesign/view.py`
-  Responsibility: final centralized-theme UI changes from the redesign branch.
-- Create: `.worktrees/ui-redesign/theme.py`
-  Responsibility: centralized palette, QSS, and `ThemeManager`.
-- Create: `.worktrees/ui-redesign/tests/test_theme.py`
-  Responsibility: regression coverage for saved dark-theme startup behavior.
-
-## Phase 0 Task 1: Stabilize and Merge `feature/ui-redesign`
-
-**Files:**
-- Modify: `.worktrees/ui-redesign/view.py`
-- Create: `.worktrees/ui-redesign/theme.py`
-- Create: `.worktrees/ui-redesign/tests/test_theme.py`
-
-- [ ] **Step 1: Confirm the UI redesign worktree status**
-
-Run:
+No implementation work remains in Phase 0. Before starting Phase 1, verify the post-redesign baseline from the active worktree:
 
 ```powershell
-git -C .worktrees\ui-redesign status --short
+git log --oneline --decorate --max-count=2
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 Expected:
 
 ```text
- M view.py
-?? tests/test_theme.py
-?? theme.py
-```
-
-- [ ] **Step 2: Run the focused theme regression test**
-
-Run:
-
-```powershell
-python -m unittest discover -s .worktrees\ui-redesign\tests -t .worktrees\ui-redesign -p "test_theme.py" -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 3: Run the full test suite in the UI redesign worktree**
-
-Run:
-
-```powershell
-python -m unittest discover -s .worktrees\ui-redesign\tests -t .worktrees\ui-redesign -p "test_*.py" -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 4: Commit the UI redesign work**
-
-Run:
-
-```powershell
-git -C .worktrees\ui-redesign add view.py theme.py tests/test_theme.py
-git -C .worktrees\ui-redesign commit -m "feat: add centralized UI theme system"
-```
-
-Expected: commit succeeds on `feature/ui-redesign`.
-
-- [ ] **Step 5: Rebase the UI redesign branch onto current `main`**
-
-Run:
-
-```powershell
-git -C .worktrees\ui-redesign rebase main
-```
-
-Expected: rebase succeeds. If conflicts occur, resolve them in favor of preserving the centralized `theme.py` system and the latest `main` docs/tests.
-
-- [ ] **Step 6: Run full tests again after the rebase**
-
-Run:
-
-```powershell
-python -m unittest discover -s .worktrees\ui-redesign\tests -t .worktrees\ui-redesign -p "test_*.py" -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Merge the UI redesign branch into `main`**
-
-Run this from the main worktree after the plan document is committed or otherwise safely saved:
-
-```powershell
-git merge --ff-only feature/ui-redesign
-```
-
-Expected: fast-forward succeeds, and `main` now contains `theme.py`, `tests/test_theme.py`, and the redesigned `view.py`.
-
-- [ ] **Step 8: Verify `main` after the merge**
-
-Run:
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Commit state**
-
-No extra commit is needed if Step 7 fast-forwarded the UI redesign commit into `main`. If the merge required a merge commit, use:
-
-```powershell
-git commit -m "merge: integrate UI redesign"
+dc2f274 ... Merge branch 'feature/ui-redesign'
+...
+Ran 45 tests
+OK
 ```
 
 # Phase 1: Establish the Package Boundary
@@ -2111,7 +2028,7 @@ git commit -m "docs: document refactored package structure"
 
 ## Risk Notes
 
-- `feature/ui-redesign` must land before Phase 1. Its active worktree currently changes `view.py` and adds `theme.py` plus `tests/test_theme.py`; splitting the older `view.py` would create avoidable conflicts.
+- `feature/ui-redesign` has already landed in `main`; Phase 1 and Phase 2 must stay based on that post-redesign baseline.
 - `main.py` must stay in the root because both build scripts currently point at it.
 - Root compatibility shims reduce risk for tests and build scripts, but they should not become the preferred import style.
 - Phase 1 intentionally avoids unnecessary `view.py` edits. Root shims keep post-redesign imports such as `theme`, `log_view_model`, `app_paths`, and `app_version` working until Phase 2.
@@ -2122,7 +2039,7 @@ git commit -m "docs: document refactored package structure"
 
 ## Verification Checklist
 
-- [ ] `git -C .worktrees\ui-redesign status --short` shows a clean worktree before Phase 1 starts.
+- [ ] `git log --oneline --decorate --max-count=2` shows `dc2f274 Merge branch 'feature/ui-redesign'` before Phase 1 starts.
 - [ ] `python -m unittest discover -s tests -p "test_*.py" -v` passes after every task.
 - [ ] `python -m unittest tests.test_theme -v` passes after the UI redesign merge and after moving `theme.py`.
 - [ ] `python -c "import main, main_no_update, controller, view, pdf_processor; print('root imports ok')"` passes after every phase.

@@ -38,10 +38,10 @@ if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 if not exist "%SPEC_DIR%" mkdir "%SPEC_DIR%"
 set "VERSION_INFO_FILE=%BUILD_DIR%\build_version_info_generated.txt"
 
-for /f "delims=" %%A in ('python -c "from app_version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_WINDOWS_VERSION; print(*APP_WINDOWS_VERSION, sep=chr(44)+chr(32))"') do set "APP_WINDOWS_VERSION=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_WINDOWS_VERSION; print(*APP_WINDOWS_VERSION, sep=chr(44)+chr(32))"') do set "APP_WINDOWS_VERSION=%%A"
 
 if not defined APP_COMPANY (
     echo [ERROR] Failed to read APP_COMPANY from app_version.py.

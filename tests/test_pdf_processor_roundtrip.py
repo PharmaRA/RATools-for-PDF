@@ -4,7 +4,7 @@ import unittest
 
 import fitz
 
-from pdf_processor import PDFProcessor
+from ratools_pdf.pdf.processor import PDFProcessor
 
 
 class PDFProcessorRoundTripTests(unittest.TestCase):

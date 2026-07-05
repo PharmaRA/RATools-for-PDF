@@ -16,10 +16,30 @@ from controller import (
     _select_log_rows_for_export,
     _structured_log_row_from_event,
 )
-from view import IODataWizardDialog
+from ratools_pdf.controllers.io_actions import (
+    _build_io_paths_for_file as package_build_io_paths_for_file,
+    _collect_ectd_rename_plan as package_collect_ectd_rename_plan,
+    _normalized_ectd_name as package_normalized_ectd_name,
+)
+from ratools_pdf.controllers.log_export import (
+    _render_logs_as_csv_rows as package_render_logs_as_csv_rows,
+    _select_log_rows_for_export as package_select_log_rows_for_export,
+)
+from ratools_pdf.controllers.workers import IOActionWorker as PackageIOActionWorker
+from ratools_pdf.ui.dialogs import IODataWizardDialog
 
 
 class ControllerGuardTests(unittest.TestCase):
+    def test_controller_worker_package_export_matches_root_export(self):
+        self.assertIs(PackageIOActionWorker, controller.IOActionWorker)
+
+    def test_controller_helper_package_exports_match_root_exports(self):
+        self.assertIs(package_build_io_paths_for_file, _build_io_paths_for_file)
+        self.assertIs(package_collect_ectd_rename_plan, _collect_ectd_rename_plan)
+        self.assertIs(package_normalized_ectd_name, _normalized_ectd_name)
+        self.assertIs(package_render_logs_as_csv_rows, _render_logs_as_csv_rows)
+        self.assertIs(package_select_log_rows_for_export, _select_log_rows_for_export)
+
     def test_io_action_metadata_describes_bookmark_export(self):
         self.assertTrue(hasattr(controller, "_io_action_metadata"))
         meta = controller._io_action_metadata("export_bookmarks")
@@ -85,8 +105,8 @@ class ControllerGuardTests(unittest.TestCase):
                 common_base=tmp,
             )
 
-            with patch("controller.PDFProcessor.export_bookmarks") as export_bookmarks, \
-                    patch("controller.PDFProcessor.export_links") as export_links:
+            with patch("ratools_pdf.controllers.workers.PDFProcessor.export_bookmarks") as export_bookmarks, \
+                    patch("ratools_pdf.controllers.workers.PDFProcessor.export_links") as export_links:
                 worker.run()
 
             export_bookmarks.assert_called_once_with(file_path, os.path.join(tmp, "report_bookmarks.csv"))
@@ -115,8 +135,8 @@ class ControllerGuardTests(unittest.TestCase):
                 common_base=source_dir,
             )
 
-            with patch("controller.PDFProcessor.import_bookmarks") as import_bookmarks, \
-                    patch("controller.PDFProcessor.import_links") as import_links:
+            with patch("ratools_pdf.controllers.workers.PDFProcessor.import_bookmarks") as import_bookmarks, \
+                    patch("ratools_pdf.controllers.workers.PDFProcessor.import_links") as import_links:
                 worker.run()
 
             import_bookmarks.assert_called_once()

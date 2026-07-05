@@ -40,9 +40,9 @@ if errorlevel 1 (
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 
-for /f "delims=" %%A in ('python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
-for /f "delims=" %%A in ('python -c "from app_version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_VERSION_STR; print(APP_VERSION_STR)"') do set "APP_VERSION_STR=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_COMPANY; print(APP_COMPANY)"') do set "APP_COMPANY=%%A"
+for /f "delims=" %%A in ('python -c "from ratools_pdf.config.version import APP_NAME; print(APP_NAME)"') do set "APP_NAME=%%A"
 set "VERSIONED_DIR_NAME=main_v%APP_VERSION_STR%.dist"
 set "RAW_OUTPUT_DIR=%OUT_DIR%\main.dist"
 set "VERSIONED_OUTPUT_DIR=%OUT_DIR%\%VERSIONED_DIR_NAME%"
