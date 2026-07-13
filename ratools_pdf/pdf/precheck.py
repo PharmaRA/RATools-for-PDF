@@ -556,6 +556,53 @@ def _catalog_key_resolved_value(doc, catalog_xref, key):
     return _processor_cls()._dereference_xref_value(doc, value)
 
 
+def _pdf_has_signature(input_path):
+    """判断 PDF 是否已包含数字签名。
+
+    只读检测，任何异常都按“无签名”处理，避免阻塞批量处理流程。
+    """
+    if not input_path or not os.path.isfile(input_path):
+        return False
+
+    doc = None
+    try:
+        doc = fitz.open(input_path)
+        if doc.needs_pass:
+            # 加密文档无法可靠读取签名域，交由后续处理流程按加密文件处理
+            return False
+
+        # 首选：AcroForm 的 SigFlags。位 1 (SignaturesExist) 置位表示文档存在签名域，
+        # 常规监管 PDF 中该标志置位基本等同于已签名。
+        try:
+            if doc.get_sigflags() > 0:
+                return True
+        except Exception:
+            pass
+
+        # 兜底：扫描签名控件，命中实际已签名的签名域。
+        signature_widget_type = getattr(fitz, "PDF_WIDGET_TYPE_SIGNATURE", None)
+        for page in doc:
+            for widget in (page.widgets() or []):
+                try:
+                    if signature_widget_type is not None and widget.field_type != signature_widget_type:
+                        continue
+                    if getattr(widget, "is_signed", None):
+                        return True
+                    if str(getattr(widget, "field_value", "") or "").strip():
+                        return True
+                except Exception:
+                    continue
+        return False
+    except Exception:
+        return False
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+
 def build_precheck_report(input_path, selected_options=None):
     selected_options = _processor_cls()._filtered_precheck_options(selected_options)
 

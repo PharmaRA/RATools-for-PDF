@@ -646,6 +646,106 @@ class MainWindow(QMainWindow):
         dlg.exec()
         return dlg.update_action
 
+    def show_signed_files_prompt(self, signed_files):
+        """检测到已签名文件时的三选一提示：跳过 / 全部处理 / 取消。
+
+        返回 "skip"、"process_all" 或 "cancel"。
+        """
+        count = len(signed_files)
+
+        dlg = FramelessDraggableDialog("检测到已签名文件", self)
+        dlg.signed_action = "cancel"
+        dlg.content_layout.setSpacing(16)
+
+        # ---- 顶部警告卡片：图标 + 标题 + 说明 ----
+        warn_card = QFrame()
+        warn_card.setObjectName("signedWarnCard")
+        warn_layout = QHBoxLayout(warn_card)
+        warn_layout.setContentsMargins(14, 14, 14, 14)
+        warn_layout.setSpacing(12)
+
+        warn_icon = QLabel("⚠️")
+        warn_icon.setObjectName("signedWarnIcon")
+        warn_icon.setAlignment(Qt.AlignTop)
+        warn_layout.addWidget(warn_icon, 0, Qt.AlignTop)
+
+        warn_text_layout = QVBoxLayout()
+        warn_text_layout.setSpacing(4)
+        warn_title = QLabel(f"待处理列表中有 {count} 个文件已包含数字签名")
+        warn_title.setWordWrap(True)
+        warn_title.setObjectName("signedWarnTitle")
+        warn_desc = QLabel("继续处理会重写这些文件，使原有数字签名失效。此操作不可逆。")
+        warn_desc.setWordWrap(True)
+        warn_desc.setObjectName("signedWarnDesc")
+        warn_text_layout.addWidget(warn_title)
+        warn_text_layout.addWidget(warn_desc)
+        warn_layout.addLayout(warn_text_layout, 1)
+
+        dlg.content_layout.addWidget(warn_card)
+
+        # ---- 文件列表标题 ----
+        caption = QLabel("已签名文件：")
+        caption.setObjectName("signedListCaption")
+        dlg.content_layout.addWidget(caption)
+
+        # ---- 可滚动文件列表（带项目符号）----
+        file_list = QLabel("\n".join(f"•  {os.path.basename(p)}" for p in signed_files))
+        file_list.setWordWrap(True)
+        file_list.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        file_list.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        file_list.setObjectName("signedFileList")
+        # 悬停显示完整路径，方便定位同名文件
+        file_list.setToolTip("\n".join(signed_files))
+
+        scroll = QScrollArea()
+        scroll.setObjectName("signedListScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(file_list)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 单文件时不需要滚动条占位，多文件时限制高度触发滚动
+        scroll.setMinimumHeight(56)
+        scroll.setMaximumHeight(180 if count > 1 else 72)
+        dlg.content_layout.addWidget(scroll)
+
+        # ---- 底部操作提示 ----
+        hint = QLabel("请选择如何处理这些已签名文件：")
+        hint.setObjectName("dialogMuted")
+        dlg.content_layout.addWidget(hint)
+        dlg.content_layout.addStretch()
+
+        # ---- 按钮区 ----
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        btn_layout.addStretch()
+
+        btn_cancel = QPushButton("取消处理")
+        btn_cancel.setObjectName("dialogSecondaryBtn")
+        btn_process_all = QPushButton("仍然处理全部")
+        btn_process_all.setObjectName("dialogSecondaryBtn")
+        btn_skip = QPushButton("跳过已签名文件")
+        btn_skip.setObjectName("dialogPrimaryBtn")
+        for btn in (btn_cancel, btn_process_all, btn_skip):
+            btn.setFixedHeight(36)
+            btn.setCursor(Qt.PointingHandCursor)
+
+        def finish(action):
+            dlg.signed_action = action
+            dlg.accept()
+
+        btn_skip.clicked.connect(lambda: finish("skip"))
+        btn_process_all.clicked.connect(lambda: finish("process_all"))
+        btn_cancel.clicked.connect(lambda: finish("cancel"))
+
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_process_all)
+        btn_layout.addWidget(btn_skip)
+        dlg.content_layout.addLayout(btn_layout)
+
+        dlg.adjustSize()
+        dlg.setMinimumWidth(500)
+        dlg.exec()
+        return dlg.signed_action
+
     def load_all_settings(self):
         self.is_applying_preset = True
         for opt_id, cb in self.all_checkboxes.items():

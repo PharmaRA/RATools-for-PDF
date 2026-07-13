@@ -933,6 +933,13 @@ class MainController(QObject):
             self.view.show_warning_message("⚠️ 警告", "请至少在右侧勾选一个处理规则！")
             return
 
+        processing_files = self._prompt_skip_signed_files(processing_files)
+        if processing_files is None:
+            return
+        if not processing_files:
+            self.view.show_warning_message("⚠️ 警告", "已跳过全部已签名文件，没有可处理的 PDF 文件！")
+            return
+
         if "filename_ectd_format" in selected_options:
             rename_pairs, collisions = _collect_ectd_rename_plan(processing_files)
 
@@ -1049,6 +1056,37 @@ class MainController(QObject):
         self.worker.finished_all.connect(self.processing_finished)
         self.worker.error.connect(self.processing_error)
         self.worker.start()
+
+    def _prompt_skip_signed_files(self, processing_files):
+        """处理前检测已签名文件，并询问用户如何处理。
+
+        返回值：
+            - 文件列表：应当继续处理的文件（可能已剔除已签名文件）
+            - None：用户选择取消，调用方应中止处理
+        """
+        signed_files = [
+            path for path in processing_files
+            if PDFProcessor._pdf_has_signature(path)
+        ]
+        if not signed_files:
+            return processing_files
+
+        action = self.view.show_signed_files_prompt(signed_files)
+        if action == "cancel":
+            return None
+        if action == "skip":
+            signed_set = set(signed_files)
+            kept = [path for path in processing_files if path not in signed_set]
+            self.process_logs += (
+                f"\n[提示] 检测到 {len(signed_files)} 个已签名文件，已按用户选择跳过。\n"
+            )
+            return kept
+        # process_all
+        self.process_logs += (
+            f"\n[提示] 检测到 {len(signed_files)} 个已签名文件，用户选择仍然处理全部，"
+            "原有数字签名将失效。\n"
+        )
+        return processing_files
 
     def start_retry_failed_processing(self):
         retry_files = [path for path in self.last_failed_files if path in self.loaded_files]

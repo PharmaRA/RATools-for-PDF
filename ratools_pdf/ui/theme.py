@@ -496,6 +496,17 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
 #dialogInfoPanel { color: $text_body; background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; font-size: 12px; }
 #dialogEmptyPanel { color: $text_muted; background-color: $surface_alt; border: 1px dashed $border_strong; border-radius: 8px; padding: 18px; font-size: 12px; }
 
+/* ---- 已签名文件提示对话框 ---- */
+#signedWarnCard { background-color: $warning_soft; border: 1px solid $warning; border-radius: 10px; }
+#signedWarnCard QLabel { border: none; background: transparent; }
+#signedWarnIcon { font-size: 22px; border: none; background: transparent; }
+#signedWarnTitle { color: $warning_text; font-size: 14px; font-weight: 700; border: none; }
+#signedWarnDesc { color: $text_body; font-size: 12px; border: none; }
+#signedListCaption { color: $text_muted; font-size: 12px; font-weight: 700; border: none; }
+#signedListScroll { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
+#signedListScroll > QWidget { background: transparent; }
+#signedFileList { color: $text_body; font-size: 12px; background: transparent; border: none; padding: 10px 12px; line-height: 150%; }
+
 /* ---- 消息框 ---- */
 #msgIcon { font-size: 36px; border: none; background: transparent; }
 #msgText { color: $text_body; font-size: 13px; border: none; }

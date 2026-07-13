@@ -203,6 +203,10 @@ class PDFProcessor:
         return precheck.build_precheck_report(input_path, selected_options)
 
     @staticmethod
+    def _pdf_has_signature(input_path):
+        return precheck._pdf_has_signature(input_path)
+
+    @staticmethod
     def _mark_change(change_list, label):
         if label not in change_list:
             change_list.append(label)
