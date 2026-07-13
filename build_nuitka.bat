@@ -54,7 +54,7 @@ python -m nuitka "%MAIN_FILE%" ^
   --enable-plugin=pyside6 ^
   --windows-console-mode=disable ^
   --include-module=fitz ^
-  --include-module=app_paths ^
+  --include-module=ratools_pdf.config.paths ^
   --include-data-files="%ROOT_DIR%LICENSE=LICENSE" ^
   --include-data-files="%ROOT_DIR%THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md" ^
   --include-data-files="%ICON_FILE%=icon.ico" ^

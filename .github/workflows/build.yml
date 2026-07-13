@@ -39,7 +39,7 @@ jobs:
     - name: Resolve build version
       shell: pwsh
       run: |
-        $version = python -c "from app_version import APP_VERSION_STR; print(APP_VERSION_STR)"
+        $version = python -c "from ratools_pdf.config.version import APP_VERSION_STR; print(APP_VERSION_STR)"
         "APP_VERSION_STR=$version" >> $env:GITHUB_ENV
 
     - name: Zip Artifacts

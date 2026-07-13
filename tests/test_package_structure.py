@@ -87,12 +87,18 @@ class PackageStructureTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         pyinstaller_script = (repo_root / "build_pyinstaller.bat").read_text(encoding="utf-8")
         nuitka_script = (repo_root / "build_nuitka.bat").read_text(encoding="utf-8")
+        release_workflow = (repo_root / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
+        package_version_import = "from ratools_pdf.config.version import APP_VERSION_STR"
 
-        self.assertIn("from ratools_pdf.config.version import APP_VERSION_STR", pyinstaller_script)
-        self.assertIn("from ratools_pdf.config.version import APP_VERSION_STR", nuitka_script)
+        self.assertIn(package_version_import, pyinstaller_script)
+        self.assertIn(package_version_import, nuitka_script)
+        self.assertIn(package_version_import, release_workflow)
+        self.assertIn("--include-module=ratools_pdf.config.paths", nuitka_script)
         self.assertIn("--exclude-module ratools_pdf.services.update_checker", pyinstaller_script)
         self.assertNotIn("from app_version import", pyinstaller_script)
         self.assertNotIn("from app_version import", nuitka_script)
+        self.assertNotIn("from app_version import", release_workflow)
+        self.assertNotIn("--include-module=app_paths", nuitka_script)
         self.assertNotIn("--exclude-module update_checker", pyinstaller_script)
 
 
