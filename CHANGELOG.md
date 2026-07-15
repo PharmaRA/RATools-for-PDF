@@ -4,6 +4,14 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)，并遵循[语义化版本](https://semver.org/lang/zh-CN/)。为降低个人维护成本，内容保持轻量。
 
+开发中的改动先记入 `## [Unreleased]`，发版时再改为对应的版本号小节。
+
+## [Unreleased]
+
+### 新增
+
+- 发布流程自动从 `CHANGELOG.md` 提取当前版本小节并注入 GitHub Release 正文（找不到对应小节时回退到自动生成说明）
+
 ## [0.7.1] - 2026-07-13
 
 ### 新增

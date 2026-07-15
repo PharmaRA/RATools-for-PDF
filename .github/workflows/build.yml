@@ -42,6 +42,11 @@ jobs:
         $version = python -c "from ratools_pdf.config.version import APP_VERSION_STR; print(APP_VERSION_STR)"
         "APP_VERSION_STR=$version" >> $env:GITHUB_ENV
 
+    - name: Extract release notes from CHANGELOG
+      shell: cmd
+      run: |
+        python scripts/extract_release_notes.py --version %APP_VERSION_STR% --changelog CHANGELOG.md --output release_notes.md
+
     - name: Zip Artifacts
       # Windows 运行器默认使用 PowerShell，直接调用 Compress-Archive 进行压缩
       run: |
@@ -56,4 +61,5 @@ jobs:
         files: |
           RATools-for-PDF_v${{ env.APP_VERSION_STR }}.zip
           RATools-for-PDF-NoUpdate_v${{ env.APP_VERSION_STR }}.zip
-        generate_release_notes: true # 自动生成基于 PR 和 commit 历史的发布说明
+        body_path: release_notes.md # 注入 CHANGELOG 中当前版本的小节；找不到时为空文件
+        generate_release_notes: true # 自动追加基于 PR 和 commit 历史的发布说明
