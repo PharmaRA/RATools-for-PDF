@@ -63,3 +63,4 @@ jobs:
           RATools-for-PDF-NoUpdate_v${{ env.APP_VERSION_STR }}.zip
         body_path: release_notes.md # 注入 CHANGELOG 中当前版本的小节；找不到时为空文件
         generate_release_notes: true # 自动追加基于 PR 和 commit 历史的发布说明
+        make_latest: true # 显式将本次发布标记为 Latest，不依赖 GitHub 的自动判定

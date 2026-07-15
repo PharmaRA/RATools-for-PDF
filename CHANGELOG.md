@@ -11,6 +11,7 @@
 ### 新增
 
 - 发布流程自动从 `CHANGELOG.md` 提取当前版本小节并注入 GitHub Release 正文（找不到对应小节时回退到自动生成说明）
+- 发布时显式标记 Latest（`make_latest: true`），避免多个 tag 并行发布时因发布时间错位导致旧版本被标为 Latest
 
 ## [0.7.1] - 2026-07-13
 
