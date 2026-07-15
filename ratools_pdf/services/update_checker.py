@@ -10,7 +10,7 @@ from ratools_pdf.config.version import APP_REPOSITORY_NAME, APP_REPOSITORY_OWNER
 
 MAJOR_UPDATE_MARKER = "[major-update]"
 GITHUB_API_URL = (
-    f"https://api.github.com/repos/{APP_REPOSITORY_OWNER}/{APP_REPOSITORY_NAME}/releases/latest"
+    f"https://api.github.com/repos/{APP_REPOSITORY_OWNER}/{APP_REPOSITORY_NAME}/releases"
 )
 
 
@@ -90,6 +90,26 @@ def release_from_github_payload(payload):
     )
 
 
+def select_latest_release(payloads):
+    """从 releases 列表中挑选语义版本号最大的稳定发布。
+
+    GitHub 的 /releases/latest 端点依据发布时间或手动标记判定 "latest"，
+    并不保证返回语义版本号最大的发布，因此改为拉取完整列表后自行比较，
+    避免出现「已有 v0.7.1 却仍提示 v0.7.0」的问题。
+    """
+    latest = None
+    for payload in payloads:
+        try:
+            release = release_from_github_payload(payload)
+        except (ValueError, KeyError):
+            continue
+        if latest is None or is_newer_version(release.version, latest.version):
+            latest = release
+    if latest is None:
+        raise ValueError("No stable release found")
+    return latest
+
+
 def fetch_latest_release(timeout=8):
     request = urllib.request.Request(
         GITHUB_API_URL,
@@ -99,8 +119,8 @@ def fetch_latest_release(timeout=8):
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    return release_from_github_payload(payload)
+        payloads = json.loads(response.read().decode("utf-8"))
+    return select_latest_release(payloads)
 
 
 def check_for_updates(current_version=APP_VERSION, timeout=8):

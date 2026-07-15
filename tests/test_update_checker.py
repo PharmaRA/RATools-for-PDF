@@ -49,6 +49,46 @@ class UpdateCheckerTests(unittest.TestCase):
 
         self.assertTrue(update_checker.is_major_update((0, 6, 2), latest))
 
+    def test_select_latest_release_picks_highest_semver(self):
+        payloads = [
+            {"draft": False, "prerelease": False, "tag_name": "v0.7.0", "name": "0.7.0"},
+            {"draft": False, "prerelease": False, "tag_name": "v0.7.1", "name": "0.7.1"},
+            {"draft": False, "prerelease": False, "tag_name": "v0.6.9", "name": "0.6.9"},
+        ]
+
+        release = update_checker.select_latest_release(payloads)
+
+        self.assertEqual(release.version, (0, 7, 1))
+
+    def test_select_latest_release_ignores_prereleases_and_drafts(self):
+        payloads = [
+            {"draft": False, "prerelease": True, "tag_name": "v0.8.0", "name": "0.8.0"},
+            {"draft": True, "prerelease": False, "tag_name": "v0.7.2", "name": "0.7.2"},
+            {"draft": False, "prerelease": False, "tag_name": "v0.7.1", "name": "0.7.1"},
+        ]
+
+        release = update_checker.select_latest_release(payloads)
+
+        self.assertEqual(release.version, (0, 7, 1))
+
+    def test_select_latest_release_skips_unparsable_tags(self):
+        payloads = [
+            {"draft": False, "prerelease": False, "tag_name": "nightly", "name": "nightly"},
+            {"draft": False, "prerelease": False, "tag_name": "v0.7.1", "name": "0.7.1"},
+        ]
+
+        release = update_checker.select_latest_release(payloads)
+
+        self.assertEqual(release.version, (0, 7, 1))
+
+    def test_select_latest_release_raises_when_no_stable_release(self):
+        payloads = [
+            {"draft": False, "prerelease": True, "tag_name": "v0.8.0", "name": "0.8.0"},
+        ]
+
+        with self.assertRaises(ValueError):
+            update_checker.select_latest_release(payloads)
+
     def test_check_for_updates_marks_available_update(self):
         latest = update_checker.ReleaseInfo(
             version=(0, 6, 3),
