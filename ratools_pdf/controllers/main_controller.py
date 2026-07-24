@@ -1153,7 +1153,7 @@ class MainController(QObject):
             return _build_io_preview_rows(self.loaded_files, action_type, dir_path, common_base)
 
         dialog = IODataWizardDialog(
-            default_data_kind=default_data_kind,
+            data_kind=default_data_kind,
             file_count=len(self.loaded_files),
             preview_callback=build_preview,
             parent=self.view,

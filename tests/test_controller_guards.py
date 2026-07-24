@@ -289,7 +289,7 @@ class ControllerGuardTests(unittest.TestCase):
         dialog.show()
         app.processEvents()
 
-        self.assertEqual(dialog.radio_bookmarks.text(), "书签 CSV")
+        self.assertEqual(dialog.data_kind, "bookmarks")
         self.assertEqual(dialog.radio_export.text(), "导出数据")
         self.assertEqual(dialog.btn_browse.text(), "选择目录")
         self.assertEqual(dialog.btn_confirm.text(), "开始导出")
@@ -316,23 +316,21 @@ class ControllerGuardTests(unittest.TestCase):
         self.assertIn("已匹配 1 / 2", dialog.summary_label.text())
         self.assertTrue(dialog.btn_confirm.isEnabled())
 
-    def test_io_wizard_allows_bookmarks_and_links_to_be_selected_together(self):
+    def test_io_wizard_links_dialog_only_handles_links(self):
         app = QApplication.instance() or QApplication([])
-        dialog = IODataWizardDialog("bookmarks", 1, lambda _actions, _path: [
-            {"file_name": "report.pdf", "data_label": "书签", "status": "将生成", "data_path": "D:/data/report_bookmarks.csv"},
+        dialog = IODataWizardDialog("links", 1, lambda _actions, _path: [
             {"file_name": "report.pdf", "data_label": "链接", "status": "将生成", "data_path": "D:/data/report_links.json"},
         ])
         dialog.show()
 
-        dialog.radio_links.setChecked(True)
         dialog.dir_edit.setText("D:/data")
         app.processEvents()
 
-        self.assertTrue(dialog.radio_bookmarks.isChecked())
-        self.assertTrue(dialog.radio_links.isChecked())
-        self.assertEqual(dialog.get_action_types(), ["export_bookmarks", "export_links"])
-        self.assertEqual(dialog.preview_table.rowCount(), 2)
-        self.assertIn("2 个数据文件", dialog.summary_label.text())
+        self.assertEqual(dialog.data_kind, "links")
+        self.assertEqual(dialog.data_type, "JSON")
+        self.assertEqual(dialog.get_action_types(), ["export_links"])
+        self.assertEqual(dialog.preview_table.rowCount(), 1)
+        self.assertIn("1 个数据文件", dialog.summary_label.text())
 
 
 if __name__ == "__main__":

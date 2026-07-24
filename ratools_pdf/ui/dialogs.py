@@ -279,45 +279,32 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
 
 
 class IODataWizardDialog(FramelessDraggableDialog):
-    def __init__(self, default_data_kind="bookmarks", file_count=0, preview_callback=None, parent=None):
-        super().__init__("书签与链接数据导入/导出", parent)
+    def __init__(self, data_kind="bookmarks", file_count=0, preview_callback=None, parent=None):
+        self.data_kind = "links" if data_kind == "links" else "bookmarks"
+        self.data_label = "链接" if self.data_kind == "links" else "书签"
+        self.data_type = "JSON" if self.data_kind == "links" else "CSV"
+
+        super().__init__(f"{self.data_label}数据导入/导出", parent)
         self.resize(760, 540)
         self.preview_callback = preview_callback
         self.file_count = file_count
 
         self.content_layout.setSpacing(12)
 
-        title = QLabel("配置数据任务")
+        title = QLabel(f"配置{self.data_label}数据任务")
         title.setObjectName("dialogHeading")
         self.content_layout.addWidget(title)
 
-        intro = QLabel(f"当前队列包含 {file_count} 个 PDF。先选择要处理的数据和方向，再确认目录匹配结果。")
+        intro = QLabel(
+            f"当前队列包含 {file_count} 个 PDF。选择操作方向，再确认目录匹配结果。"
+            f"数据文件格式为 {self.data_type}。"
+        )
         intro.setWordWrap(True)
         intro.setObjectName("dialogMuted")
         self.content_layout.addWidget(intro)
 
         options_row = QHBoxLayout()
         options_row.setSpacing(12)
-
-        data_block = QVBoxLayout()
-        data_block.setSpacing(6)
-        data_title = QLabel("数据类型")
-        data_title.setObjectName("dialogCaption")
-        data_choices = QHBoxLayout()
-        data_choices.setSpacing(8)
-        self.data_group = QButtonGroup(self)
-        self.radio_bookmarks = QPushButton("书签 CSV")
-        self.radio_links = QPushButton("链接 JSON")
-        self.data_group.setExclusive(False)
-        self.data_group.addButton(self.radio_bookmarks)
-        self.data_group.addButton(self.radio_links)
-        for btn in [self.radio_bookmarks, self.radio_links]:
-            btn.setCheckable(True)
-            btn.setObjectName("choiceToggleBtn")
-            btn.setCursor(Qt.PointingHandCursor)
-            data_choices.addWidget(btn)
-        data_block.addWidget(data_title)
-        data_block.addLayout(data_choices)
 
         direction_block = QVBoxLayout()
         direction_block.setSpacing(6)
@@ -338,7 +325,6 @@ class IODataWizardDialog(FramelessDraggableDialog):
         direction_block.addWidget(direction_title)
         direction_block.addLayout(direction_choices)
 
-        options_row.addLayout(data_block, 1)
         options_row.addLayout(direction_block, 1)
         self.content_layout.addLayout(options_row)
 
@@ -355,7 +341,7 @@ class IODataWizardDialog(FramelessDraggableDialog):
         dir_row.setSpacing(8)
         self.dir_edit = QLineEdit()
         self.dir_edit.setObjectName("settingsPathEdit")
-        self.dir_edit.setPlaceholderText("选择 CSV/JSON 数据目录")
+        self.dir_edit.setPlaceholderText(f"选择 {self.data_type} 数据目录")
         self.dir_edit.setFixedHeight(36)
         self.btn_browse = QPushButton("选择目录")
         self.btn_browse.setObjectName("dialogSecondaryBtn")
@@ -418,11 +404,9 @@ class IODataWizardDialog(FramelessDraggableDialog):
         btn_row.addWidget(self.btn_confirm)
         self.content_layout.addLayout(btn_row)
 
-        self.radio_bookmarks.setChecked(default_data_kind != "links")
-        self.radio_links.setChecked(default_data_kind == "links")
         self.radio_export.setChecked(True)
 
-        for btn in [self.radio_bookmarks, self.radio_links, self.radio_export, self.radio_import]:
+        for btn in [self.radio_export, self.radio_import]:
             btn.toggled.connect(self.refresh_preview)
         self.dir_edit.textChanged.connect(self.refresh_preview)
         self.btn_browse.clicked.connect(self.browse_directory)
@@ -436,43 +420,27 @@ class IODataWizardDialog(FramelessDraggableDialog):
 
     def get_action_types(self):
         direction = "import" if self.radio_import.isChecked() else "export"
-        action_types = []
-        if self.radio_bookmarks.isChecked():
-            action_types.append(f"{direction}_bookmarks")
-        if self.radio_links.isChecked():
-            action_types.append(f"{direction}_links")
-        return action_types
+        return [f"{direction}_{self.data_kind}"]
 
     def get_selected_directory(self):
         return self.dir_edit.text().strip()
 
     def browse_directory(self):
-        data_type = "JSON" if self.radio_links.isChecked() else "CSV"
         action_name = "导入" if self.radio_import.isChecked() else "导出"
-        selected = QFileDialog.getExistingDirectory(self, f"请选择 {data_type} 数据{action_name}目录")
+        selected = QFileDialog.getExistingDirectory(self, f"请选择 {self.data_type} 数据{action_name}目录")
         if selected:
             self.dir_edit.setText(selected)
 
     def refresh_preview(self):
         action_types = self.get_action_types()
-        selected_count = len(action_types)
-        data_kind = "书签和链接" if selected_count == 2 else ("链接" if self.radio_links.isChecked() else "书签")
-        data_type = "JSON" if self.radio_links.isChecked() else "CSV"
+        data_kind = self.data_label
+        data_type = self.data_type
         is_export = self.radio_export.isChecked()
         dir_path = self.get_selected_directory()
         self.btn_confirm.setText("开始导出" if is_export else "开始导入")
-        if selected_count == 0:
-            self.preview_table.setRowCount(0)
-            self.preview_table.hide()
-            self.preview_empty_label.setText("请至少选择一种数据类型。")
-            self.preview_empty_label.show()
-            self.summary_label.setText("未选择数据类型")
-            self.btn_confirm.setEnabled(False)
-            return
 
-        data_type_text = "CSV/JSON" if selected_count == 2 else data_type
         self.output_hint.setText(
-            f"将在所选目录生成与 PDF 文件名匹配的 {data_type_text} 文件，并保留相对目录层级。"
+            f"将在所选目录生成与 PDF 文件名匹配的 {data_type} 文件，并保留相对目录层级。"
             if is_export
             else "将从所选目录读取匹配的数据文件；导入后的 PDF 保存到 RATools_导入完成。"
         )

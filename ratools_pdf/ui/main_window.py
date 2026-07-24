@@ -378,8 +378,8 @@ class MainWindow(QMainWindow):
         # 存储每一个页面的包装容器
         self.settings_pages = []
 
-        self.btn_bookmark_io_wizard = QPushButton("导入/导出书签数据...")
-        self.btn_link_io_wizard = QPushButton("导入/导出链接数据...")
+        self.btn_bookmark_io_wizard = QPushButton("书签数据导入/导出...")
+        self.btn_link_io_wizard = QPushButton("链接数据导入/导出...")
         self.btn_embed_missing_fonts = QPushButton("🛠 嵌入缺失字体")
         self.btn_embed_missing_fonts.setObjectName("secondaryBtn")
         self.btn_embed_missing_fonts.setCursor(Qt.PointingHandCursor)
