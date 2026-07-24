@@ -64,6 +64,118 @@ class PDFProcessorRoundTripTests(unittest.TestCase):
 
             self.assertEqual(tuple(link.get("to")), (144.0, 288.0))
 
+    def test_link_export_external_scope_skips_internal_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            json_path = os.path.join(tmp, "links.json")
+
+            doc = fitz.open()
+            doc.new_page()
+            doc.new_page()
+            doc[0].insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(70, 60, 180, 80),
+                "uri": "https://example.com",
+            })
+            doc[0].insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": fitz.Rect(70, 100, 180, 120),
+                "page": 1,
+                "to": fitz.Point(144, 288),
+            })
+            doc.save(source_pdf)
+            doc.close()
+
+            PDFProcessor.export_links(source_pdf, json_path, scope="external")
+
+            import json
+            with open(json_path, "r", encoding="utf-8") as f:
+                exported = json.load(f)
+
+            self.assertEqual(len(exported), 1)
+            self.assertEqual(exported[0]["kind"], fitz.LINK_URI)
+
+    def test_link_import_incremental_keeps_existing_and_skips_overlap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            json_path = os.path.join(tmp, "links.json")
+            output_pdf = os.path.join(tmp, "output.pdf")
+
+            # 源 PDF：第 0 页已有一个 URI 链接。
+            doc = fitz.open()
+            doc.new_page()
+            doc[0].insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(70, 60, 180, 80),
+                "uri": "https://existing.com",
+            })
+            doc.save(source_pdf)
+            doc.close()
+
+            # 导入数据：一个与现有链接重叠、一个位于新区域。
+            import json
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump([
+                    {
+                        "page_index": 0,
+                        "rect": [70, 60, 180, 80],
+                        "kind": fitz.LINK_URI,
+                        "uri": "https://overlap.com",
+                    },
+                    {
+                        "page_index": 0,
+                        "rect": [70, 200, 180, 220],
+                        "kind": fitz.LINK_URI,
+                        "uri": "https://fresh.com",
+                    },
+                ], f)
+
+            PDFProcessor.import_links(source_pdf, json_path, output_pdf, mode="incremental")
+
+            restored = fitz.open(output_pdf)
+            uris = sorted(link.get("uri", "") for link in restored[0].get_links())
+            restored.close()
+
+            # 既有链接保留、重叠区域被跳过、新区域被写入。
+            self.assertIn("https://existing.com", uris)
+            self.assertIn("https://fresh.com", uris)
+            self.assertNotIn("https://overlap.com", uris)
+
+    def test_link_import_overwrite_replaces_existing_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            json_path = os.path.join(tmp, "links.json")
+            output_pdf = os.path.join(tmp, "output.pdf")
+
+            doc = fitz.open()
+            doc.new_page()
+            doc[0].insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(70, 60, 180, 80),
+                "uri": "https://existing.com",
+            })
+            doc.save(source_pdf)
+            doc.close()
+
+            import json
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump([
+                    {
+                        "page_index": 0,
+                        "rect": [70, 200, 180, 220],
+                        "kind": fitz.LINK_URI,
+                        "uri": "https://fresh.com",
+                    },
+                ], f)
+
+            PDFProcessor.import_links(source_pdf, json_path, output_pdf, mode="overwrite")
+
+            restored = fitz.open(output_pdf)
+            uris = [link.get("uri", "") for link in restored[0].get_links()]
+            restored.close()
+
+            self.assertEqual(uris, ["https://fresh.com"])
+
     def test_smart_mode_reports_unsupported_options_as_forced(self):
         with tempfile.TemporaryDirectory() as tmp:
             source_pdf = os.path.join(tmp, "source.pdf")

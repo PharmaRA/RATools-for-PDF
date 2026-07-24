@@ -102,7 +102,7 @@ class ControllerGuardTests(unittest.TestCase):
                 worker.run()
 
             export_bookmarks.assert_called_once_with(file_path, os.path.join(tmp, "report_bookmarks.csv"))
-            export_links.assert_called_once_with(file_path, os.path.join(tmp, "report_links.json"))
+            export_links.assert_called_once_with(file_path, os.path.join(tmp, "report_links.json"), scope="all")
 
     def test_io_worker_imports_bookmarks_and_links_as_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:

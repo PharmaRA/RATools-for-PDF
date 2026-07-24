@@ -119,20 +119,52 @@ def import_bookmarks(pdf_path, csv_path, output_path):
 
 # 导出与导入超链接 (JSON)
 
+# 外部链接：指向网页/邮件 (URI)、其它 PDF 文件 (GOTOR) 或外部程序/文件 (LAUNCH)。
+# 文档内跳转 (GOTO) 属于内部链接，不计入“仅外链”范围。
+_EXTERNAL_LINK_KINDS = {
+    fitz.LINK_URI,
+    fitz.LINK_GOTOR,
+    getattr(fitz, "LINK_LAUNCH", None),
+}
+_EXTERNAL_LINK_KINDS.discard(None)
 
-def export_links(pdf_path, json_path):
-    """Export links to JSON with enough destination data for round-trip import."""
+
+def _is_external_link_kind(kind):
+    return kind in _EXTERNAL_LINK_KINDS
+
+
+def _rects_overlap(rect_a, rect_b, min_ratio=0.5):
+    """两个矩形是否被视为“同一区域”：交集面积占较小矩形的比例达到阈值即算重复。"""
+    inter = rect_a & rect_b
+    if inter.is_empty or inter.width <= 0 or inter.height <= 0:
+        return False
+    inter_area = inter.width * inter.height
+    smaller_area = min(rect_a.width * rect_a.height, rect_b.width * rect_b.height)
+    if smaller_area <= 0:
+        return False
+    return (inter_area / smaller_area) >= min_ratio
+
+
+def export_links(pdf_path, json_path, scope="all"):
+    """Export links to JSON with enough destination data for round-trip import.
+
+    scope: "all" 导出全部链接；"external" 仅导出外部链接 (URI/GOTOR/LAUNCH)。
+    """
+    only_external = scope == "external"
     doc = fitz.open(pdf_path)
     all_links = []
 
     for page in doc:
         for link in page.get_links():
+            kind = link.get('kind', fitz.LINK_NONE)
+            if only_external and not _is_external_link_kind(kind):
+                continue
             rect = link['from']
             target_point = link.get('to')
             link_dict = {
                 'page_index': page.number,
                 'rect': [rect.x0, rect.y0, rect.x1, rect.y1],
-                'kind': link.get('kind', fitz.LINK_NONE),
+                'kind': kind,
                 'uri': link.get('uri', ''),
                 'file': link.get('file', ''),
                 'target_page': link.get('page', 0),
@@ -147,47 +179,87 @@ def export_links(pdf_path, json_path):
     doc.close()
 
 
-def import_links(pdf_path, json_path, output_path):
-    """Rebuild links from JSON while preserving internal destinations and new-window flags."""
+def _build_link_payload(ld, link_file_kind):
+    """将 JSON 中的一条链接记录转换为 insert_link 所需的字典。"""
+    rect = fitz.Rect(ld['rect'])
+    kind = ld['kind']
+
+    new_link = {"kind": kind, "from": rect}
+    if kind == fitz.LINK_URI:
+        new_link["uri"] = ld.get('uri', '')
+    elif link_file_kind is not None and kind == link_file_kind:
+        new_link["file"] = ld.get('file', '')
+    elif kind in [fitz.LINK_GOTO, fitz.LINK_GOTOR]:
+        new_link["page"] = ld.get('target_page', 0)
+        new_link["zoom"] = ld.get('zoom', 0.0)
+        to_value = ld.get('to')
+        if isinstance(to_value, (list, tuple)) and len(to_value) >= 2:
+            new_link["to"] = fitz.Point(float(to_value[0]), float(to_value[1]))
+        if kind == fitz.LINK_GOTOR:
+            new_link["file"] = ld.get('file', '')
+            new_link["newWindow"] = bool(ld.get('new_window', False))
+    elif kind == fitz.LINK_LAUNCH:
+        new_link["file"] = ld.get('file', '')
+        new_link["newWindow"] = bool(ld.get('new_window', False))
+
+    return new_link, rect
+
+
+def import_links(pdf_path, json_path, output_path, scope="all", mode="overwrite"):
+    """Rebuild links from JSON while preserving internal destinations and new-window flags.
+
+    scope: "all" 导入全部链接；"external" 仅导入外部链接 (URI/GOTOR/LAUNCH)。
+    mode:  "overwrite" 覆盖——先移除页面上同范围的旧链接再写入；
+           "incremental" 增量——保留旧链接，仅写入未与既有链接重叠的新链接。
+    """
+    only_external = scope == "external"
+    incremental = mode == "incremental"
     doc = fitz.open(pdf_path)
     link_file_kind = getattr(fitz, "LINK_FILE", None)
 
     with open(json_path, 'r', encoding='utf-8') as f:
         links_data = json.load(f)
 
-    for page in doc:
-        for link in page.get_links():
-            page.delete_link(link)
+    # 覆盖模式：移除页面上处于导入范围内的旧链接。
+    # “仅外链”范围只删除外链，保留文档内跳转；“全部”范围删除所有链接。
+    if not incremental:
+        for page in doc:
+            for link in page.get_links():
+                if only_external and not _is_external_link_kind(link.get('kind', fitz.LINK_NONE)):
+                    continue
+                page.delete_link(link)
+
+    # 增量模式下，记录各页现存链接区域，用于跳过重复区域。
+    existing_rects = {}
+    if incremental:
+        for page in doc:
+            existing_rects[page.number] = [
+                fitz.Rect(link['from']) for link in page.get_links()
+            ]
 
     for ld in links_data:
         p_idx = ld.get('page_index', 0)
-        if 0 <= p_idx < doc.page_count:
-            page = doc[p_idx]
-            rect = fitz.Rect(ld['rect'])
-            kind = ld['kind']
+        if not (0 <= p_idx < doc.page_count):
+            continue
 
-            new_link = {"kind": kind, "from": rect}
-            if kind == fitz.LINK_URI:
-                new_link["uri"] = ld.get('uri', '')
-            elif link_file_kind is not None and kind == link_file_kind:
-                new_link["file"] = ld.get('file', '')
-            elif kind in [fitz.LINK_GOTO, fitz.LINK_GOTOR]:
-                new_link["page"] = ld.get('target_page', 0)
-                new_link["zoom"] = ld.get('zoom', 0.0)
-                to_value = ld.get('to')
-                if isinstance(to_value, (list, tuple)) and len(to_value) >= 2:
-                    new_link["to"] = fitz.Point(float(to_value[0]), float(to_value[1]))
-                if kind == fitz.LINK_GOTOR:
-                    new_link["file"] = ld.get('file', '')
-                    new_link["newWindow"] = bool(ld.get('new_window', False))
-            elif kind == fitz.LINK_LAUNCH:
-                new_link["file"] = ld.get('file', '')
-                new_link["newWindow"] = bool(ld.get('new_window', False))
+        kind = ld.get('kind', fitz.LINK_NONE)
+        if only_external and not _is_external_link_kind(kind):
+            continue
 
-            try:
-                page.insert_link(new_link)
-            except Exception:
-                pass
+        page = doc[p_idx]
+        new_link, rect = _build_link_payload(ld, link_file_kind)
+
+        if incremental:
+            page_rects = existing_rects.setdefault(p_idx, [])
+            if any(_rects_overlap(rect, existing) for existing in page_rects):
+                continue
+
+        try:
+            page.insert_link(new_link)
+            if incremental:
+                existing_rects[p_idx].append(rect)
+        except Exception:
+            pass
 
     doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
     doc.close()

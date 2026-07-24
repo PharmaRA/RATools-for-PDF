@@ -1166,9 +1166,12 @@ class MainController(QObject):
             dir_path=dialog.get_selected_directory(),
             common_base=common_base,
             confirmed=True,
+            link_scope=dialog.get_link_scope(),
+            link_mode=dialog.get_link_mode(),
         )
 
-    def handle_io_action(self, action_type, dir_path=None, common_base=None, confirmed=False):
+    def handle_io_action(self, action_type, dir_path=None, common_base=None, confirmed=False,
+                         link_scope="all", link_mode="overwrite"):
         if not self.loaded_files:
             self.view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
             return
@@ -1200,7 +1203,10 @@ class MainController(QObject):
             out_dir_path.mkdir(exist_ok=True)
             out_dir = str(out_dir_path)
 
-        self.io_worker = IOActionWorker(action_types, self.loaded_files, dir_path, out_dir, common_base)
+        self.io_worker = IOActionWorker(
+            action_types, self.loaded_files, dir_path, out_dir, common_base,
+            link_scope=link_scope, link_mode=link_mode,
+        )
         self.io_worker.progress.connect(self.update_progress)
         self.io_worker.finished_action.connect(self.on_io_action_finished)
         self.io_worker.error_action.connect(self.on_io_action_error)

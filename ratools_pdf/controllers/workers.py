@@ -505,7 +505,8 @@ class IOActionWorker(QThread):
     finished_action = Signal(str)
     error_action = Signal(str)
 
-    def __init__(self, action_type, files, target_dir, output_dir=None, common_base=""):
+    def __init__(self, action_type, files, target_dir, output_dir=None, common_base="",
+                 link_scope="all", link_mode="overwrite"):
         super().__init__()
         self.action_types = _normalize_io_action_types(action_type)
         self.action_type = self.action_types[0] if self.action_types else ""
@@ -513,6 +514,8 @@ class IOActionWorker(QThread):
         self.target_dir = target_dir
         self.output_dir = output_dir
         self.common_base = common_base
+        self.link_scope = "external" if link_scope == "external" else "all"
+        self.link_mode = "incremental" if link_mode == "incremental" else "overwrite"
 
     def run(self):
         try:
@@ -534,8 +537,8 @@ class IOActionWorker(QThread):
                             PDFProcessor.export_bookmarks(file_path, data_path)
                             messages.append("✅ 导出书签成功")
                         elif action_type == 'export_links':
-                            PDFProcessor.export_links(file_path, data_path)
-                            messages.append("✅ 导出链接成功")
+                            PDFProcessor.export_links(file_path, data_path, scope=self.link_scope)
+                            messages.append("✅ 导出%s成功" % ("外部链接" if self.link_scope == "external" else "链接"))
                     success = bool(messages)
 
                 elif self.action_type.startswith("import"):
@@ -572,8 +575,13 @@ class IOActionWorker(QThread):
                                     PDFProcessor.import_bookmarks(current_source, data_path, current_output)
                                     messages.append("✅ 导入书签成功")
                                 elif action_type == 'import_links':
-                                    PDFProcessor.import_links(current_source, data_path, current_output)
-                                    messages.append("✅ 导入链接成功")
+                                    PDFProcessor.import_links(
+                                        current_source, data_path, current_output,
+                                        scope=self.link_scope, mode=self.link_mode,
+                                    )
+                                    scope_label = "外部链接" if self.link_scope == "external" else "链接"
+                                    mode_label = "增量" if self.link_mode == "incremental" else "覆盖"
+                                    messages.append(f"✅ 导入{scope_label}成功（{mode_label}）")
                                 current_source = current_output
                             success = True
                         finally:

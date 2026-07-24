@@ -328,6 +328,65 @@ class IODataWizardDialog(FramelessDraggableDialog):
         options_row.addLayout(direction_block, 1)
         self.content_layout.addLayout(options_row)
 
+        # 链接专属选项：链接范围（全部/仅外链）与导入模式（覆盖/增量）。
+        self.radio_scope_all = None
+        self.radio_scope_external = None
+        self.radio_mode_overwrite = None
+        self.radio_mode_incremental = None
+        if self.data_kind == "links":
+            link_options_row = QHBoxLayout()
+            link_options_row.setSpacing(12)
+
+            scope_block = QVBoxLayout()
+            scope_block.setSpacing(6)
+            scope_title = QLabel("链接范围")
+            scope_title.setObjectName("dialogCaption")
+            scope_choices = QHBoxLayout()
+            scope_choices.setSpacing(8)
+            self.scope_group = QButtonGroup(self)
+            self.radio_scope_all = QPushButton("全部链接")
+            self.radio_scope_external = QPushButton("仅外部链接")
+            self.radio_scope_external.setToolTip("仅处理网页/邮件 (URI)、跳转其它 PDF (GOTOR) 和打开外部文件 (LAUNCH) 的链接，忽略文档内跳转。")
+            self.scope_group.addButton(self.radio_scope_all)
+            self.scope_group.addButton(self.radio_scope_external)
+            for btn in [self.radio_scope_all, self.radio_scope_external]:
+                btn.setCheckable(True)
+                btn.setObjectName("choiceToggleBtn")
+                btn.setCursor(Qt.PointingHandCursor)
+                scope_choices.addWidget(btn)
+            scope_block.addWidget(scope_title)
+            scope_block.addLayout(scope_choices)
+
+            self.mode_block_widget = QWidget()
+            mode_block = QVBoxLayout(self.mode_block_widget)
+            mode_block.setContentsMargins(0, 0, 0, 0)
+            mode_block.setSpacing(6)
+            mode_title = QLabel("导入方式")
+            mode_title.setObjectName("dialogCaption")
+            mode_choices = QHBoxLayout()
+            mode_choices.setSpacing(8)
+            self.mode_group = QButtonGroup(self)
+            self.radio_mode_overwrite = QPushButton("覆盖")
+            self.radio_mode_incremental = QPushButton("增量")
+            self.radio_mode_overwrite.setToolTip("先移除 PDF 中所选范围内的现有链接，再写入导入的链接。")
+            self.radio_mode_incremental.setToolTip("保留 PDF 中现有链接，仅追加未与现有链接重叠的新链接。")
+            self.mode_group.addButton(self.radio_mode_overwrite)
+            self.mode_group.addButton(self.radio_mode_incremental)
+            for btn in [self.radio_mode_overwrite, self.radio_mode_incremental]:
+                btn.setCheckable(True)
+                btn.setObjectName("choiceToggleBtn")
+                btn.setCursor(Qt.PointingHandCursor)
+                mode_choices.addWidget(btn)
+            mode_block.addWidget(mode_title)
+            mode_block.addLayout(mode_choices)
+
+            link_options_row.addLayout(scope_block, 1)
+            link_options_row.addWidget(self.mode_block_widget, 1)
+            self.content_layout.addLayout(link_options_row)
+
+            self.radio_scope_all.setChecked(True)
+            self.radio_mode_overwrite.setChecked(True)
+
         directory_card = QFrame()
         directory_card.setObjectName("wizardCard")
         directory_layout = QVBoxLayout(directory_card)
@@ -408,6 +467,10 @@ class IODataWizardDialog(FramelessDraggableDialog):
 
         for btn in [self.radio_export, self.radio_import]:
             btn.toggled.connect(self.refresh_preview)
+        for btn in [self.radio_scope_all, self.radio_scope_external,
+                    self.radio_mode_overwrite, self.radio_mode_incremental]:
+            if btn is not None:
+                btn.toggled.connect(self.refresh_preview)
         self.dir_edit.textChanged.connect(self.refresh_preview)
         self.btn_browse.clicked.connect(self.browse_directory)
         self.btn_cancel.clicked.connect(self.reject)
@@ -421,6 +484,16 @@ class IODataWizardDialog(FramelessDraggableDialog):
     def get_action_types(self):
         direction = "import" if self.radio_import.isChecked() else "export"
         return [f"{direction}_{self.data_kind}"]
+
+    def get_link_scope(self):
+        if self.radio_scope_external is not None and self.radio_scope_external.isChecked():
+            return "external"
+        return "all"
+
+    def get_link_mode(self):
+        if self.radio_mode_incremental is not None and self.radio_mode_incremental.isChecked():
+            return "incremental"
+        return "overwrite"
 
     def get_selected_directory(self):
         return self.dir_edit.text().strip()
@@ -438,6 +511,10 @@ class IODataWizardDialog(FramelessDraggableDialog):
         is_export = self.radio_export.isChecked()
         dir_path = self.get_selected_directory()
         self.btn_confirm.setText("开始导出" if is_export else "开始导入")
+
+        # 导入方式（覆盖/增量）仅在导入方向下有意义。
+        if getattr(self, "mode_block_widget", None) is not None:
+            self.mode_block_widget.setVisible(not is_export)
 
         self.output_hint.setText(
             f"将在所选目录生成与 PDF 文件名匹配的 {data_type} 文件，并保留相对目录层级。"

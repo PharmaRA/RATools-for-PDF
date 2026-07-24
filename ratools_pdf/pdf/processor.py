@@ -298,12 +298,12 @@ class PDFProcessor:
         return bookmarks_links.import_bookmarks(pdf_path, csv_path, output_path)
 
     @staticmethod
-    def export_links(pdf_path, json_path):
-        return bookmarks_links.export_links(pdf_path, json_path)
+    def export_links(pdf_path, json_path, scope="all"):
+        return bookmarks_links.export_links(pdf_path, json_path, scope=scope)
 
     @staticmethod
-    def import_links(pdf_path, json_path, output_path):
-        return bookmarks_links.import_links(pdf_path, json_path, output_path)
+    def import_links(pdf_path, json_path, output_path, scope="all", mode="overwrite"):
+        return bookmarks_links.import_links(pdf_path, json_path, output_path, scope=scope, mode=mode)
 
     @staticmethod
     def _is_text_blue(page, rect):
