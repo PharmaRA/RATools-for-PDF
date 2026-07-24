@@ -603,6 +603,189 @@ def _pdf_has_signature(input_path):
                 pass
 
 
+# 批注类型编号到中文名称的映射。用于批注复核提示的明细展示。
+# 注意：PyMuPDF 的 page.annots() 本身不返回 Link 注释，链接由 get_links() 处理，
+# 因此这里以类型编号判定，不依赖易混淆的“type[0] == 8”写法。
+ANNOTATION_TYPE_LABELS = {
+    0: "便签(文本注释)",
+    2: "自由文本",
+    3: "直线",
+    4: "矩形",
+    5: "圆形",
+    6: "多边形",
+    7: "折线",
+    8: "高亮",
+    9: "下划线",
+    10: "波浪线",
+    11: "删除线",
+    12: "涂黑(密文)",
+    13: "图章",
+    14: "标注",
+    15: "手绘",
+    17: "文件附件",
+    18: "声音",
+    19: "影片",
+    22: "屏幕",
+}
+
+# Word 转 PDF 时，交叉引用、书签或超链接失效会残留固定的占位错误文本。
+# 这里只匹配 Word 生成的固定文案，不匹配正文中正常出现的“错误”“error”，避免误报。
+WORD_BROKEN_REFERENCE_REGEXES = [
+    re.compile(r"错误\s*[！!]\s*未找到引用源"),
+    re.compile(r"错误\s*[！!]\s*未定义书签"),
+    re.compile(r"错误\s*[！!]\s*超链接引用无效"),
+    re.compile(r"错误\s*[！!]\s*链接无效"),
+    re.compile(r"错误\s*[！!]\s*不是有效的(?:文件名|链接)"),
+    re.compile(r"错误\s*[！!]\s*文档中没有指定样式的文字"),
+    re.compile(r"错误\s*[！!]\s*不能通过编辑域代码创建对象"),
+    re.compile(r"Error!\s*Reference source not found", re.IGNORECASE),
+    re.compile(r"Error!\s*Bookmark not defined", re.IGNORECASE),
+    re.compile(r"Error!\s*Hyperlink reference not valid", re.IGNORECASE),
+    re.compile(r"Error!\s*No text of specified style in document", re.IGNORECASE),
+    re.compile(r"Error!\s*Objects cannot be created from editing field codes", re.IGNORECASE),
+    re.compile(r"Error!\s*Not a valid (?:filename|link)", re.IGNORECASE),
+]
+
+
+def _collect_annotation_findings(doc):
+    """扫描 PDF 中的批注（便签、高亮、下划线等），仅作人工复核提示，不自动处理。
+
+    统计非链接类批注（PyMuPDF 的 page.annots() 本身不返回 Link 注释）；
+    Popup 依附于其它批注，不单独计数。返回结构包含总数、页数、按类型的明细。
+    """
+    link_type = getattr(fitz, "PDF_ANNOT_LINK", 1)
+    popup_type = getattr(fitz, "PDF_ANNOT_POPUP", 16)
+
+    type_counts = {}
+    matched_pages = set()
+    total = 0
+    for page_index, page in enumerate(doc, start=1):
+        try:
+            annots = page.annots()
+        except Exception:
+            continue
+        if not annots:
+            continue
+        for annot in annots:
+            try:
+                type_tuple = annot.type
+            except Exception:
+                continue
+            if isinstance(type_tuple, (tuple, list)) and type_tuple:
+                type_number = type_tuple[0]
+                type_name = type_tuple[1] if len(type_tuple) > 1 else ""
+            else:
+                type_number = None
+                type_name = ""
+            if type_number in (link_type, popup_type):
+                continue
+            total += 1
+            matched_pages.add(page_index)
+            label = ANNOTATION_TYPE_LABELS.get(type_number, str(type_name or "批注"))
+            type_counts[label] = type_counts.get(label, 0) + 1
+
+    if total == 0:
+        return {"has_annotations": False, "count": 0, "summary": "", "details": ""}
+
+    detail_parts = [
+        f"{label} {count} 个"
+        for label, count in sorted(type_counts.items(), key=lambda item: item[0])
+    ]
+    return {
+        "has_annotations": True,
+        "count": total,
+        "summary": f"发现 {total} 个批注，分布在 {len(matched_pages)} 页",
+        "details": "、".join(detail_parts),
+    }
+
+
+def _collect_broken_reference_findings(doc):
+    """扫描 Word 转 PDF 后残留的失效引用/链接占位错误文本。
+
+    仅匹配 Word 固定生成的错误文案（如“错误！未找到引用源。”“Error! Reference source not found.”），
+    不匹配正文中正常出现的“错误”“error”，避免误报。返回结构包含命中页码与命中文案样例。
+    """
+    matched_pages = {}  # page_number -> set(命中文案)
+    for page_index, page in enumerate(doc, start=1):
+        try:
+            text = page.get_text("text")
+        except Exception:
+            continue
+        if not text:
+            continue
+        for regex in WORD_BROKEN_REFERENCE_REGEXES:
+            match = regex.search(text)
+            if match:
+                matched_pages.setdefault(page_index, set()).add(match.group(0).strip())
+
+    if not matched_pages:
+        return {"has_broken_reference": False, "count": 0, "summary": "", "details": ""}
+
+    pages = sorted(matched_pages)
+    detail_parts = [
+        f"第{page_number}页：{'、'.join(sorted(matched_pages[page_number]))}"
+        for page_number in pages
+    ]
+    return {
+        "has_broken_reference": True,
+        "count": len(pages),
+        "summary": f"发现 {len(pages)} 页存在疑似失效引用/链接占位文本（Word 转 PDF 常见问题）",
+        "details": "; ".join(detail_parts),
+    }
+
+
+def _collect_annotation_findings_for_path(pdf_path):
+    """按路径执行批注检测，供独立的“批注检测”按钮使用，不牵连完整预检。"""
+    if not os.path.exists(pdf_path):
+        return {"available": False, "error": "文件不存在", "has_annotations": False, "count": 0, "summary": "", "details": ""}
+    if not os.path.isfile(pdf_path):
+        return {"available": False, "error": "不是PDF文件", "has_annotations": False, "count": 0, "summary": "", "details": ""}
+
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        if doc.needs_pass:
+            return {"available": False, "error": "该PDF需要密码，无法执行批注检测", "has_annotations": False, "count": 0, "summary": "", "details": ""}
+        findings = _processor_cls()._collect_annotation_findings(doc)
+        findings["available"] = True
+        findings["error"] = ""
+        return findings
+    except Exception as exc:
+        return {"available": False, "error": str(exc), "has_annotations": False, "count": 0, "summary": "", "details": ""}
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+
+def _collect_broken_reference_findings_for_path(pdf_path):
+    """按路径执行失效引用/链接文本检测，供独立的“失效引用检测”按钮使用，不牵连完整预检。"""
+    if not os.path.exists(pdf_path):
+        return {"available": False, "error": "文件不存在", "has_broken_reference": False, "count": 0, "summary": "", "details": ""}
+    if not os.path.isfile(pdf_path):
+        return {"available": False, "error": "不是PDF文件", "has_broken_reference": False, "count": 0, "summary": "", "details": ""}
+
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        if doc.needs_pass:
+            return {"available": False, "error": "该PDF需要密码，无法执行失效引用检测", "has_broken_reference": False, "count": 0, "summary": "", "details": ""}
+        findings = _processor_cls()._collect_broken_reference_findings(doc)
+        findings["available"] = True
+        findings["error"] = ""
+        return findings
+    except Exception as exc:
+        return {"available": False, "error": str(exc), "has_broken_reference": False, "count": 0, "summary": "", "details": ""}
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+
 def build_precheck_report(input_path, selected_options=None):
     selected_options = _processor_cls()._filtered_precheck_options(selected_options)
 
@@ -625,6 +808,10 @@ def build_precheck_report(input_path, selected_options=None):
         "font_summary": "",
         "font_details": "",
         "font_findings": [],
+        "annotation_summary": "",
+        "annotation_details": "",
+        "broken_reference_summary": "",
+        "broken_reference_details": "",
         "error": "",
     }
 
@@ -847,6 +1034,40 @@ def build_precheck_report(input_path, selected_options=None):
                         suggestions,
                         "font_precheck_review",
                         "字体预检：需要复核",
+                        reason,
+                    )
+            except Exception:
+                pass
+
+            try:
+                annotation_precheck = _processor_cls()._collect_annotation_findings(doc)
+                if annotation_precheck.get("has_annotations"):
+                    report["annotation_summary"] = annotation_precheck.get("summary", "")
+                    report["annotation_details"] = annotation_precheck.get("details", "")
+                    reason = report["annotation_summary"]
+                    if report["annotation_details"]:
+                        reason = f"{reason}；明细：{report['annotation_details']}"
+                    _processor_cls()._add_precheck_report_finding(
+                        suggestions,
+                        "annotation_precheck_review",
+                        "批注检查：需要复核",
+                        reason,
+                    )
+            except Exception:
+                pass
+
+            try:
+                broken_reference_precheck = _processor_cls()._collect_broken_reference_findings(doc)
+                if broken_reference_precheck.get("has_broken_reference"):
+                    report["broken_reference_summary"] = broken_reference_precheck.get("summary", "")
+                    report["broken_reference_details"] = broken_reference_precheck.get("details", "")
+                    reason = report["broken_reference_summary"]
+                    if report["broken_reference_details"]:
+                        reason = f"{reason}；明细：{report['broken_reference_details']}"
+                    _processor_cls()._add_precheck_report_finding(
+                        suggestions,
+                        "broken_reference_precheck_review",
+                        "失效引用/链接文本检查：需要复核",
                         reason,
                     )
             except Exception:

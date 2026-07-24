@@ -184,6 +184,11 @@ class MainWindow(QMainWindow):
                     {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
                     {"id": "filename_ectd_format", "title": "eCTD文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
                 ]
+            },
+            {
+                "icon": "🔍",
+                "title": "文档检测",
+                "options": []
             }
         ]
 
@@ -385,6 +390,16 @@ class MainWindow(QMainWindow):
         self.btn_embed_missing_fonts.setCursor(Qt.PointingHandCursor)
         self.btn_embed_missing_fonts.setToolTip("打开选中的 PDF，并在 Acrobat 中手动执行印前检查的“嵌入缺失的字体”。")
 
+        self.btn_detect_annotations = QPushButton("🖍 检测批注 (便签/高亮等)")
+        self.btn_detect_annotations.setObjectName("secondaryBtn")
+        self.btn_detect_annotations.setCursor(Qt.PointingHandCursor)
+        self.btn_detect_annotations.setToolTip("扫描队列中所有 PDF，报告便签、高亮等批注情况，仅检测不修改文件。")
+
+        self.btn_detect_broken_refs = QPushButton("🔗 检测失效引用/链接文本")
+        self.btn_detect_broken_refs.setObjectName("secondaryBtn")
+        self.btn_detect_broken_refs.setCursor(Qt.PointingHandCursor)
+        self.btn_detect_broken_refs.setToolTip("扫描队列中所有 PDF，检测 Word 转 PDF 后残留的“错误！未找到引用源”等失效占位文本，仅检测不修改文件。")
+
         for btn in [self.btn_bookmark_io_wizard, self.btn_link_io_wizard]:
             btn.setObjectName("secondaryBtn")
             btn.setCursor(Qt.PointingHandCursor)
@@ -422,6 +437,16 @@ class MainWindow(QMainWindow):
                 btn_layout.setSpacing(8)
                 btn_layout.addWidget(self.btn_link_io_wizard)
                 page_layout.addLayout(btn_layout)
+
+            elif mod["title"] == "文档检测":
+                page_layout.addWidget(self._create_section_label("只读检测（不修改文件）"))
+                detect_hint = QLabel("对整个待处理队列执行只读扫描，结果会弹窗汇总并写入日志，不会改动任何 PDF。")
+                detect_hint.setWordWrap(True)
+                detect_hint.setObjectName("mutedSmall")
+                page_layout.addWidget(detect_hint)
+                page_layout.addSpacing(8)
+                page_layout.addWidget(self.btn_detect_annotations)
+                page_layout.addWidget(self.btn_detect_broken_refs)
 
             page_layout.addStretch()
 

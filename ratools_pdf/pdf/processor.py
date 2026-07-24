@@ -143,6 +143,22 @@ class PDFProcessor:
         return precheck._font_precheck_has_embedding_risk(font_precheck)
 
     @staticmethod
+    def _collect_annotation_findings(doc):
+        return precheck._collect_annotation_findings(doc)
+
+    @staticmethod
+    def _collect_broken_reference_findings(doc):
+        return precheck._collect_broken_reference_findings(doc)
+
+    @staticmethod
+    def _collect_annotation_findings_for_path(pdf_path):
+        return precheck._collect_annotation_findings_for_path(pdf_path)
+
+    @staticmethod
+    def _collect_broken_reference_findings_for_path(pdf_path):
+        return precheck._collect_broken_reference_findings_for_path(pdf_path)
+
+    @staticmethod
     def _collect_font_precheck_for_path(pdf_path):
         return precheck._collect_font_precheck_for_path(pdf_path)
 

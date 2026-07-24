@@ -420,6 +420,10 @@ class PreCheckWorker(QThread):
                         "error": reason,
                         "font_summary": "",
                         "font_details": "",
+                        "annotation_summary": "",
+                        "annotation_details": "",
+                        "broken_reference_summary": "",
+                        "broken_reference_details": "",
                     })
                     self.progress.emit(
                         i,
@@ -462,6 +466,10 @@ class PreCheckWorker(QThread):
                         "error": "",
                         "font_summary": report.get("font_summary", ""),
                         "font_details": report.get("font_details", ""),
+                        "annotation_summary": report.get("annotation_summary", ""),
+                        "annotation_details": report.get("annotation_details", ""),
+                        "broken_reference_summary": report.get("broken_reference_summary", ""),
+                        "broken_reference_details": report.get("broken_reference_details", ""),
                     })
                     self.progress.emit(
                         i,
@@ -478,6 +486,10 @@ class PreCheckWorker(QThread):
                         "error": "",
                         "font_summary": report.get("font_summary", ""),
                         "font_details": report.get("font_details", ""),
+                        "annotation_summary": report.get("annotation_summary", ""),
+                        "annotation_details": report.get("annotation_details", ""),
+                        "broken_reference_summary": report.get("broken_reference_summary", ""),
+                        "broken_reference_details": report.get("broken_reference_details", ""),
                     })
                     self.progress.emit(
                         i,
@@ -495,6 +507,113 @@ class PreCheckWorker(QThread):
             self.finished_precheck.emit(summary)
         except Exception as e:
             self.error_precheck.emit(str(e))
+
+
+class DetectionWorker(QThread):
+    """后台检测线程：对整个队列执行单项只读检测（批注 / 失效引用文本），不修改文件。
+
+    detection_kind:
+        - "annotation"：检测便签、高亮等批注
+        - "broken_reference"：检测 Word 转 PDF 残留的失效引用/链接占位文本
+    """
+    progress = Signal(int, str, str)
+    result_ready = Signal(dict)
+    finished_detection = Signal(str, list)
+    error_detection = Signal(str)
+
+    KIND_LABELS = {
+        "annotation": "批注检测",
+        "broken_reference": "失效引用检测",
+    }
+
+    def __init__(self, files, detection_kind):
+        super().__init__()
+        self.files = list(files)
+        self.detection_kind = detection_kind if detection_kind in self.KIND_LABELS else "annotation"
+
+    def _collect(self, file_path):
+        if self.detection_kind == "annotation":
+            findings = PDFProcessor._collect_annotation_findings_for_path(file_path)
+            hit = bool(findings.get("has_annotations"))
+        else:
+            findings = PDFProcessor._collect_broken_reference_findings_for_path(file_path)
+            hit = bool(findings.get("has_broken_reference"))
+        return findings, hit
+
+    def run(self):
+        try:
+            started_at = datetime.now()
+            kind_label = self.KIND_LABELS[self.detection_kind]
+            hit_files = 0
+            failed_files = 0
+            results = []
+
+            for i, file_path in enumerate(self.files):
+                base_name = os.path.basename(file_path)
+                self.progress.emit(
+                    i,
+                    "正在检测...",
+                    f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始{kind_label}: {base_name}",
+                )
+
+                findings, hit = self._collect(file_path)
+                summary = findings.get("summary", "")
+                details = findings.get("details", "")
+
+                if not findings.get("available"):
+                    failed_files += 1
+                    reason = findings.get("error") or "无法读取PDF结构"
+                    status = "检测失败"
+                    row = {
+                        "file_name": base_name,
+                        "file_path": file_path,
+                        "detection_kind": self.detection_kind,
+                        "status": status,
+                        "summary": "",
+                        "details": "",
+                        "error": reason,
+                    }
+                    results.append(row)
+                    self.result_ready.emit(row)
+                    self.progress.emit(
+                        i,
+                        status,
+                        f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    原因: {reason}",
+                    )
+                    continue
+
+                status = "发现问题" if hit else "未发现"
+                if hit:
+                    hit_files += 1
+                row = {
+                    "file_name": base_name,
+                    "file_path": file_path,
+                    "detection_kind": self.detection_kind,
+                    "status": status,
+                    "summary": summary,
+                    "details": details,
+                    "error": "",
+                }
+                results.append(row)
+                self.result_ready.emit(row)
+                log_detail = summary
+                if details:
+                    log_detail = f"{summary}；明细：{details}" if summary else details
+                self.progress.emit(
+                    i,
+                    status,
+                    f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    结果: {log_detail or '未发现相关内容'}",
+                )
+
+            elapsed_sec = int((datetime.now() - started_at).total_seconds())
+            summary = (
+                f"{kind_label}结束。共检查 {len(self.files)} 个文件，"
+                f"发现 {hit_files} 个文件存在相关内容，"
+                f"{failed_files} 个文件检测失败。总耗时 {elapsed_sec}s。"
+            )
+            self.finished_detection.emit(summary, results)
+        except Exception as e:
+            self.error_detection.emit(str(e))
 
 
 class IOActionWorker(QThread):

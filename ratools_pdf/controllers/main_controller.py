@@ -23,6 +23,7 @@ from ratools_pdf.controllers.log_export import (
     _structured_log_row_from_event,
 )
 from ratools_pdf.controllers.workers import (
+    DetectionWorker,
     IOActionWorker,
     PreCheckWorker,
     ProcessWorker,
@@ -67,6 +68,10 @@ class MainController(QObject):
         self.worker = None
         self.precheck_worker = None
         self.precheck_files = []
+        self.detection_worker = None
+        self.detection_files = []
+        self.last_detection_results = []
+        self.last_detection_results = []
         self.update_worker = None
         app = QCoreApplication.instance()
         if app:
@@ -99,6 +104,8 @@ class MainController(QObject):
 
         self.view.btn_bookmark_io_wizard.clicked.connect(lambda: self.handle_io_wizard("bookmarks"))
         self.view.btn_link_io_wizard.clicked.connect(lambda: self.handle_io_wizard("links"))
+        self.view.btn_detect_annotations.clicked.connect(lambda: self.start_detection("annotations"))
+        self.view.btn_detect_broken_refs.clicked.connect(lambda: self.start_detection("broken_refs"))
 
         self.setup_exclusive_options()
 
@@ -660,6 +667,9 @@ class MainController(QObject):
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再移除队列项。")
             return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测结束后再移除队列项。")
+            return
 
         paths_to_remove = set()
 
@@ -773,6 +783,9 @@ class MainController(QObject):
     def add_files(self, paths):
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再添加文件。")
+            return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测结束后再添加文件。")
             return
 
         valid_pdf_paths = []
@@ -888,6 +901,9 @@ class MainController(QObject):
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再清空待处理队列。")
             return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测结束后再清空待处理队列。")
+            return
 
         if not self.loaded_files:
             return
@@ -913,6 +929,9 @@ class MainController(QObject):
 
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检完成后再开始处理。")
+            return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测完成后再开始处理。")
             return
 
         if not self.loaded_files:
@@ -1106,6 +1125,9 @@ class MainController(QObject):
         if self.worker and self.worker.isRunning():
             self.view.show_warning_message("⚠️ 正在处理", "批量处理进行中，无法执行预检。")
             return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "检测进行中，请稍候再执行预检。")
+            return
         if self._is_precheck_running():
             return
         if not self.loaded_files:
@@ -1134,6 +1156,97 @@ class MainController(QObject):
         self.precheck_worker.error_precheck.connect(self.precheck_error)
         self.precheck_worker.finished.connect(self.precheck_worker.deleteLater)
         self.precheck_worker.start()
+
+    def _is_detection_running(self):
+        detection_worker = getattr(self, "detection_worker", None)
+        return bool(detection_worker and detection_worker.isRunning())
+
+    DETECTION_KIND_MAP = {
+        "annotations": "annotation",
+        "broken_refs": "broken_reference",
+    }
+
+    DETECTION_KIND_TITLES = {
+        "annotation": "批注检测",
+        "broken_reference": "失效引用/链接文本检测",
+    }
+
+    def start_detection(self, ui_kind):
+        detection_kind = self.DETECTION_KIND_MAP.get(ui_kind, "annotation")
+        kind_title = self.DETECTION_KIND_TITLES[detection_kind]
+
+        if self.worker and self.worker.isRunning():
+            self.view.show_warning_message("⚠️ 正在处理", f"批量处理进行中，无法执行{kind_title}。")
+            return
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", f"预检进行中，无法执行{kind_title}。")
+            return
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", "已有检测任务进行中，请稍候。")
+            return
+        if not self.loaded_files:
+            self.view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
+            return
+
+        self.detection_files = list(self.loaded_files)
+        self.last_detection_results = []
+        self.process_logs += f"\n{'=' * 56}\n{kind_title}开始\n{'=' * 56}\n"
+
+        self.view.btn_detect_annotations.setEnabled(False)
+        self.view.btn_detect_broken_refs.setEnabled(False)
+
+        self.detection_worker = DetectionWorker(self.detection_files, detection_kind)
+        self.detection_worker.progress.connect(self.update_progress)
+        self.detection_worker.result_ready.connect(self._record_detection_result)
+        self.detection_worker.finished_detection.connect(
+            lambda summary, results, title=kind_title: self.detection_finished(summary, results, title)
+        )
+        self.detection_worker.error_detection.connect(
+            lambda error_msg, title=kind_title: self.detection_error(error_msg, title)
+        )
+        self.detection_worker.finished.connect(self.detection_worker.deleteLater)
+        self.detection_worker.start()
+
+    def _record_detection_result(self, row):
+        self.last_detection_results.append(dict(row))
+
+    def _restore_detection_buttons(self):
+        self.view.btn_detect_annotations.setEnabled(True)
+        self.view.btn_detect_broken_refs.setEnabled(True)
+
+    def detection_finished(self, summary, results, kind_title):
+        self.process_logs += f"\n{'=' * 56}\n{kind_title}结束\n{summary}\n{'=' * 56}\n"
+        self._restore_detection_buttons()
+        self.detection_files = []
+        self.detection_worker = None
+
+        hit_rows = [row for row in results if row.get("status") == "发现问题"]
+        failed_rows = [row for row in results if row.get("status") == "检测失败"]
+
+        message_lines = [summary, ""]
+        if hit_rows:
+            message_lines.append("发现问题的文件：")
+            for row in hit_rows:
+                detail = row.get("summary", "") or ""
+                if row.get("details"):
+                    detail = f"{detail}（{row['details']}）" if detail else row["details"]
+                message_lines.append(f"• {row.get('file_name', '')}：{detail}")
+        else:
+            message_lines.append("未在任何文件中发现相关内容。")
+        if failed_rows:
+            message_lines.append("")
+            message_lines.append("检测失败的文件：")
+            for row in failed_rows:
+                message_lines.append(f"• {row.get('file_name', '')}：{row.get('error', '')}")
+
+        self.view.show_info_message(f"🔍 {kind_title}完成", "\n".join(message_lines))
+
+    def detection_error(self, error_msg, kind_title):
+        self.process_logs += f"\n{'!' * 56}\n[{kind_title}错误] {error_msg}\n{'!' * 56}\n"
+        self._restore_detection_buttons()
+        self.detection_files = []
+        self.detection_worker = None
+        self.view.show_error_message(f"❌ {kind_title}失败", f"检测过程中发生错误：\n{error_msg}")
 
     def _get_loaded_files_common_base(self):
         try:
@@ -1214,16 +1327,21 @@ class MainController(QObject):
 
     def update_progress(self, row_index, status_text, log_msg):
         # 获取与该行对应的精确文件路径，用于树节点的映射更新
-        processing_files = self.processing_files or self.precheck_files or self.loaded_files
+        processing_files = (
+            self.processing_files
+            or self.precheck_files
+            or self.detection_files
+            or self.loaded_files
+        )
         if row_index < 0 or row_index >= len(processing_files):
             return
         file_path = processing_files[row_index]
 
-        if status_text in ["处理完成", "操作成功", "无需处理"]:
+        if status_text in ["处理完成", "操作成功", "无需处理", "未发现"]:
             color = QColor(16, 185, 129)  # 绿色
-        elif status_text in ["处理失败", "操作失败", "预检失败"]:
+        elif status_text in ["处理失败", "操作失败", "预检失败", "检测失败"]:
             color = QColor(239, 68, 68)  # 红色
-        elif status_text in ["建议处理", "需要复核"]:
+        elif status_text in ["建议处理", "需要复核", "发现问题"]:
             color = QColor(245, 158, 11)  # 橙色
         elif status_text == "已停止":
             color = QColor(245, 158, 11)  # 橙色
@@ -1569,6 +1687,10 @@ class MainController(QObject):
                 "error",
                 "font_summary",
                 "font_details",
+                "annotation_summary",
+                "annotation_details",
+                "broken_reference_summary",
+                "broken_reference_details",
             ]
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
