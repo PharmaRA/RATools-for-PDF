@@ -145,6 +145,49 @@ def _rects_overlap(rect_a, rect_b, min_ratio=0.5):
     return (inter_area / smaller_area) >= min_ratio
 
 
+def _read_link_quad_points(doc, xref):
+    """读取链接注释的 QuadPoints 数组，返回浮点数列表；无则返回 None。
+
+    QuadPoints 为 8×N 个数字（每 8 个描述一个四边形），跨行链接会有多组。
+    """
+    if not xref:
+        return None
+    try:
+        key_type, value = doc.xref_get_key(xref, "QuadPoints")
+    except Exception:
+        return None
+    if key_type != "array" or not value:
+        return None
+    numbers = []
+    for token in value.strip("[]").split():
+        try:
+            numbers.append(float(token))
+        except ValueError:
+            return None
+    # 必须是完整的四边形组（每组 8 个数），否则视为无效。
+    if not numbers or len(numbers) % 8 != 0:
+        return None
+    return numbers
+
+
+def _write_link_quad_points(doc, xref, quad_points):
+    """把 QuadPoints 数组写回链接注释，用于还原跨行链接的逐行可点区域。"""
+    if not xref or not quad_points or len(quad_points) % 8 != 0:
+        return
+    # PDF 数字尽量输出整数形式，保持与原始注释一致的紧凑写法。
+    tokens = []
+    for value in quad_points:
+        if float(value).is_integer():
+            tokens.append(str(int(value)))
+        else:
+            tokens.append(repr(float(value)))
+    array_str = "[" + " ".join(tokens) + "]"
+    try:
+        doc.xref_set_key(xref, "QuadPoints", array_str)
+    except Exception:
+        pass
+
+
 def export_links(pdf_path, json_path, scope="all"):
     """Export links to JSON with enough destination data for round-trip import.
 
@@ -171,6 +214,9 @@ def export_links(pdf_path, json_path, scope="all"):
                 'zoom': link.get('zoom', 0.0),
                 'to': [getattr(target_point, 'x', 0.0), getattr(target_point, 'y', 0.0)] if target_point else None,
                 'new_window': bool(link.get('newWindow', False)),
+                # 跨行链接由多个四边形 (QuadPoints) 组成，link['from'] 只是它们的合并包围盒。
+                # 保存原始 QuadPoints，导入时精确还原每行的可点区域，避免把行间内容一并圈入。
+                'quad_points': _read_link_quad_points(doc, link.get('xref', 0)),
             }
             all_links.append(link_dict)
 
@@ -254,8 +300,17 @@ def import_links(pdf_path, json_path, output_path, scope="all", mode="overwrite"
             if any(_rects_overlap(rect, existing) for existing in page_rects):
                 continue
 
+        quad_points = ld.get('quad_points')
         try:
+            # insert_link 不返回 xref，且保存前 get_links() 读不到新链接，
+            # 因此用 page.annot_xrefs() 做插入前后差集来定位新注释，
+            # 以便把跨行链接的 QuadPoints 精确写回。
+            xrefs_before = {item[0] for item in page.annot_xrefs()}
             page.insert_link(new_link)
+            if quad_points:
+                new_xrefs = {item[0] for item in page.annot_xrefs()} - xrefs_before
+                for xref in new_xrefs:
+                    _write_link_quad_points(doc, xref, quad_points)
             if incremental:
                 existing_rects[p_idx].append(rect)
         except Exception:

@@ -1,4 +1,5 @@
-﻿import os
+﻿import json
+import os
 import tempfile
 import unittest
 
@@ -63,6 +64,49 @@ class PDFProcessorRoundTripTests(unittest.TestCase):
             restored.close()
 
             self.assertEqual(tuple(link.get("to")), (144.0, 288.0))
+
+    def test_link_export_import_preserves_multiline_quad_points(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_pdf = os.path.join(tmp, "source.pdf")
+            json_path = os.path.join(tmp, "links.json")
+            output_pdf = os.path.join(tmp, "output.pdf")
+
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(50, 50, 350, 100),
+                "uri": "https://example.com",
+            })
+            doc.save(source_pdf)
+            doc.close()
+
+            # 手动写入两行四边形，模拟跨行链接：合并包围盒是 (50,50,350,100)，
+            # 但真正的可点区域只有第一行 (50,50)-(350,70) 与第二行 (50,80)-(150,100)。
+            # get_links() 需在保存后重新打开才能读到 xref。
+            doc = fitz.open(source_pdf)
+            xref = doc[0].get_links()[0]["xref"]
+            quad = "[50 70 350 70 50 50 350 50 50 100 150 100 50 80 150 80]"
+            doc.xref_set_key(xref, "QuadPoints", quad)
+            doc.saveIncr()
+            doc.close()
+
+            PDFProcessor.export_links(source_pdf, json_path)
+            PDFProcessor.import_links(source_pdf, json_path, output_pdf)
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                exported = json.load(f)
+            self.assertEqual(len(exported[0]["quad_points"]), 16)
+
+            restored = fitz.open(output_pdf)
+            restored_xref = restored[0].get_links()[0]["xref"]
+            key_type, value = restored.xref_get_key(restored_xref, "QuadPoints")
+            restored.close()
+
+            self.assertEqual(key_type, "array")
+            restored_nums = [float(t) for t in value.strip("[]").split()]
+            self.assertEqual(len(restored_nums), 16)
+            self.assertEqual(restored_nums[:8], [50, 70, 350, 70, 50, 50, 350, 50])
 
     def test_link_export_external_scope_skips_internal_links(self):
         with tempfile.TemporaryDirectory() as tmp:
