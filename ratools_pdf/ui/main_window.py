@@ -3,7 +3,7 @@ import os
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QMainWindow, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
