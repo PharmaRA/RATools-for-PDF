@@ -10,10 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
 from ratools_pdf.common.status import status_semantic
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.controllers.io_actions import (
-    _build_io_preview_rows,
     _collect_ectd_rename_plan,
-    _io_action_metadata,
-    _normalize_io_action_types,
     common_base_dir,
 )
 from ratools_pdf.controllers.log_export import (
@@ -21,16 +18,16 @@ from ratools_pdf.controllers.log_export import (
     _structured_log_row_from_event,
 )
 from ratools_pdf.controllers.detection_controller import DetectionController
+from ratools_pdf.controllers.io_controller import IOController
 from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import (
-    IOActionWorker,
     PreCheckWorker,
     ProcessWorker,
 )
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services import system_shell
-from ratools_pdf.ui.dialogs import IODataWizardDialog, LogDialog
+from ratools_pdf.ui.dialogs import LogDialog
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
@@ -69,6 +66,7 @@ class MainController(QObject):
         self.precheck_worker = None
         self.precheck_files = []
         self.detection = DetectionController(self, self.view, parent=self)
+        self.io = IOController(self, self.view, parent=self)
         self.updates = UpdateController(self.view, parent=self)
 
         self.setup_connections()
@@ -101,8 +99,8 @@ class MainController(QObject):
         if ENABLE_UPDATE_CHECK:
             self.view.btn_top_about.clicked.connect(self.updates.wire_about_dialog)
 
-        self.view.btn_bookmark_io_wizard.clicked.connect(lambda: self.handle_io_wizard("bookmarks"))
-        self.view.btn_link_io_wizard.clicked.connect(lambda: self.handle_io_wizard("links"))
+        self.view.btn_bookmark_io_wizard.clicked.connect(lambda: self.io.handle_io_wizard("bookmarks"))
+        self.view.btn_link_io_wizard.clicked.connect(lambda: self.io.handle_io_wizard("links"))
         self.view.btn_detect_annotations.clicked.connect(lambda: self.detection.start_detection("annotations"))
         self.view.btn_detect_broken_refs.clicked.connect(lambda: self.detection.start_detection("broken_refs"))
 
@@ -925,79 +923,6 @@ class MainController(QObject):
     def _is_detection_running(self):
         return self.detection.is_running()
 
-    def _get_loaded_files_common_base(self):
-        return common_base_dir(self.loaded_files)
-
-    def handle_io_wizard(self, default_data_kind):
-        if not self.loaded_files:
-            self.view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
-            return
-
-        common_base = self._get_loaded_files_common_base()
-
-        def build_preview(action_type, dir_path):
-            return _build_io_preview_rows(self.loaded_files, action_type, dir_path, common_base)
-
-        dialog = IODataWizardDialog(
-            data_kind=default_data_kind,
-            file_count=len(self.loaded_files),
-            preview_callback=build_preview,
-            parent=self.view,
-        )
-        if not dialog.exec():
-            return
-
-        self.handle_io_action(
-            dialog.get_action_types(),
-            dir_path=dialog.get_selected_directory(),
-            common_base=common_base,
-            confirmed=True,
-            link_scope=dialog.get_link_scope(),
-            link_mode=dialog.get_link_mode(),
-        )
-
-    def handle_io_action(self, action_type, dir_path=None, common_base=None, confirmed=False,
-                         link_scope="all", link_mode="overwrite"):
-        if not self.loaded_files:
-            self.view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
-            return
-
-        action_types = _normalize_io_action_types(action_type)
-        meta = _io_action_metadata(action_types[0])
-        is_export = meta["is_export"]
-        data_type = "CSV/JSON" if len(action_types) > 1 else meta["data_type"]
-        action_name = meta["action_name"]
-
-        if common_base is None:
-            common_base = self._get_loaded_files_common_base()
-
-        if dir_path is None:
-            dir_path = QFileDialog.getExistingDirectory(self.view, f"请选择 {data_type} 数据{action_name}的目录")
-        if not dir_path:
-            return
-
-        if confirmed and not is_export:
-            rows = _build_io_preview_rows(self.loaded_files, action_types, dir_path, common_base)
-            if not any(row["status"] == "已匹配" for row in rows):
-                self.view.show_warning_message("⚠️ 未找到数据文件", f"所选目录中没有匹配的 {data_type} 文件。")
-                return
-
-        out_dir = None
-        if not is_export:
-            first_file = Path(self.loaded_files[0])
-            out_dir_path = first_file.parent / f"RATools_{action_name}完成"
-            out_dir_path.mkdir(exist_ok=True)
-            out_dir = str(out_dir_path)
-
-        self.io_worker = IOActionWorker(
-            action_types, self.loaded_files, dir_path, out_dir, common_base,
-            link_scope=link_scope, link_mode=link_mode,
-        )
-        self.io_worker.progress.connect(self.update_progress)
-        self.io_worker.finished_action.connect(self.on_io_action_finished)
-        self.io_worker.error_action.connect(self.on_io_action_error)
-        self.io_worker.start()
-
     def update_progress(self, file_path, status_text, log_msg):
         # 信号直接携带 file_path，各类 worker 无需再依赖"当前列表 + 行索引"的隐式路由
         if not file_path:
@@ -1207,14 +1132,6 @@ class MainController(QObject):
             return
 
         self.view.show_warning_message("⚠️ 未选择正在处理的文件", "请选择状态为“正在处理...”的 PDF 后再终止。")
-
-    def on_io_action_finished(self, result_msg):
-        self.process_logs += f"\n{'-' * 56}\n{result_msg}\n{'-' * 56}\n"
-        self.view.show_success_message("✅ 操作成功", result_msg)
-
-    def on_io_action_error(self, error_msg):
-        self.process_logs += f"\n{'!' * 56}\n[IO错误] {error_msg}\n{'!' * 56}\n"
-        self.view.show_error_message("❌ 操作失败", error_msg)
 
     def show_log_dialog(self):
         if not hasattr(self, 'log_dialog'):
