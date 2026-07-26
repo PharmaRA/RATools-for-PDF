@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import os
-import re
 import tempfile
 from datetime import datetime
 
@@ -11,6 +10,7 @@ from ratools_pdf.controllers.io_actions import (
     _build_io_paths_for_file,
     _io_action_metadata,
     _normalize_io_action_types,
+    _normalized_ectd_name,
 )
 from ratools_pdf.pdf.processor import PDFProcessor
 
@@ -73,12 +73,8 @@ class ProcessWorker(QThread):
     def _build_output_path(self, index, file_path, rename_ectd):
         base_name = os.path.basename(file_path)
         if rename_ectd:
-            name, ext = os.path.splitext(base_name)
-            name = name.lower().replace(" ", "-")
-            name = re.sub(r'[^a-z0-9_-]', '', name)
-            if not name:
-                name = f"doc_{index + 1:03d}"
-            base_name = f"{name}{ext.lower()}"
+            # 与 IO 向导预览共用同一实现，保证"预览名 == 实际输出名"
+            base_name = _normalized_ectd_name(base_name, index + 1)
 
         if self.overwrite_original:
             return base_name, file_path + ".tmp_overwrite.pdf"
