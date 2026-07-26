@@ -1,4 +1,3 @@
-import ctypes
 import html
 import os
 import re
@@ -19,6 +18,7 @@ from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
 )
+from ratools_pdf.ui import win32
 from ratools_pdf.ui.platform import is_win11, should_use_manual_dialog_shadow
 from ratools_pdf.ui.theme import active_palette, log_status_colors
 
@@ -115,29 +115,9 @@ class FramelessDraggableDialog(QDialog):
     def _remove_win11_transparent_border(self):
         """专门处理 Win11 下强制附加的透明边框、圆角和阴影"""
         try:
-            hwnd = int(self.winId())
-
-            # 1. 禁用系统圆角
-            DWMWA_WINDOW_CORNER_PREFERENCE = 33
-            DWMWCP_DONOTROUND = 1
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                ctypes.byref(ctypes.c_int(DWMWCP_DONOTROUND)),
-                ctypes.sizeof(ctypes.c_int)
-            )
-
-            # 2. 彻底隐藏 Win11 强制附加的 1px 边框
-            DWMWA_BORDER_COLOR = 34
-            DWMWA_COLOR_NONE = 0xFFFFFFFE  # 设为无颜色
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_BORDER_COLOR,
-                ctypes.byref(ctypes.c_uint(DWMWA_COLOR_NONE)),
-                ctypes.sizeof(ctypes.c_uint)
-            )
-        except Exception as e:
-            print(f"移除 Win11 边框失败: {e}")
+            win32.remove_win11_window_decorations(int(self.winId()))
+        except Exception:
+            pass
 
 
 # ================== 具体的业务对话框 ==================
