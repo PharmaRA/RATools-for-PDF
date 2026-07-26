@@ -8,17 +8,16 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ratools_pdf.config import rules_catalog
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.config.paths import get_app_dir, get_resource_path
 from ratools_pdf.ui.dialogs import (
     AboutDialog,
     CustomMessageBox,
-    FramelessDraggableDialog,
-    IODataWizardDialog,
-    LogDialog,
     ManualFontEmbeddingDialog,
     SettingsDialog,
 )
+from ratools_pdf.ui.dialogs.prompts import MajorUpdatePromptDialog, SignedFilesPromptDialog
 from ratools_pdf.ui.theme import (
     active_palette,
     apply_windows_title_bar_theme,
@@ -29,47 +28,12 @@ from ratools_pdf.ui.widgets import DropZoneLabel
 
 
 class MainWindow(QMainWindow):
-    PRESET_OPTIONS = {
-        "china": {
-            "title": "中国 eCTD",
-            "options": {
-                "convert_pdf_version",
-                "fast_web_view",
-                "initial_view_bookmarks_and_page",
-                "page_layout_default",
-                "open_page_first",
-                "bookmark_inherit_zoom",
-                "cleanup_remove_external_uri",
-                "cleanup_remove_annotations",
-                "cleanup_remove_metadata",
-                "cleanup_remove_attachments",
-                "cleanup_remove_dynamic_content",
-                "link_inherit_zoom",
-                "link_open_new_window",
-                "bookmark_open_new_window",
-                "collapse_all_bookmarks",
-                "filename_ectd_format",
-            },
-        },
-        "us": {
-            "title": "美国 eCTD",
-            "options": {
-                "convert_pdf_version",
-                "fast_web_view",
-                "initial_view_bookmarks_and_page",
-                "page_layout_default",
-                "open_page_first",
-                "bookmark_inherit_zoom",
-                "cleanup_remove_annotations",
-                "cleanup_remove_metadata",
-                "cleanup_remove_attachments",
-                "cleanup_remove_dynamic_content",
-                "link_inherit_zoom",
-                "link_open_new_window",
-                "bookmark_open_new_window",
-            },
-        },
-    }
+    # 规则目录与预设的唯一来源是 config.rules_catalog；
+    # 类属性保留原名，兼容既有引用（controller/tests）。
+    PRESET_OPTIONS = rules_catalog.PRESETS
+
+    # 通用设置类勾选框：不参与预设/清空/规则统计（key 同时是显示文案）
+    GENERAL_SETTING_OPTIONS = ("处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)")
 
     def __init__(self):
         super().__init__()
@@ -112,85 +76,7 @@ class MainWindow(QMainWindow):
         self.settings_dialog.default_output_edit.textChanged.connect(lambda _text: self.refresh_selection_summary())
         self.settings_dialog.default_output_edit.textChanged.connect(lambda _text: self.persist_default_output_dir())
 
-        self.MODULES_DATA = [
-            {
-                "icon": "👀",
-                "title": "初始视图与文档属性",
-                "options": [
-                    {"id": "open_page_first", "title": "设为首页打开", "desc": "强制文档打开时默认显示第一页"},
-                    {"id": "page_layout_default", "title": "重置页面布局", "desc": "将页面布局恢复为默认"},
-                    {"id": "zoom_default", "title": "重置缩放比例", "desc": "将打开时的缩放比例设置为默认"},
-                    {"id": "initial_view_bookmarks_and_page", "title": "设置导览标签", "desc": "包含书签的文档，导览标签设置为书签面板和页面；不包含书签的文档，导览标签设置为页面。"},
-                    {"id": "collapse_all_bookmarks", "title": "折叠所有书签", "desc": "将书签树默认设置为折叠状态，保持界面整洁"},
-                    {"id": "title_from_filename", "title": "同步文件名为标题", "desc": "自动将当前PDF的文件名写入文档属性的“标题”元数据中"}
-                ]
-            },
-            {
-                "icon": "📄",
-                "title": "页面与字体标准化",
-                "options": [
-                    {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "无法通过预检精确判断是否需要处理；智能模式下若勾选仍会执行"},
-                    {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"}
-                ]
-            },
-            {
-                "icon": "🔖",
-                "title": "书签管理",
-                "options": [
-                    {"id": "bookmark_inherit_zoom", "title": "书签设为承前缩放", "desc": "点击书签跳转时，保持当前页面的缩放比例不变 (Inherit Zoom)"},
-                    {"id": "bookmark_open_new_window", "title": "书签动作：新窗口打开", "desc": "配置书签的链接跳转默认在新的PDF浏览器窗口中打开"},
-                    {"id": "bookmark_remove_external_links", "title": "清理书签外部链接", "desc": "移除书签中指向网页或外部文件的URI动作"},
-                    {"id": "bookmark_remove_invalid", "title": "清理失效书签", "desc": "自动检测并删除未指向任何有效页面或动作的空书签"},
-                    {"id": "bookmark_remove_unknown_actions", "title": "清理非标准动作书签", "desc": "仅保留内部跳转、外部文档和调用命令，删除其它未知动作"}
-                ]
-            },
-            {
-                "icon": "🔗",
-                "title": "超链接处理",
-                "options": [
-                    {"id": "link_abs_to_rel_path", "title": "绝对路径转相对路径", "desc": "将外部文件链接的绝对路径自动转换为相对路径"},
-                    {"id": "link_inherit_zoom", "title": "超链接设为承前缩放", "desc": "点击链接跳转时，保持当前屏幕的视图缩放比例 (Inherit Zoom)"},
-                    {"id": "link_open_new_window", "title": "链接动作：新窗口打开", "desc": "强制外部文档或网页链接在独立的新窗口中打开"},
-                    {"id": "link_text_blue", "title": "链接文本设为蓝色", "desc": "自动识别超链接区域并将其文本颜色变更为标准蓝色"},
-                    {"id": "link_black_border", "title": "链接区域加黑框", "desc": "为所有的有效超链接区域添加1px的黑色实线边框"},
-                    {"id": "link_bordered_to_blue_border", "title": "标准化有框链接", "desc": "若超链接已存在边框，则统一转为蓝框黑字样式"},
-                    {"id": "link_unbordered_blue_to_blue_border", "title": "标准化无框蓝字链接", "desc": "若超链接无边框且文字为蓝色，则统一转为蓝框黑字样式"},
-                    {"id": "link_remove_border", "title": "清除所有链接边框", "desc": "移除文档内所有超链接的可见边框，保持页面排版干净"}
-                ]
-            },
-            {
-                "icon": "🛡️",
-                "title": "内容合规与安全性",
-                "options": [
-                    {"id": "cleanup_remove_external_uri", "title": "删除外部URI链接", "desc": "清理指向外部网站、邮箱等所有URI类型的超链接"},
-                    {"id": "cleanup_remove_external_uri_and_text_black", "title": "删除外部URI链接并去色", "desc": "清理URI链接的同时，将该链接对应的文本颜色重置为黑色"},
-                    {"id": "cleanup_remove_invalid_links", "title": "清理失效超链接", "desc": "自动扫描并移除所有未分配有效动作 (Action) 的空链接"},
-                    {"id": "cleanup_remove_invalid_links_and_text_black", "title": "清理失效链接并去色", "desc": "移除空链接，并将该区域相关的文本颜色恢复为普通黑色"},
-                    {"id": "cleanup_remove_unknown_action_links", "title": "清理非标准动作链接", "desc": "仅保留内部/外部跳转和执行动作，移除其它所有的特殊行为"},
-                    {"id": "cleanup_remove_dynamic_content", "title": "彻底清除动态内容 (JS/3D)", "desc": "删除文档内所有的JavaScript脚本、3D模型等交互元素以满足安全合规"},
-                    {"id": "cleanup_remove_attachments", "title": "移除所有内嵌附件", "desc": "清理PDF内部打包的所有附加文件 (.zip, .xml 等)"},
-                    {"id": "cleanup_remove_tags", "title": "移除结构化标签", "desc": "删除PDF结构树 (StructTreeRoot) 和标记信息 (MarkInfo)"},
-                    {"id": "cleanup_remove_annotations", "title": "清理所有高亮/批注", "desc": "删除文本框、高亮、画笔等所有非链接类型的交互式注释"},
-                    {"id": "cleanup_remove_metadata", "title": "清空文档元数据", "desc": "移除所有标题、作者、创建时间等PieceInfo和Metadata"},
-                    {"id": "cleanup_remove_all_links_bookmarks", "title": "移除全部链接和书签", "desc": "仅删除页面链接与书签，不删除普通批注"}
-                ]
-            },
-            {
-                "icon": "📦",
-                "title": "文件级优化与输出",
-                "options": [
-                    {"id": "convert_pdf_version", "title": "PDF版本转换", "desc": "将PDF版本修改为1.7版本"},
-                    {"id": "remove_pdf_restrictions", "title": "PDF解除权限限制", "desc": "尝试移除禁止复制、打印、编辑等权限限制，不处理需要打开密码的加密文档"},
-                    {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
-                    {"id": "filename_ectd_format", "title": "eCTD文件名合规格式化", "desc": "自动将输出文件名转为小写、去除空格并替换非法字符"}
-                ]
-            },
-            {
-                "icon": "🔍",
-                "title": "文档检测",
-                "options": []
-            }
-        ]
+        self.MODULES_DATA = rules_catalog.MODULES
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -199,6 +85,73 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        self._build_header(main_layout)
+        self._build_middle(main_layout)
+        self._build_preset_bar(main_layout)
+        self._build_footer(main_layout)
+
+        self.nav_btn_group.idClicked.connect(self.switch_settings_page)
+
+        # 立刻触发一次以展示第一页内容
+        self.switch_settings_page(0)
+        self.apply_stylesheet()
+
+        self.settings_key_map = {
+            "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
+            "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
+        }
+        for i, mod in enumerate(self.MODULES_DATA):
+            for j, opt in enumerate(mod["options"]):
+                self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
+
+        self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
+        self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
+        self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+        self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+
+        self.settings_dialog.set_theme_mode(theme_mode)
+        for mode, btn in self.settings_dialog.theme_buttons.items():
+            btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
+
+        self.load_all_settings()
+        self.refresh_selection_summary()
+
+    def show_info_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="info", parent=self).exec()
+
+    def show_success_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="success", parent=self).exec()
+
+    def show_warning_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
+
+    def show_error_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="error", parent=self).exec()
+
+    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
+        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
+        dlg.exec()
+
+    def show_confirm_message(self, title, message):
+        dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
+        return dlg.exec() == QDialog.Accepted
+
+    def show_major_update_prompt(self, current_version, release):
+        dlg = MajorUpdatePromptDialog(current_version, release, parent=self)
+        dlg.exec()
+        return dlg.chosen_action
+
+    def show_signed_files_prompt(self, signed_files):
+        """检测到已签名文件时的三选一提示：跳过 / 全部处理 / 取消。
+
+        返回 "skip"、"process_all" 或 "cancel"。
+        """
+        dlg = SignedFilesPromptDialog(signed_files, parent=self)
+        dlg.exec()
+        return dlg.chosen_action
+
+    def _build_header(self, main_layout):
+        """顶部 Header：全局设置 / 关于按钮。"""
         # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
@@ -218,6 +171,9 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
+
+    def _build_middle(self, main_layout):
+        """中段：左侧导航 + 中间队列视图（拖放区/文件树）+ 右侧规则设置区。"""
 
         middle_container = QFrame()
         middle_layout = QHBoxLayout(middle_container)
@@ -461,6 +417,9 @@ class MainWindow(QMainWindow):
         middle_layout.addWidget(right_sidebar)
         main_layout.addWidget(middle_container)
 
+    def _build_preset_bar(self, main_layout):
+        """快速预设栏：中国/美国 eCTD、我的常用、保存与清空。"""
+
         preset_bar = QFrame()
         preset_bar.setObjectName("presetBar")
         preset_layout = QHBoxLayout(preset_bar)
@@ -510,6 +469,9 @@ class MainWindow(QMainWindow):
         preset_layout.addWidget(self.btn_clear_selected_options)
         main_layout.addWidget(preset_bar)
 
+
+    def _build_footer(self, main_layout):
+        """底部操作栏：日志、处理模式、动作按钮组、开始按钮。"""
         # ================= 底部操作栏 =================
         footer = QFrame()
         footer.setObjectName("footer")
@@ -581,195 +543,6 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
 
-        self.nav_btn_group.idClicked.connect(self.switch_settings_page)
-
-        # 立刻触发一次以展示第一页内容
-        self.switch_settings_page(0)
-        self.apply_stylesheet()
-
-        self.settings_key_map = {
-            "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
-            "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
-        }
-        for i, mod in enumerate(self.MODULES_DATA):
-            for j, opt in enumerate(mod["options"]):
-                self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
-
-        self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
-        self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
-        self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
-        self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
-
-        self.settings_dialog.set_theme_mode(theme_mode)
-        for mode, btn in self.settings_dialog.theme_buttons.items():
-            btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
-
-        self.load_all_settings()
-        self.refresh_selection_summary()
-
-    def show_info_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="info", parent=self).exec()
-
-    def show_success_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="success", parent=self).exec()
-
-    def show_warning_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
-
-    def show_error_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="error", parent=self).exec()
-
-    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
-        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
-        dlg.exec()
-
-    def show_confirm_message(self, title, message):
-        dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
-        return dlg.exec() == QDialog.Accepted
-
-    def show_major_update_prompt(self, current_version, release):
-        dlg = FramelessDraggableDialog("重要更新可用", self)
-        dlg.resize(460, 300)
-        dlg.update_action = "later"
-        dlg.content_layout.setSpacing(14)
-
-        message = QLabel(
-            f"发现重要更新：{release.version_text}\n"
-            f"当前版本：{current_version}\n"
-            f"发布标题：{release.title}\n"
-            f"发布时间：{release.published_at or '未知'}"
-        )
-        message.setWordWrap(True)
-        message.setObjectName("aboutText")
-        dlg.content_layout.addWidget(message)
-        dlg.content_layout.addStretch()
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-        btn_layout.addStretch()
-
-        btn_ignore = QPushButton("忽略此版本")
-        btn_ignore.setObjectName("dialogSecondaryBtn")
-        btn_later = QPushButton("稍后提醒")
-        btn_later.setObjectName("dialogSecondaryBtn")
-        btn_open = QPushButton("查看更新")
-        btn_open.setObjectName("dialogPrimaryBtn")
-
-        def finish(action):
-            dlg.update_action = action
-            dlg.accept()
-
-        btn_open.clicked.connect(lambda: finish("open"))
-        btn_later.clicked.connect(lambda: finish("later"))
-        btn_ignore.clicked.connect(lambda: finish("ignore"))
-
-        btn_layout.addWidget(btn_ignore)
-        btn_layout.addWidget(btn_later)
-        btn_layout.addWidget(btn_open)
-        dlg.content_layout.addLayout(btn_layout)
-
-        dlg.exec()
-        return dlg.update_action
-
-    def show_signed_files_prompt(self, signed_files):
-        """检测到已签名文件时的三选一提示：跳过 / 全部处理 / 取消。
-
-        返回 "skip"、"process_all" 或 "cancel"。
-        """
-        count = len(signed_files)
-
-        dlg = FramelessDraggableDialog("检测到已签名文件", self)
-        dlg.signed_action = "cancel"
-        dlg.content_layout.setSpacing(16)
-
-        # ---- 顶部警告卡片：图标 + 标题 + 说明 ----
-        warn_card = QFrame()
-        warn_card.setObjectName("signedWarnCard")
-        warn_layout = QHBoxLayout(warn_card)
-        warn_layout.setContentsMargins(14, 14, 14, 14)
-        warn_layout.setSpacing(12)
-
-        warn_icon = QLabel("⚠️")
-        warn_icon.setObjectName("signedWarnIcon")
-        warn_icon.setAlignment(Qt.AlignTop)
-        warn_layout.addWidget(warn_icon, 0, Qt.AlignTop)
-
-        warn_text_layout = QVBoxLayout()
-        warn_text_layout.setSpacing(4)
-        warn_title = QLabel(f"待处理列表中有 {count} 个文件已包含数字签名")
-        warn_title.setWordWrap(True)
-        warn_title.setObjectName("signedWarnTitle")
-        warn_desc = QLabel("继续处理会重写这些文件，使原有数字签名失效。此操作不可逆。")
-        warn_desc.setWordWrap(True)
-        warn_desc.setObjectName("signedWarnDesc")
-        warn_text_layout.addWidget(warn_title)
-        warn_text_layout.addWidget(warn_desc)
-        warn_layout.addLayout(warn_text_layout, 1)
-
-        dlg.content_layout.addWidget(warn_card)
-
-        # ---- 文件列表标题 ----
-        caption = QLabel("已签名文件：")
-        caption.setObjectName("signedListCaption")
-        dlg.content_layout.addWidget(caption)
-
-        # ---- 可滚动文件列表（带项目符号）----
-        file_list = QLabel("\n".join(f"•  {os.path.basename(p)}" for p in signed_files))
-        file_list.setWordWrap(True)
-        file_list.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        file_list.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        file_list.setObjectName("signedFileList")
-        # 悬停显示完整路径，方便定位同名文件
-        file_list.setToolTip("\n".join(signed_files))
-
-        scroll = QScrollArea()
-        scroll.setObjectName("signedListScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(file_list)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # 单文件时不需要滚动条占位，多文件时限制高度触发滚动
-        scroll.setMinimumHeight(56)
-        scroll.setMaximumHeight(180 if count > 1 else 72)
-        dlg.content_layout.addWidget(scroll)
-
-        # ---- 底部操作提示 ----
-        hint = QLabel("请选择如何处理这些已签名文件：")
-        hint.setObjectName("dialogMuted")
-        dlg.content_layout.addWidget(hint)
-        dlg.content_layout.addStretch()
-
-        # ---- 按钮区 ----
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-        btn_layout.addStretch()
-
-        btn_cancel = QPushButton("取消处理")
-        btn_cancel.setObjectName("dialogSecondaryBtn")
-        btn_process_all = QPushButton("仍然处理全部")
-        btn_process_all.setObjectName("dialogSecondaryBtn")
-        btn_skip = QPushButton("跳过已签名文件")
-        btn_skip.setObjectName("dialogPrimaryBtn")
-        for btn in (btn_cancel, btn_process_all, btn_skip):
-            btn.setFixedHeight(36)
-            btn.setCursor(Qt.PointingHandCursor)
-
-        def finish(action):
-            dlg.signed_action = action
-            dlg.accept()
-
-        btn_skip.clicked.connect(lambda: finish("skip"))
-        btn_process_all.clicked.connect(lambda: finish("process_all"))
-        btn_cancel.clicked.connect(lambda: finish("cancel"))
-
-        btn_layout.addWidget(btn_cancel)
-        btn_layout.addWidget(btn_process_all)
-        btn_layout.addWidget(btn_skip)
-        dlg.content_layout.addLayout(btn_layout)
-
-        dlg.adjustSize()
-        dlg.setMinimumWidth(500)
-        dlg.exec()
-        return dlg.signed_action
 
     def load_all_settings(self):
         self.is_applying_preset = True
@@ -901,21 +674,27 @@ class MainWindow(QMainWindow):
         self.refresh_selection_summary()
         self.show_success_message("✅ 已保存", "当前处理规则已保存为我的常用。")
 
-    def restore_custom_selection(self):
-        checkbox_groups = {}
+    def _rule_checkbox_groups(self):
+        """规则勾选框按控件聚合（同一控件可能挂多个 option id 别名）。"""
+        groups = {}
         for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
+            if opt_id in self.GENERAL_SETTING_OPTIONS:
                 continue
-            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+            groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+        return groups
 
+    def _set_rule_selection(self, target_options):
+        """按目标 id 集合刷勾选状态（预设应用/恢复自定义/清空共用）。"""
         self.is_applying_preset = True
         try:
-            for group in checkbox_groups.values():
-                should_check = any(key in self.custom_selection_before_preset for key in group["keys"])
+            for group in self._rule_checkbox_groups().values():
+                should_check = any(key in target_options for key in group["keys"])
                 group["checkbox"].setChecked(should_check)
         finally:
             self.is_applying_preset = False
 
+    def restore_custom_selection(self):
+        self._set_rule_selection(self.custom_selection_before_preset)
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.persist_all_settings()
@@ -937,19 +716,7 @@ class MainWindow(QMainWindow):
         self.apply_preset(preset_key)
 
     def clear_selected_options(self):
-        checkbox_groups = {}
-        for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
-                continue
-            checkbox_groups.setdefault(id(cb), cb)
-
-        self.is_applying_preset = True
-        try:
-            for cb in checkbox_groups.values():
-                cb.setChecked(False)
-        finally:
-            self.is_applying_preset = False
-
+        self._set_rule_selection(set())
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.custom_selection_before_preset = set()
@@ -968,20 +735,7 @@ class MainWindow(QMainWindow):
         if not target_options:
             return
 
-        checkbox_groups = {}
-        for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
-                continue
-            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
-
-        self.is_applying_preset = True
-        try:
-            for group in checkbox_groups.values():
-                should_check = any(key in target_options for key in group["keys"])
-                group["checkbox"].setChecked(should_check)
-        finally:
-            self.is_applying_preset = False
-
+        self._set_rule_selection(target_options)
         self.active_preset_key = preset_key
         self._set_preset_button_state(preset_key)
         self.persist_all_settings()
@@ -1042,7 +796,7 @@ class MainWindow(QMainWindow):
     def refresh_selection_summary(self):
         selected_count = len([
             opt for opt in self.get_selected_options()
-            if opt not in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]
+            if opt not in self.GENERAL_SETTING_OPTIONS
         ])
         preset_titles = {key: value["title"] for key, value in self.PRESET_OPTIONS.items()}
         preset_titles["favorite"] = "我的常用"

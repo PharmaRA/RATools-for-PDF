@@ -6,13 +6,7 @@ def _render_logs_as_csv_rows(log_text):
     starts_by_file = {}
     pending_result = None
     last_start_file = None
-
-    def _time_to_seconds(value):
-        try:
-            hh, mm, ss = value.split(":")
-            return int(hh) * 3600 + int(mm) * 60 + int(ss)
-        except Exception:
-            return None
+    _time_to_seconds = _log_time_to_seconds
 
     for raw_line in log_text.splitlines():
         line = raw_line.rstrip()

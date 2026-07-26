@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import os
-import re
 import tempfile
 from datetime import datetime
 
@@ -11,17 +10,15 @@ from ratools_pdf.controllers.io_actions import (
     _build_io_paths_for_file,
     _io_action_metadata,
     _normalize_io_action_types,
+    _normalized_ectd_name,
 )
+from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
 else:
     update_checker = None
-
-
-def _process_document_task(file_path, out_path, options, processing_mode="smart"):
-    return PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode)
 
 
 def _process_document_task_pipe(file_path, out_path, options, processing_mode, conn):
@@ -37,7 +34,7 @@ class ProcessWorker(QThread):
     """
     后台处理线程：负责核心的 PDF 批量规则应用，防止 UI 卡死
     """
-    progress = Signal(int, str, str)  # row_index, status_text, log_message
+    progress = Signal(str, str, str)  # file_path, status_text, log_message
     structured_progress = Signal(object)
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
@@ -77,12 +74,8 @@ class ProcessWorker(QThread):
     def _build_output_path(self, index, file_path, rename_ectd):
         base_name = os.path.basename(file_path)
         if rename_ectd:
-            name, ext = os.path.splitext(base_name)
-            name = name.lower().replace(" ", "-")
-            name = re.sub(r'[^a-z0-9_-]', '', name)
-            if not name:
-                name = f"doc_{index + 1:03d}"
-            base_name = f"{name}{ext.lower()}"
+            # 与 IO 向导预览共用同一实现，保证"预览名 == 实际输出名"
+            base_name = _normalized_ectd_name(base_name, index + 1)
 
         if self.overwrite_original:
             return base_name, file_path + ".tmp_overwrite.pdf"
@@ -110,7 +103,7 @@ class ProcessWorker(QThread):
             "out_path": out_path,
         })
         self.progress.emit(
-            index,
+            file_path,
             "正在处理...",
             f"\n[{now}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
@@ -193,7 +186,7 @@ class ProcessWorker(QThread):
             "message": msg,
         })
         self.progress.emit(
-            task["index"],
+            task["file_path"],
             status,
             f"[{now}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}",
         )
@@ -211,7 +204,7 @@ class ProcessWorker(QThread):
             "message": "用户手动停止处理",
         })
         self.progress.emit(
-            task["index"],
+            task["file_path"],
             "已停止",
             f"[{now}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: 用户手动停止处理",
         )
@@ -228,7 +221,7 @@ class ProcessWorker(QThread):
             "message": reason,
         })
         self.progress.emit(
-            task["index"],
+            task["file_path"],
             "已跳过",
             f"[{now}] {task['file_path']}\n    状态: 已跳过\n    输出文件: {task['out_path']}\n    原因: {reason}",
         )
@@ -383,7 +376,7 @@ class PreCheckWorker(QThread):
     """
     后台预检线程：只读取 PDF 状态，生成建议勾选的处理项，不修改文件。
     """
-    progress = Signal(int, str, str)
+    progress = Signal(str, str, str)
     result_ready = Signal(dict)
     finished_precheck = Signal(str)
     error_precheck = Signal(str)
@@ -402,7 +395,7 @@ class PreCheckWorker(QThread):
             for i, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
                 self.progress.emit(
-                    i,
+                    file_path,
                     "正在预检...",
                     f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始预检: {base_name}",
                 )
@@ -426,7 +419,7 @@ class PreCheckWorker(QThread):
                         "broken_reference_details": "",
                     })
                     self.progress.emit(
-                        i,
+                        file_path,
                         "预检失败",
                         f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 预检失败\n    原因: {reason}",
                     )
@@ -472,7 +465,7 @@ class PreCheckWorker(QThread):
                         "broken_reference_details": report.get("broken_reference_details", ""),
                     })
                     self.progress.emit(
-                        i,
+                        file_path,
                         status,
                         f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    建议: {advice}",
                     )
@@ -492,7 +485,7 @@ class PreCheckWorker(QThread):
                         "broken_reference_details": report.get("broken_reference_details", ""),
                     })
                     self.progress.emit(
-                        i,
+                        file_path,
                         "无需处理",
                         f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: 无需处理\n    建议: 未发现当前可自动处理的明显问题",
                     )
@@ -516,7 +509,7 @@ class DetectionWorker(QThread):
         - "annotation"：检测便签、高亮等批注
         - "broken_reference"：检测 Word 转 PDF 残留的失效引用/链接占位文本
     """
-    progress = Signal(int, str, str)
+    progress = Signal(str, str, str)
     result_ready = Signal(dict)
     finished_detection = Signal(str, list)
     error_detection = Signal(str)
@@ -533,10 +526,10 @@ class DetectionWorker(QThread):
 
     def _collect(self, file_path):
         if self.detection_kind == "annotation":
-            findings = PDFProcessor._collect_annotation_findings_for_path(file_path)
+            findings = pdf_inspect.collect_annotation_findings_for_path(file_path)
             hit = bool(findings.get("has_annotations"))
         else:
-            findings = PDFProcessor._collect_broken_reference_findings_for_path(file_path)
+            findings = pdf_inspect.collect_broken_reference_findings_for_path(file_path)
             hit = bool(findings.get("has_broken_reference"))
         return findings, hit
 
@@ -551,7 +544,7 @@ class DetectionWorker(QThread):
             for i, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
                 self.progress.emit(
-                    i,
+                    file_path,
                     "正在检测...",
                     f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始{kind_label}: {base_name}",
                 )
@@ -576,7 +569,7 @@ class DetectionWorker(QThread):
                     results.append(row)
                     self.result_ready.emit(row)
                     self.progress.emit(
-                        i,
+                        file_path,
                         status,
                         f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    原因: {reason}",
                     )
@@ -600,7 +593,7 @@ class DetectionWorker(QThread):
                 if details:
                     log_detail = f"{summary}；明细：{details}" if summary else details
                 self.progress.emit(
-                    i,
+                    file_path,
                     status,
                     f"[{datetime.now().strftime('%H:%M:%S')}] {base_name}\n    状态: {status}\n    结果: {log_detail or '未发现相关内容'}",
                 )
@@ -620,7 +613,7 @@ class IOActionWorker(QThread):
     """
     高级 IO 操作后台线程：处理书签、链接等需要长时间读写的批量导入/导出操作
     """
-    progress = Signal(int, str, str)
+    progress = Signal(str, str, str)
     finished_action = Signal(str)
     error_action = Signal(str)
 
@@ -641,7 +634,7 @@ class IOActionWorker(QThread):
             for row_idx, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
 
-                self.progress.emit(row_idx, "正在执行...",
+                self.progress.emit(file_path, "正在执行...",
                                    f"[{datetime.now().strftime('%H:%M:%S')}] 正在处理: {base_name}")
                 success, messages = False, []
 
@@ -718,7 +711,7 @@ class IOActionWorker(QThread):
                     status = "未匹配跳过"
                     if success:
                         status = "操作成功"
-                self.progress.emit(row_idx, status, f"   ↳ 结果: {msg}")
+                self.progress.emit(file_path, status, f"   ↳ 结果: {msg}")
 
             action_name = "导出" if self.action_type.startswith("export") else "导入"
             self.finished_action.emit(f"批量高级 '{action_name}' 任务执行完成。")

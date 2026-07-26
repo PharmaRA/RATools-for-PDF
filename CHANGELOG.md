@@ -6,6 +6,26 @@
 
 开发中的改动先记入 `## [Unreleased]`，发版时再改为对应的版本号小节。
 
+## [Unreleased]
+
+### 变更（内部重构，用户可见行为不变）
+
+- 第二轮架构重构（路线图见 `docs/superpowers/plans/2026-07-26-comprehensive-refactor-roadmap.md`）：
+  - 新增 61 个特征测试固化 `process_document` 与 `build_precheck_report` 行为后再动结构
+  - pdf 层拆除 `_processor_cls()` 循环依赖（84 处回环），`PDFProcessor` 门面从约 50 个转发方法收缩为 7 个真实入口，新增 `pdf/inspect.py` 公开只读检查 API
+  - 588 行 `process_document` 拆为 9 个管线步骤 + 保存阶段；298 行 `build_precheck_report` 拆为 7 个检查组
+  - 规则标题/描述/预设统一到 `config/rules_catalog.py`，修复预检日志与界面勾选框文案漂移
+  - `MainController` 从 1717 行收敛至约 850 行，拆出 precheck / detection / io / log / font_embedding / update 六个子控制器与 system_shell / pdf_inspector 两个服务
+  - worker 进度信号改为直接携带文件路径，删除"按列表猜行索引"的隐式路由
+  - eCTD 重命名统一为单一实现，消除"预览名与实际输出名可能不一致"的隐患
+  - DWM/Win32 逻辑合并到 `ui/win32.py`；状态常量集中到 `common/status.py`
+
+### 修复
+
+- 修复暗色主题下文件树右键菜单仍为亮色样式的问题（菜单样式迁入中央主题）
+- 修复 NoUpdate 变体中「关于」对话框更新方法引用不存在按钮的潜在崩溃
+- 树节点状态颜色与「等待处理」灰色改为跟随明暗主题
+
 ## [0.7.3] - 2026-07-24
 
 ### 新增

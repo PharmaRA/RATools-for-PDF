@@ -1,22 +1,9 @@
-import csv
-import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
-
-import fitz
 
 from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
-
-
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
 
 
 def _get_qpdf_path():
@@ -24,8 +11,6 @@ def _get_qpdf_path():
         candidates = [
             get_resource_path("plugins", "qpdf", "qpdf.exe"),
             os.environ.get("QPDF_PATH", ""),
-            r"D:\Program Files\qpdf 11.9.1\bin\qpdf.exe",
-            r"C:\Program Files\qpdf\bin\qpdf.exe",
         ]
         for candidate in candidates:
             if candidate and os.path.exists(candidate):
@@ -35,7 +20,7 @@ def _get_qpdf_path():
 
 
 def _rewrite_with_qpdf(input_pdf, output_pdf, force_version=None, linearize=False, decrypt_restrictions=False):
-    qpdf_exe = _processor_cls()._get_qpdf_path()
+    qpdf_exe = _get_qpdf_path()
     if sys.platform == "win32" and qpdf_exe != "qpdf.exe" and not os.path.exists(qpdf_exe):
         raise FileNotFoundError(f"未找到 qpdf 工具！\n请确保已安装或设置 QPDF_PATH: {qpdf_exe}")
 
@@ -97,7 +82,7 @@ def _is_pdf_linearized(input_path):
 
 
 def _qpdf_encryption_info(input_path):
-    qpdf_exe = _processor_cls()._get_qpdf_path()
+    qpdf_exe = _get_qpdf_path()
     if sys.platform == "win32" and qpdf_exe != "qpdf.exe" and not os.path.exists(qpdf_exe):
         return ""
 
@@ -120,7 +105,7 @@ def _qpdf_encryption_info(input_path):
 
 
 def _qpdf_reports_restrictions(input_path):
-    info = _processor_cls()._qpdf_encryption_info(input_path).lower()
+    info = _qpdf_encryption_info(input_path).lower()
     if not info or "file is not encrypted" in info:
         return False
     return ": not allowed" in info

@@ -1,22 +1,8 @@
-import csv
-import json
 import os
 import re
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 import fitz
-
-from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
-
-
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
 
 
 def _is_text_blue(page, rect):
@@ -156,7 +142,7 @@ def _point_in_any_rect(point, rects):
 
 
 def _make_text_block_blue(block_text):
-    return _processor_cls()._make_text_block_color(block_text, (0.0, 0.0, 1.0))
+    return _make_text_block_color(block_text, (0.0, 0.0, 1.0))
 
 
 def _make_text_block_color(block_text, color_rgb):
@@ -187,7 +173,7 @@ def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, onl
             continue
 
         bbox = fitz.Rect(trace.get("bbox", (0, 0, 0, 0)))
-        if not any(_processor_cls()._rects_intersect(bbox, rect) for rect in target_rects):
+        if not any(_rects_intersect(bbox, rect) for rect in target_rects):
             continue
 
         chars = trace.get("chars", ())
@@ -207,7 +193,7 @@ def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, onl
             visible_char_count += 1
             rect = fitz.Rect(char_bbox)
             center = fitz.Point((rect.x0 + rect.x1) / 2.0, (rect.y0 + rect.y1) / 2.0)
-            if _processor_cls()._point_in_any_rect(center, target_rects):
+            if _point_in_any_rect(center, target_rects):
                 inside_char_count += 1
 
         if visible_char_count == 0:
@@ -248,7 +234,7 @@ def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, onl
             if current_index not in target_indexes:
                 return block
 
-            new_block = _processor_cls()._make_text_block_color(block, color_rgb)
+            new_block = _make_text_block_color(block, color_rgb)
             if new_block != block:
                 changed = True
             return new_block
@@ -288,7 +274,7 @@ def _apply_blue_text_via_content_stream(doc, page, link_rects=None):
         while link_obj:
             link_rects.append(link_obj.rect)
             link_obj = link_obj.next
-    return _processor_cls()._apply_text_color_via_content_stream(
+    return _apply_text_color_via_content_stream(
         doc,
         page,
         link_rects,
@@ -332,7 +318,7 @@ def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_link
             # Do not call update_link() just to set NewWindow. On some Windows/PyMuPDF
             # combinations, rebuilding external-file links can normalize relative /F paths
             # into absolute paths. Patch the raw action object instead so /F and /UF stay intact.
-            _processor_cls()._force_link_new_window(doc, link.get("xref", 0))
+            _force_link_new_window(doc, link.get("xref", 0))
             changed = True
 
     return changed
@@ -342,7 +328,7 @@ def _apply_hyperlink_styles(doc, page, options, link_objs=None, link_rects=None)
     changed = False
 
     if "link_text_blue" in options:
-        if _processor_cls()._apply_blue_text_via_content_stream(doc, page, link_rects=link_rects):
+        if _apply_blue_text_via_content_stream(doc, page, link_rects=link_rects):
             changed = True
 
     iterable = link_objs if link_objs is not None else []
@@ -354,7 +340,7 @@ def _apply_hyperlink_styles(doc, page, options, link_objs=None, link_rects=None)
 
     for link_obj in iterable:
         link_changed = False
-        has_border = _processor_cls()._link_has_visible_border(doc, link_obj)
+        has_border = _link_has_visible_border(doc, link_obj)
 
         if "link_remove_border" in options:
             if has_border:
@@ -370,7 +356,7 @@ def _apply_hyperlink_styles(doc, page, options, link_objs=None, link_rects=None)
                 link_obj.set_colors(stroke=(0, 0, 1))
                 link_changed = True
         elif "link_unbordered_blue_to_blue_border" in options:
-            if not has_border and _processor_cls()._is_text_blue(page, link_obj.rect):
+            if not has_border and _is_text_blue(page, link_obj.rect):
                 link_obj.set_border(width=1.0)
                 link_obj.set_colors(stroke=(0, 0, 1))
                 link_changed = True

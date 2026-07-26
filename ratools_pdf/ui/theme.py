@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import sys
 from dataclasses import dataclass, asdict
 from string import Template
@@ -24,6 +23,8 @@ from string import Template
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
+
+from ratools_pdf.ui import win32
 
 
 # ============================================================================
@@ -250,72 +251,8 @@ def active_palette() -> Palette:
     return _ACTIVE_PALETTE
 
 
-def _hex_to_colorref(hex_value: str) -> int:
-    """把 #RRGGBB 转为 Windows COLORREF (0x00BBGGRR)。"""
-    normalized = hex_value.lstrip("#")
-    red = int(normalized[0:2], 16)
-    green = int(normalized[2:4], 16)
-    blue = int(normalized[4:6], 16)
-    return (blue << 16) | (green << 8) | red
-
-
-def _set_dwm_int_attribute(hwnd: int, attribute: int, value: int) -> bool:
-    data = ctypes.c_int(value)
-    try:
-        result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            ctypes.c_void_p(int(hwnd)),
-            attribute,
-            ctypes.byref(data),
-            ctypes.sizeof(data),
-        )
-    except Exception:
-        return False
-    return result == 0
-
-
-def _refresh_windows_frame(hwnd: int):
-    try:
-        # SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-        flags = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020
-        ctypes.windll.user32.SetWindowPos(
-            ctypes.c_void_p(int(hwnd)),
-            None,
-            0,
-            0,
-            0,
-            0,
-            flags,
-        )
-        # RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME
-        ctypes.windll.user32.RedrawWindow(ctypes.c_void_p(int(hwnd)), None, None, 0x0501)
-    except Exception:
-        pass
-
-
-def set_windows_title_bar_dark_mode(
-    hwnd: int,
-    enabled: bool,
-    caption_color: str | None = None,
-    text_color: str | None = None,
-    border_color: str | None = None,
-) -> bool:
-    """在 Windows 原生标题栏上应用深色模式。非 Windows 或失败时静默跳过。"""
-    if sys.platform != "win32" or not hwnd:
-        return False
-
-    mode_value = 1 if enabled else 0
-    ok = _set_dwm_int_attribute(hwnd, 20, mode_value)
-    if not ok:
-        ok = _set_dwm_int_attribute(hwnd, 19, mode_value)
-
-    # Windows 11 支持显式标题栏配色；Windows 10 会返回无效参数，忽略即可。
-    for attribute, color in ((35, caption_color), (36, text_color), (34, border_color)):
-        if color:
-            _set_dwm_int_attribute(hwnd, attribute, _hex_to_colorref(color))
-
-    _refresh_windows_frame(hwnd)
-
-    return ok
+# DWM/Win32 细节集中在 ui.win32；这里保留同名入口以兼容既有调用与测试。
+set_windows_title_bar_dark_mode = win32.set_title_bar_dark_mode
 
 
 def apply_windows_title_bar_theme(widget, palette: Palette) -> bool:
@@ -474,7 +411,7 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
 #dialogPrimaryBtn:hover { background-color: $primary_hover; }
 #dialogPrimaryBtn:pressed { background-color: $primary_pressed; }
 #dialogPrimaryBtn:disabled { background-color: $primary_disabled; color: $surface; }
-#dialogDangerBtn { background-color: $danger; color: #FFFFFF; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: none; }
+#dialogDangerBtn { background-color: $danger; color: $text_on_primary; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: none; }
 #dialogDangerBtn:hover { background-color: $danger_hover; }
 #dialogDangerBtn:pressed { background-color: $danger_pressed; }
 #dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: 1px solid $border_strong; }
@@ -564,6 +501,13 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
 #logSplitter::handle:vertical:hover { background-color: $primary_soft; border-radius: 5px; }
 #logDetailTextEdit { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 10px; color: $text_body; font-family: Consolas, 'Courier New', monospace; font-size: 12px; selection-background-color: $selection_bg; selection-color: $selection_text; }
 
+/* ---- 右键菜单 ---- */
+QMenu { background-color: $surface; border: 1px solid $border_strong; border-radius: 6px; padding: 4px; }
+QMenu::item { padding: 6px 28px 6px 20px; border-radius: 4px; color: $text_body; font-size: 13px; }
+QMenu::item:selected { background-color: $surface_hover; color: $primary_text; }
+QMenu::separator { height: 1px; background: $border; margin: 4px 8px; }
+QMenu::item:disabled { color: $text_faint; }
+
 /* ---- 关于对话框 ---- */
 #aboutHeroCard { background-color: $primary_soft; border: 1px solid $primary_soft_border; border-radius: 10px; }
 #aboutInfoCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 10px; }
@@ -594,6 +538,17 @@ def log_status_colors(palette: Palette, tags) -> tuple[str, str, str]:
     if "success" in tags:
         return palette.success, palette.success_soft, palette.success_text
     return palette.text_faint, palette.surface, palette.text_body
+
+
+def tree_status_color(palette: Palette, semantic: str) -> str:
+    """文件树"当前状态"列的前景色。semantic 取值见 common.status.status_semantic。"""
+    if semantic == "positive":
+        return palette.success
+    if semantic == "negative":
+        return palette.danger
+    if semantic == "warning":
+        return palette.warning
+    return palette.info
 
 
 # ============================================================================

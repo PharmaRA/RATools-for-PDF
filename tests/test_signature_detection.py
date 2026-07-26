@@ -6,8 +6,8 @@ from unittest.mock import patch
 import fitz
 
 from ratools_pdf.controllers.main_controller import MainController
+from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf import precheck
-from ratools_pdf.pdf.processor import PDFProcessor
 
 
 def _make_unsigned_pdf(path):
@@ -34,16 +34,16 @@ class SignatureDetectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "unsigned.pdf")
             _make_unsigned_pdf(path)
-            self.assertFalse(PDFProcessor._pdf_has_signature(path))
+            self.assertFalse(pdf_inspect.pdf_has_signature(path))
 
     def test_signed_pdf_is_detected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "signed.pdf")
             _make_signed_pdf(path)
-            self.assertTrue(PDFProcessor._pdf_has_signature(path))
+            self.assertTrue(pdf_inspect.pdf_has_signature(path))
 
     def test_missing_file_reports_no_signature(self):
-        self.assertFalse(PDFProcessor._pdf_has_signature(r"C:\does\not\exist.pdf"))
+        self.assertFalse(pdf_inspect.pdf_has_signature(r"C:\does\not\exist.pdf"))
 
     def test_empty_path_reports_no_signature(self):
         self.assertFalse(precheck._pdf_has_signature(""))
@@ -79,13 +79,13 @@ class PromptSkipSignedFilesTests(unittest.TestCase):
 
     def _run(self, prompt_result):
         controller = _FakeController(_FakeView(prompt_result))
-        with patch.object(PDFProcessor, "_pdf_has_signature", side_effect=lambda p: p in self.SIGNED):
+        with patch("ratools_pdf.controllers.main_controller.pdf_inspect.pdf_has_signature", side_effect=lambda p: p in self.SIGNED):
             result = controller._prompt_skip_signed_files(list(self.ALL_FILES))
         return controller, result
 
     def test_no_signed_files_skips_prompt(self):
         controller = _FakeController(_FakeView("cancel"))
-        with patch.object(PDFProcessor, "_pdf_has_signature", return_value=False):
+        with patch("ratools_pdf.controllers.main_controller.pdf_inspect.pdf_has_signature", return_value=False):
             result = controller._prompt_skip_signed_files(list(self.ALL_FILES))
         self.assertEqual(result, self.ALL_FILES)
         self.assertEqual(controller.view.prompt_calls, [])

@@ -200,17 +200,23 @@ RATools-for-PDF/
 ├─ main_no_update.py  # 无更新版程序入口
 ├─ ratools_pdf/       # 应用包，承载配置、控制器、服务、UI 与 PDF 模块
 │  ├─ app.py
-│  ├─ config/
-│  ├─ controllers/
+│  ├─ common/         # 跨层共享常量（处理状态等，禁止 Qt/fitz 依赖）
+│  ├─ config/         # 特性开关、路径、版本、规则目录（rules_catalog）
+│  ├─ controllers/    # 组合根 MainController + 各子控制器与后台 worker
 │  ├─ pdf/
-│  │  ├─ processor.py
+│  │  ├─ processor.py        # 处理管线（步骤函数 + PDFProcessor 门面）
+│  │  ├─ precheck.py         # 预检检查组
+│  │  ├─ inspect.py          # 只读检查公开 API（供 controllers 使用）
 │  │  ├─ qpdf.py
-│  │  ├─ precheck.py
 │  │  ├─ bookmarks_links.py
 │  │  ├─ page_layout.py
 │  │  └─ hyperlink_styles.py
-│  ├─ services/
+│  ├─ services/       # 更新检查、系统 shell、PDF 详情等无 UI 服务
 │  └─ ui/
+│     ├─ main_window.py
+│     ├─ dialogs/     # 每个对话框一个模块
+│     ├─ theme.py     # 集中式主题（QSS 模板 + 明暗配色）
+│     └─ win32.py     # DWM/Win32 集成
 ├─ .github/workflows/ # GitHub Actions CI 配置
 ├─ tests/             # 回归测试
 ├─ docs/              # 设计记录、计划与归档资料

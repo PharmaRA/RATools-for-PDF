@@ -1,22 +1,8 @@
 import csv
 import json
-import os
-import re
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 import fitz
-
-from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
-
-
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
 
 
 def export_bookmarks(pdf_path, csv_path):
