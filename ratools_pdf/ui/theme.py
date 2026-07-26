@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from dataclasses import dataclass, asdict
 from string import Template
 
@@ -56,7 +58,7 @@ class Palette:
     text_faint: str    # 最弱 (占位 / 分区标题)
     text_on_primary: str
 
-    # --- 主色 (靛蓝) ---
+    # --- 主色 (企业蓝) ---
     primary: str
     primary_hover: str
     primary_pressed: str
@@ -112,7 +114,7 @@ class Palette:
 
 
 # ---------------------------------------------------------------------------
-# 现代精致亮色 —— 靛蓝 #4F46E5
+# 现代精致亮色 —— 企业蓝 #2563EB
 # ---------------------------------------------------------------------------
 LIGHT = Palette(
     name="light",
@@ -134,16 +136,16 @@ LIGHT = Palette(
     text_faint="#9AA2AF",
     text_on_primary="#FFFFFF",
 
-    primary="#4F46E5",
-    primary_hover="#4338CA",
-    primary_pressed="#3730A3",
-    primary_soft="#EEF2FF",
-    primary_soft_border="#C7D2FE",
-    primary_text="#4338CA",
-    primary_disabled="#C7D2FE",
+    primary="#2563EB",
+    primary_hover="#1D4ED8",
+    primary_pressed="#1E40AF",
+    primary_soft="#EFF6FF",
+    primary_soft_border="#BFDBFE",
+    primary_text="#1D4ED8",
+    primary_disabled="#BFDBFE",
 
-    selection_bg="#E0E7FF",
-    selection_text="#3730A3",
+    selection_bg="#DBEAFE",
+    selection_text="#1E40AF",
 
     danger="#EF4444",
     danger_hover="#DC2626",
@@ -160,9 +162,10 @@ LIGHT = Palette(
     warning_text="#92400E",
     warning_soft="#FFF7ED",
 
-    info="#3B82F6",
-    info_text="#1D4ED8",
-    info_soft="#EFF6FF",
+    # 主色转蓝后 info 挪到天蓝色系，保持"进行中/预检"与品牌色可区分
+    info="#0EA5E9",
+    info_text="#0369A1",
+    info_soft="#F0F9FF",
 
     scrollbar_handle="#CBD5E1",
     scrollbar_handle_hover="#94A3B8",
@@ -198,16 +201,16 @@ DARK = Palette(
     text_faint="#6B7280",
     text_on_primary="#FFFFFF",
 
-    primary="#6366F1",
-    primary_hover="#7C7EF6",
-    primary_pressed="#4F46E5",
-    primary_soft="#262A45",
-    primary_soft_border="#4F46E5",
-    primary_text="#C7D2FE",
-    primary_disabled="#3A3F63",
+    primary="#3B82F6",
+    primary_hover="#60A5FA",
+    primary_pressed="#2563EB",
+    primary_soft="#1E2B45",
+    primary_soft_border="#2563EB",
+    primary_text="#BFDBFE",
+    primary_disabled="#34425F",
 
-    selection_bg="#312E5C",
-    selection_text="#E0E7FF",
+    selection_bg="#1E3A8A",
+    selection_text="#DBEAFE",
 
     danger="#F87171",
     danger_hover="#EF4444",
@@ -224,9 +227,9 @@ DARK = Palette(
     warning_text="#FCD34D",
     warning_soft="#3A2E1A",
 
-    info="#60A5FA",
-    info_text="#93C5FD",
-    info_soft="#1E2A3D",
+    info="#38BDF8",
+    info_text="#7DD3FC",
+    info_soft="#16293D",
 
     scrollbar_handle="#3A404C",
     scrollbar_handle_hover="#4B5563",
@@ -249,6 +252,40 @@ _ACTIVE_PALETTE: Palette = LIGHT
 def active_palette() -> Palette:
     """返回当前生效的配色。未初始化 ThemeManager 时回退到亮色。"""
     return _ACTIVE_PALETTE
+
+
+# ---------------------------------------------------------------------------
+# 勾选框对勾图标
+# ---------------------------------------------------------------------------
+# QSS 的 image: 只接受文件路径 / Qt 资源，本项目未引入 .qrc 体系，打包脚本
+# (PyInstaller/Nuitka) 也按文件清单收集资源。为避免两套打包脚本各自维护
+# 图标清单，这里在运行时把 SVG 写入临时目录后引用，源代码即唯一事实来源。
+_CHECKMARK_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
+    '<path d="M3.8 8.6 L6.8 11.4 L12.2 4.9" fill="none" stroke="{color}" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+)
+
+_checkmark_paths: dict = {}
+
+
+def checkmark_icon_path(color: str = "#FFFFFF") -> str:
+    """返回对勾 SVG 的文件路径 (QSS url 格式, 正斜杠)；按颜色缓存生成。"""
+    cached = _checkmark_paths.get(color)
+    if cached and os.path.exists(cached):
+        return cached
+    file_path = os.path.join(
+        tempfile.gettempdir(),
+        f"ratools_pdf_check_{color.lstrip('#').lower()}.svg",
+    )
+    try:
+        with open(file_path, "w", encoding="utf-8") as fh:
+            fh.write(_CHECKMARK_SVG.format(color=color))
+    except OSError:
+        return ""
+    normalized = file_path.replace("\\", "/")
+    _checkmark_paths[color] = normalized
+    return normalized
 
 
 # DWM/Win32 细节集中在 ui.win32；这里保留同名入口以兼容既有调用与测试。
@@ -376,7 +413,8 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: $
 QCheckBox { outline: none; spacing: 8px; color: $text_body; }
 QCheckBox:focus { outline: none; }
 QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid $border_strong; background: $surface; margin-top: 1px; }
-QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
+QCheckBox::indicator:hover { border-color: $primary; }
+QCheckBox::indicator:checked { background: $primary; border-color: $primary; image: url($checkmark_url); }
 #dangerCheck { color: $danger; }
 
 /* ---- 底部操作 ---- */
@@ -521,7 +559,10 @@ QMenu::item:disabled { color: $text_faint; }
 
 def build_app_qss(palette: Palette) -> str:
     """依据 Palette 渲染整份应用级 QSS。"""
-    return _APP_QSS_TEMPLATE.substitute(palette.as_dict())
+    tokens = palette.as_dict()
+    # 对勾始终画在 primary 实底上，白色两套主题通用
+    tokens["checkmark_url"] = checkmark_icon_path(palette.text_on_primary)
+    return _APP_QSS_TEMPLATE.substitute(tokens)
 
 
 # ============================================================================

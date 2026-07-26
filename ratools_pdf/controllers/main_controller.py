@@ -68,6 +68,12 @@ class MainController(QObject):
         if app:
             app.aboutToQuit.connect(self.updates.shutdown)
 
+        # 树状态列颜色是逐节点 setForeground 写入的，主题切换后必须整树重刷，
+        # 否则保留上一主题的前景色（暗底旧亮色对比度不足）。
+        theme_manager = getattr(self.view, "theme_manager", None)
+        if theme_manager is not None:
+            theme_manager.changed.connect(self._recolor_tree_statuses)
+
     def setup_connections(self):
         self.view.drop_zone.files_dropped.connect(self.add_files)
         self.view.drop_zone.mousePressEvent = self.open_file_dialog
@@ -591,6 +597,17 @@ class MainController(QObject):
     def _is_detection_running(self):
         return self.detection.is_running()
 
+    def _recolor_tree_statuses(self, palette=None):
+        """按当前主题重刷文件树"当前状态"列前景色（主题切换时调用）。"""
+        palette = palette or active_palette()
+        waiting_color = QColor(palette.text_muted)
+        for node in self.file_nodes.values():
+            status_text = node.text(2)
+            if not status_text or status_text == "等待处理":
+                node.setForeground(2, waiting_color)
+            else:
+                node.setForeground(2, QColor(tree_status_color(palette, status_semantic(status_text))))
+
     def update_progress(self, file_path, status_text, log_msg):
         # 信号直接携带 file_path，各类 worker 无需再依赖"当前列表 + 行索引"的隐式路由
         if not file_path:
@@ -666,7 +683,7 @@ class MainController(QObject):
             f"总耗时：{elapsed}s",
         ]
         if self.last_failed_files:
-            lines.append(f"失败项：{len(self.last_failed_files)} 个，可使用“仅处理失败项”重试")
+            lines.append(f"失败项：{len(self.last_failed_files)} 个，可使用“重试失败项”重试")
         else:
             lines.append("失败项：0 个")
         if worker_summary:
@@ -678,7 +695,7 @@ class MainController(QObject):
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
-        self.view.btn_start.setText("▶ 开始批量处理")
+        self.view.btn_start.setText("▶ 开始处理")
         self.view.btn_start.setProperty("stopMode", False)
         self.view.btn_precheck.show()
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
