@@ -1,8 +1,5 @@
 import csv
 import os
-import platform
-import re
-import subprocess
 import webbrowser
 from datetime import date, datetime
 from pathlib import Path
@@ -11,6 +8,7 @@ from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
 
+from ratools_pdf.common.status import status_semantic
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.controllers.io_actions import (
     _build_io_preview_rows,
@@ -30,7 +28,9 @@ from ratools_pdf.controllers.workers import (
     UpdateCheckWorker,
 )
 from ratools_pdf.pdf.processor import PDFProcessor
+from ratools_pdf.services import system_shell
 from ratools_pdf.ui.dialogs import IODataWizardDialog, LogDialog
+from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
 class MainController(QObject):
@@ -258,69 +258,12 @@ class MainController(QObject):
             self.view.show_error_message("打开失败", "无法打开发布页：浏览器拒绝打开链接")
 
     @staticmethod
-    def _extract_executable_from_open_command(command):
-        command = str(command or "").strip()
-        if not command:
-            return ""
-        quoted = re.match(r'^\s*"([^"]+?\.exe)"', command, flags=re.IGNORECASE)
-        if quoted:
-            return quoted.group(1)
-        unquoted = re.match(r'^\s*(.+?\.exe)(?:\s+|$)', command, flags=re.IGNORECASE)
-        if unquoted:
-            return unquoted.group(1).strip()
-        first = command.split()[0] if command.split() else ""
-        return first if first.lower().endswith(".exe") else ""
-
-    @staticmethod
     def _find_acrobat_executable():
-        candidates = [
-            os.environ.get("RATOOLS_ACROBAT_PATH", ""),
-            r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
-            r"C:\Program Files\Adobe\Acrobat\Acrobat\Acrobat.exe",
-            r"C:\Program Files (x86)\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
-        ]
-
-        if platform.system() == "Windows":
-            try:
-                import winreg
-
-                registry_locations = [
-                    (winreg.HKEY_CLASSES_ROOT, r"Acrobat.Document.DC\shell\open\command", ""),
-                    (winreg.HKEY_CLASSES_ROOT, r"Acrobat.Document\shell\open\command", ""),
-                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe", ""),
-                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Acrobat.exe", ""),
-                ]
-                for hive, key_path, value_name in registry_locations:
-                    try:
-                        with winreg.OpenKey(hive, key_path) as key:
-                            value, _value_type = winreg.QueryValueEx(key, value_name)
-                        exe_path = MainController._extract_executable_from_open_command(value)
-                        if exe_path:
-                            candidates.append(exe_path)
-                    except OSError:
-                        continue
-            except Exception:
-                pass
-
-        for candidate in candidates:
-            candidate = str(candidate or "").strip().strip('"')
-            if candidate and os.path.isfile(candidate):
-                return candidate
-        return ""
+        return system_shell.find_acrobat_executable()
 
     @staticmethod
     def _open_pdf_for_manual_font_embedding(pdf_path, acrobat_path=None):
-        if acrobat_path and os.path.isfile(acrobat_path):
-            subprocess.Popen([acrobat_path, pdf_path])
-            return
-
-        sys_plat = platform.system()
-        if sys_plat == "Windows":
-            os.startfile(pdf_path)
-        elif sys_plat == "Darwin":
-            subprocess.Popen(["open", pdf_path])
-        else:
-            subprocess.Popen(["xdg-open", pdf_path])
+        system_shell.open_pdf_in_acrobat_or_default(pdf_path, acrobat_path)
 
     def _selected_pdf_paths_for_manual_font_embedding(self):
         selected_items = self.view.tree.selectedItems()
@@ -436,34 +379,8 @@ class MainController(QObject):
         if not selected_items:
             return
 
+        # 菜单样式由应用级中央 QSS（theme.py 的 QMenu 段）提供，明暗主题自动适配
         menu = QMenu(self.view.tree)
-        # 使得菜单样式与整体 UI 现代感保持一致
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: white;
-                border: 1px solid #D1D5DB;
-                border-radius: 6px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 28px 6px 20px;
-                border-radius: 4px;
-                color: #374151;
-                font-size: 13px;
-            }
-            QMenu::item:selected {
-                background-color: #F3F4F6;
-                color: #2563EB;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #E5E7EB;
-                margin: 4px 8px;
-            }
-            QMenu::item:disabled {
-                color: #9CA3AF;
-            }
-        """)
 
         action_remove = menu.addAction("🗑️ 移除选中项")
 
@@ -498,14 +415,8 @@ class MainController(QObject):
 
         # 仅打开文件（如果是PDF文件），如果是文件夹则展开/收起节点（由组件默认处理）
         if os.path.isfile(path) and path.lower().endswith('.pdf'):
-            sys_plat = platform.system()
             try:
-                if sys_plat == "Windows":
-                    os.startfile(path)
-                elif sys_plat == "Darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                system_shell.open_with_default_app(path)
             except Exception as e:
                 self.view.show_error_message("❌ 打开失败", f"无法使用默认程序打开文件：\n{str(e)}")
 
@@ -515,21 +426,8 @@ class MainController(QObject):
             self.view.show_warning_message("⚠️ 警告", "无法定位，该文件或文件夹可能已被移动或删除！")
             return
 
-        sys_plat = platform.system()
         try:
-            if sys_plat == "Windows":
-                if os.path.isfile(path):
-                    # Windows 下使用 explorer /select 高亮选中指定文件
-                    subprocess.Popen(['explorer', '/select,', os.path.normpath(path)])
-                else:
-                    os.startfile(path)
-            elif sys_plat == "Darwin":
-                # macOS 使用 open -R 会在 Finder 中展示并选中文件
-                subprocess.Popen(["open", "-R", path])
-            else:
-                # Linux 一般打开其所在目录
-                target_dir = os.path.dirname(path) if os.path.isfile(path) else path
-                subprocess.Popen(["xdg-open", target_dir])
+            system_shell.reveal_in_file_manager(path)
         except Exception as e:
             self.view.show_error_message("❌ 定位失败", f"无法打开系统资源管理器：\n{str(e)}")
 
@@ -880,7 +778,7 @@ class MainController(QObject):
             file_node.setToolTip(0, p.name)
             file_node.setToolTip(1, path)
             file_node.setToolTip(2, "等待处理")
-            file_node.setForeground(2, Qt.darkGray)
+            file_node.setForeground(2, QColor(active_palette().text_muted))
 
             # 将创建的文件节点加入字典中进行状态管理
             self.file_nodes[path] = file_node
@@ -1336,20 +1234,7 @@ class MainController(QObject):
             return
         file_path = processing_files[row_index]
 
-        if status_text in ["处理完成", "操作成功", "无需处理", "未发现"]:
-            color = QColor(16, 185, 129)  # 绿色
-        elif status_text in ["处理失败", "操作失败", "预检失败", "检测失败"]:
-            color = QColor(239, 68, 68)  # 红色
-        elif status_text in ["建议处理", "需要复核", "发现问题"]:
-            color = QColor(245, 158, 11)  # 橙色
-        elif status_text == "已停止":
-            color = QColor(245, 158, 11)  # 橙色
-        elif status_text == "已跳过":
-            color = QColor(245, 158, 11)  # 橙色
-        elif status_text == "未匹配跳过":
-            color = QColor(245, 158, 11)  # 橙黄色警告
-        else:
-            color = QColor(37, 99, 235)  # 蓝色处理中
+        color = QColor(tree_status_color(active_palette(), status_semantic(status_text)))
 
         # 查字典，直接更新树节点UI
         if file_path in self.file_nodes:
@@ -1704,13 +1589,7 @@ class MainController(QObject):
             self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
 
     def _open_directory(self, dir_path):
-        sys_plat = platform.system()
         try:
-            if sys_plat == "Windows":
-                os.startfile(dir_path)
-            elif sys_plat == "Darwin":
-                subprocess.Popen(["open", dir_path])
-            else:
-                subprocess.Popen(["xdg-open", dir_path])
+            system_shell.open_directory(dir_path)
         except Exception as e:
             self.process_logs += f"\n[警告] 自动打开文件夹失败：{str(e)}\n"

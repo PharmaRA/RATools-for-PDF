@@ -564,6 +564,13 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
 #logSplitter::handle:vertical:hover { background-color: $primary_soft; border-radius: 5px; }
 #logDetailTextEdit { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 10px; color: $text_body; font-family: Consolas, 'Courier New', monospace; font-size: 12px; selection-background-color: $selection_bg; selection-color: $selection_text; }
 
+/* ---- 右键菜单 ---- */
+QMenu { background-color: $surface; border: 1px solid $border_strong; border-radius: 6px; padding: 4px; }
+QMenu::item { padding: 6px 28px 6px 20px; border-radius: 4px; color: $text_body; font-size: 13px; }
+QMenu::item:selected { background-color: $surface_hover; color: $primary_text; }
+QMenu::separator { height: 1px; background: $border; margin: 4px 8px; }
+QMenu::item:disabled { color: $text_faint; }
+
 /* ---- 关于对话框 ---- */
 #aboutHeroCard { background-color: $primary_soft; border: 1px solid $primary_soft_border; border-radius: 10px; }
 #aboutInfoCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 10px; }
@@ -594,6 +601,17 @@ def log_status_colors(palette: Palette, tags) -> tuple[str, str, str]:
     if "success" in tags:
         return palette.success, palette.success_soft, palette.success_text
     return palette.text_faint, palette.surface, palette.text_body
+
+
+def tree_status_color(palette: Palette, semantic: str) -> str:
+    """文件树"当前状态"列的前景色。semantic 取值见 common.status.status_semantic。"""
+    if semantic == "positive":
+        return palette.success
+    if semantic == "negative":
+        return palette.danger
+    if semantic == "warning":
+        return palette.warning
+    return palette.info
 
 
 # ============================================================================
