@@ -1,17 +1,11 @@
-import fitz
 import os
-import sys
-import subprocess
 import shutil
-import csv
-import json
-import re
+import sys
 import time
-from urllib.parse import unquote, urlparse
 from pathlib import Path
 
-from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
+import fitz
+
 from ratools_pdf.pdf import bookmarks_links, hyperlink_styles, page_layout, precheck, qpdf
 
 
@@ -250,40 +244,6 @@ class PDFProcessor:
     @staticmethod
     def resolve_processing_options(input_path, options, processing_mode="smart"):
         return precheck.resolve_processing_options(input_path, options, processing_mode)
-
-    @staticmethod
-    def _run_font_embedding_workflow(pdf_path):
-        before = PDFProcessor._collect_font_precheck_for_path(pdf_path)
-        if not before.get("available"):
-            return False, f"字体风险预检失败：{before.get('error') or '无法读取PDF'}", False
-        if not PDFProcessor._font_precheck_has_embedding_risk(before):
-            return True, "字体风险预检通过，无需调用外部后端", False
-
-        provider = get_font_embedding_provider()
-        temp_output = f"{pdf_path}.font_embed.tmp.pdf"
-        try:
-            result = provider.embed_missing_fonts(pdf_path, temp_output, before)
-            if not result.success:
-                return False, f"{result.provider_name} 处理失败：{result.message}", False
-
-            after = PDFProcessor._collect_font_precheck_for_path(temp_output)
-            if not after.get("available"):
-                return False, f"字体修复后验证失败：{after.get('error') or '无法读取PDF'}", False
-            if PDFProcessor._font_precheck_has_embedding_risk(after):
-                detail = after.get("font_details") or after.get("font_summary") or "仍存在字体嵌入风险"
-                provider_detail = result.message.strip() if result.message else ""
-                if provider_detail:
-                    return False, f"{result.provider_name} 返回成功，但后验证未通过：{detail}；后端返回：{provider_detail}", False
-                return False, f"{result.provider_name} 返回成功，但后验证未通过：{detail}", False
-
-            os.replace(temp_output, pdf_path)
-            return True, f"{result.provider_name} 字体修复后验证通过", True
-        finally:
-            if os.path.exists(temp_output):
-                try:
-                    os.remove(temp_output)
-                except Exception:
-                    pass
 
     @staticmethod
     def _transform_rect(rect, scale, dx, dy):
@@ -743,44 +703,6 @@ class PDFProcessor:
                     for page in doc:
                         page_state = PDFProcessor._collect_page_state(page)
                         decolor_rects = []
-
-                        def _is_span_blue(span_color_int: int) -> bool:
-                            # span["color"] 是 0xRRGGBB
-                            b = span_color_int & 0xFF
-                            g = (span_color_int >> 8) & 0xFF
-                            r = (span_color_int >> 16) & 0xFF
-                            return b > r + 40 and b > g + 40
-
-                        def _overlay_black_text_in_rect(rect: fitz.Rect):
-                            try:
-                                text_dict = page.get_text("dict", clip=rect)
-                            except Exception:
-                                return
-                            for block in text_dict.get("blocks", []):
-                                for line in block.get("lines", []):
-                                    for span in line.get("spans", []):
-                                        try:
-                                            txt = span.get("text", "")
-                                            if not txt.strip():
-                                                continue
-                                            if not _is_span_blue(span.get("color", 0)):
-                                                continue
-                                            bbox = span.get("bbox", None)
-                                            if not bbox or len(bbox) != 4:
-                                                continue
-                                            span_rect = fitz.Rect(bbox)
-                                            # 叠加黑字覆盖蓝字（不重写内容流，尽量低风险）
-                                            page.insert_textbox(
-                                                span_rect,
-                                                txt,
-                                                fontsize=span.get("size", 11),
-                                                fontname="helv",
-                                                color=(0, 0, 0),
-                                                overlay=True,
-                                            )
-                                            changed = True
-                                        except Exception:
-                                            continue
 
                         # 外部 URI 链接：优先用 delete_annot 方式确保真的移除可点击行为
                         if (

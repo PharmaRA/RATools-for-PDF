@@ -20,10 +20,6 @@ else:
     update_checker = None
 
 
-def _process_document_task(file_path, out_path, options, processing_mode="smart"):
-    return PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode)
-
-
 def _process_document_task_pipe(file_path, out_path, options, processing_mode, conn):
     try:
         conn.send(PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode))

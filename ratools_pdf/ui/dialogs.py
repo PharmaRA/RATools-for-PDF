@@ -1,9 +1,7 @@
 import ctypes
 import html
 import os
-import platform
 import re
-import sys
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
@@ -20,8 +18,6 @@ from ratools_pdf.config.version import get_display_version
 from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
-    log_status_tags,
-    split_log_blocks,
 )
 from ratools_pdf.ui.platform import is_win11, should_use_manual_dialog_shadow
 from ratools_pdf.ui.theme import active_palette, log_status_colors
@@ -34,7 +30,7 @@ class FramelessDraggableDialog(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)  # 支持圆角透明背景
 
         #  如果是 Win11，就调用去边框方法
-        if sys.platform == "win32" and platform.release() == "11":
+        if is_win11():
             self._remove_win11_transparent_border()
 
         # 视觉样式全部来自应用级中央 QSS (theme.py)，此处不再本地硬编码颜色。
@@ -576,7 +572,6 @@ class LogDialog(FramelessDraggableDialog):
 
         self.raw_log_text = ""
         self.filter_mode = "all"
-        self.log_blocks = []
         self.summary_items = []
         self.filtered_items = []
 
@@ -694,10 +689,6 @@ class LogDialog(FramelessDraggableDialog):
         return card, title_label, value_label
 
     @staticmethod
-    def _split_log_blocks(raw_text):
-        return split_log_blocks(raw_text)
-
-    @staticmethod
     def _highlight_html(text, query):
         if not query:
             return html.escape(text)
@@ -711,17 +702,6 @@ class LogDialog(FramelessDraggableDialog):
         parts.append(html.escape(text[last:]))
         return "".join(parts)
 
-    @staticmethod
-    def _build_log_block_info(block_text):
-        status_match = re.search(r"^\s*状态:\s*(.+)$", block_text, re.MULTILINE)
-        status = status_match.group(1).strip() if status_match else ""
-
-        return {
-            "text": block_text,
-            "status": status,
-            "tags": log_status_tags(status, block_text),
-        }
-
     def set_filter_mode(self, mode):
         self.filter_mode = mode
         for key, btn in self.filter_buttons.items():
@@ -733,10 +713,6 @@ class LogDialog(FramelessDraggableDialog):
 
     def set_log_data(self, raw_text, structured_rows=None):
         self.raw_log_text = raw_text or ""
-        self.log_blocks = [
-            self._build_log_block_info(block)
-            for block in self._split_log_blocks(self.raw_log_text)
-        ]
         self.summary_items = build_log_summary_items(self.raw_log_text, structured_rows or [])
         self._update_stats()
         self.refresh_view()
@@ -1147,11 +1123,16 @@ class AboutDialog(FramelessDraggableDialog):
         self.content_layout.addWidget(btn_close)
 
     def set_update_checking(self):
+        # NoUpdate 变体（ENABLE_UPDATE_CHECK=False）不创建更新区控件
+        if not hasattr(self, "btn_check_updates"):
+            return
         self.btn_check_updates.setEnabled(False)
         self.update_status_label.setText("正在检查更新...")
         self.btn_open_release.hide()
 
     def set_update_result(self, message, release_url=""):
+        if not hasattr(self, "btn_check_updates"):
+            return
         self.btn_check_updates.setEnabled(True)
         self.update_status_label.setText(message)
         self.latest_release_url = release_url

@@ -1,17 +1,9 @@
-import csv
-import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
-
-import fitz
 
 from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
 
 
 def _processor_cls():
@@ -24,8 +16,6 @@ def _get_qpdf_path():
         candidates = [
             get_resource_path("plugins", "qpdf", "qpdf.exe"),
             os.environ.get("QPDF_PATH", ""),
-            r"D:\Program Files\qpdf 11.9.1\bin\qpdf.exe",
-            r"C:\Program Files\qpdf\bin\qpdf.exe",
         ]
         for candidate in candidates:
             if candidate and os.path.exists(candidate):

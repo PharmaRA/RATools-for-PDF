@@ -71,7 +71,6 @@ class MainController(QObject):
         self.detection_worker = None
         self.detection_files = []
         self.last_detection_results = []
-        self.last_detection_results = []
         self.update_worker = None
         app = QCoreApplication.instance()
         if app:

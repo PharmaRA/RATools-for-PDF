@@ -1,17 +1,4 @@
-import csv
-import json
-import os
-import re
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-from urllib.parse import unquote, urlparse
-
 import fitz
-
-from ratools_pdf.config.paths import get_resource_path
-from ratools_pdf.pdf.font_embedding_providers import get_font_embedding_provider
 
 
 def _processor_cls():

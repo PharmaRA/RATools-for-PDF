@@ -474,7 +474,7 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; }
 #dialogPrimaryBtn:hover { background-color: $primary_hover; }
 #dialogPrimaryBtn:pressed { background-color: $primary_pressed; }
 #dialogPrimaryBtn:disabled { background-color: $primary_disabled; color: $surface; }
-#dialogDangerBtn { background-color: $danger; color: #FFFFFF; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: none; }
+#dialogDangerBtn { background-color: $danger; color: $text_on_primary; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: none; }
 #dialogDangerBtn:hover { background-color: $danger_hover; }
 #dialogDangerBtn:pressed { background-color: $danger_pressed; }
 #dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: 1px solid $border_strong; }
