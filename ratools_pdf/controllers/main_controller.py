@@ -18,6 +18,7 @@ from ratools_pdf.controllers.log_export import (
     _structured_log_row_from_event,
 )
 from ratools_pdf.controllers.detection_controller import DetectionController
+from ratools_pdf.controllers.font_embedding_controller import FontEmbeddingController
 from ratools_pdf.controllers.io_controller import IOController
 from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import (
@@ -67,6 +68,7 @@ class MainController(QObject):
         self.precheck_files = []
         self.detection = DetectionController(self, self.view, parent=self)
         self.io = IOController(self, self.view, parent=self)
+        self.font_embedding = FontEmbeddingController(self.view, parent=self)
         self.updates = UpdateController(self.view, parent=self)
 
         self.setup_connections()
@@ -95,7 +97,7 @@ class MainController(QObject):
         self.view.btn_log.clicked.connect(self.show_log_dialog)
         btn_embed_missing_fonts = getattr(self.view, "btn_embed_missing_fonts", None)
         if btn_embed_missing_fonts is not None:
-            btn_embed_missing_fonts.clicked.connect(self.open_selected_files_in_acrobat_for_font_embedding)
+            btn_embed_missing_fonts.clicked.connect(self.font_embedding.open_selected_files_in_acrobat)
         if ENABLE_UPDATE_CHECK:
             self.view.btn_top_about.clicked.connect(self.updates.wire_about_dialog)
 
@@ -194,68 +196,6 @@ class MainController(QObject):
         self.view.persist_all_settings()
         self.view.refresh_selection_summary()
         self.view.show_success_message("✅ 已应用", f"已自动勾选 {len(suggested_options)} 条预检建议规则。")
-
-    @staticmethod
-    def _find_acrobat_executable():
-        return system_shell.find_acrobat_executable()
-
-    @staticmethod
-    def _open_pdf_for_manual_font_embedding(pdf_path, acrobat_path=None):
-        system_shell.open_pdf_in_acrobat_or_default(pdf_path, acrobat_path)
-
-    def _selected_pdf_paths_for_manual_font_embedding(self):
-        selected_items = self.view.tree.selectedItems()
-        pdf_paths = []
-        seen = set()
-        for item in selected_items:
-            path = str(item.text(1) or "").strip().strip('"')
-            if not path or not os.path.isfile(path) or not path.lower().endswith(".pdf"):
-                continue
-            key = os.path.normcase(os.path.abspath(path))
-            if key in seen:
-                continue
-            seen.add(key)
-            pdf_paths.append(path)
-        return pdf_paths
-
-    def _open_pdf_paths_in_acrobat_for_font_embedding(self, pdf_paths):
-        acrobat_path = self._find_acrobat_executable()
-        opened = []
-        failures = []
-        for pdf_path in pdf_paths:
-            try:
-                self._open_pdf_for_manual_font_embedding(pdf_path, acrobat_path=acrobat_path)
-                opened.append(pdf_path)
-            except Exception as exc:
-                failures.append(f"{os.path.basename(pdf_path)}：{exc}")
-
-        if not opened:
-            return False, "无法打开选中的 PDF：\n" + "\n".join(failures)
-
-        message = (
-            f"已打开 {len(opened)} 个 PDF。\n\n"
-            "请在 Acrobat 中执行：\n"
-            "1. 所有工具 > 印刷制作 > 印前检查\n"
-            "2. 选择“嵌入缺失的字体”\n"
-            "3. 点击修复并保存\n\n"
-            "处理完成后，回到 RATools 重新执行预检确认字体风险是否消失。"
-        )
-        if not acrobat_path:
-            message += "\n\n未定位到 Acrobat.exe，已改用系统默认 PDF 程序打开。"
-        if failures:
-            message += "\n\n部分文件未能打开：\n" + "\n".join(failures)
-        return True, message
-
-    def open_selected_files_in_acrobat_for_font_embedding(self):
-        pdf_paths = self._selected_pdf_paths_for_manual_font_embedding()
-        if not pdf_paths:
-            self.view.show_warning_message("⚠️ 未选择 PDF", "请先在左侧待处理队列中选中需要嵌入缺失字体的 PDF 文件。")
-            return
-
-        self.view.show_manual_font_embedding_dialog(
-            pdf_paths,
-            lambda paths=tuple(pdf_paths): self._open_pdf_paths_in_acrobat_for_font_embedding(list(paths)),
-        )
 
     def check_updates_on_startup(self):
         self.updates.check_updates_on_startup()
