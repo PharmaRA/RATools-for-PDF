@@ -58,7 +58,7 @@ class Palette:
     text_faint: str    # 最弱 (占位 / 分区标题)
     text_on_primary: str
 
-    # --- 主色 (靛蓝) ---
+    # --- 主色 (企业蓝) ---
     primary: str
     primary_hover: str
     primary_pressed: str
@@ -114,7 +114,7 @@ class Palette:
 
 
 # ---------------------------------------------------------------------------
-# 现代精致亮色 —— 靛蓝 #4F46E5
+# 现代精致亮色 —— 企业蓝 #2563EB
 # ---------------------------------------------------------------------------
 LIGHT = Palette(
     name="light",
@@ -136,16 +136,16 @@ LIGHT = Palette(
     text_faint="#9AA2AF",
     text_on_primary="#FFFFFF",
 
-    primary="#4F46E5",
-    primary_hover="#4338CA",
-    primary_pressed="#3730A3",
-    primary_soft="#EEF2FF",
-    primary_soft_border="#C7D2FE",
-    primary_text="#4338CA",
-    primary_disabled="#C7D2FE",
+    primary="#2563EB",
+    primary_hover="#1D4ED8",
+    primary_pressed="#1E40AF",
+    primary_soft="#EFF6FF",
+    primary_soft_border="#BFDBFE",
+    primary_text="#1D4ED8",
+    primary_disabled="#BFDBFE",
 
-    selection_bg="#E0E7FF",
-    selection_text="#3730A3",
+    selection_bg="#DBEAFE",
+    selection_text="#1E40AF",
 
     danger="#EF4444",
     danger_hover="#DC2626",
@@ -162,9 +162,10 @@ LIGHT = Palette(
     warning_text="#92400E",
     warning_soft="#FFF7ED",
 
-    info="#3B82F6",
-    info_text="#1D4ED8",
-    info_soft="#EFF6FF",
+    # 主色转蓝后 info 挪到天蓝色系，保持"进行中/预检"与品牌色可区分
+    info="#0EA5E9",
+    info_text="#0369A1",
+    info_soft="#F0F9FF",
 
     scrollbar_handle="#CBD5E1",
     scrollbar_handle_hover="#94A3B8",
@@ -200,16 +201,16 @@ DARK = Palette(
     text_faint="#6B7280",
     text_on_primary="#FFFFFF",
 
-    primary="#6366F1",
-    primary_hover="#7C7EF6",
-    primary_pressed="#4F46E5",
-    primary_soft="#262A45",
-    primary_soft_border="#4F46E5",
-    primary_text="#C7D2FE",
-    primary_disabled="#3A3F63",
+    primary="#3B82F6",
+    primary_hover="#60A5FA",
+    primary_pressed="#2563EB",
+    primary_soft="#1E2B45",
+    primary_soft_border="#2563EB",
+    primary_text="#BFDBFE",
+    primary_disabled="#34425F",
 
-    selection_bg="#312E5C",
-    selection_text="#E0E7FF",
+    selection_bg="#1E3A8A",
+    selection_text="#DBEAFE",
 
     danger="#F87171",
     danger_hover="#EF4444",
@@ -226,9 +227,9 @@ DARK = Palette(
     warning_text="#FCD34D",
     warning_soft="#3A2E1A",
 
-    info="#60A5FA",
-    info_text="#93C5FD",
-    info_soft="#1E2A3D",
+    info="#38BDF8",
+    info_text="#7DD3FC",
+    info_soft="#16293D",
 
     scrollbar_handle="#3A404C",
     scrollbar_handle_hover="#4B5563",
