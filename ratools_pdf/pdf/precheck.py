@@ -5,6 +5,8 @@ from urllib.parse import unquote, urlparse
 
 import fitz
 
+from ratools_pdf.config import rules_catalog
+
 
 def _processor_cls():
     from ratools_pdf.pdf.processor import PDFProcessor
@@ -12,7 +14,7 @@ def _processor_cls():
 
 
 def _option_title(option_id):
-    return _processor_cls().PRECHECK_OPTION_TITLES.get(option_id, option_id)
+    return rules_catalog.option_title(option_id)
 
 
 def _precheck_option_matches_selected(option_id, selected_options):
@@ -47,41 +49,9 @@ def _filtered_precheck_options(selected_options):
             filtered.update(aliases & selected_options)
     return filtered
 
-PRECHECK_OPTION_TITLES = {
-    "open_page_first": "设为首页打开",
-    "page_layout_default": "重置页面布局",
-    "zoom_default": "重置缩放比例",
-    "initial_view_bookmarks_and_page": "设置导览标签",
-    "collapse_all_bookmarks": "折叠所有书签",
-    "title_from_filename": "同步文件名为标题",
-    "bookmark_inherit_zoom": "书签设为承前缩放",
-    "bookmark_open_new_window": "书签动作改为新窗口打开",
-    "bookmark_remove_external_links": "删除书签中的外部链接",
-    "bookmark_remove_invalid": "删除失效书签",
-    "bookmark_remove_unknown_actions": "删除未知动作书签",
-    "link_abs_to_rel_path": "外部文件链接转相对路径",
-    "link_inherit_zoom": "超链接设为承前缩放",
-    "link_open_new_window": "超链接动作改为新窗口打开",
-    "link_text_blue": "链接文本设为蓝色",
-    "link_black_border": "链接区域加黑框",
-    "link_bordered_to_blue_border": "标准化有框链接",
-    "link_unbordered_blue_to_blue_border": "标准化无框蓝字链接",
-    "link_remove_border": "清除所有链接边框",
-    "cleanup_remove_external_uri": "删除外部URI链接",
-    "cleanup_remove_external_uri_and_text_black": "删除外部URI链接并去色",
-    "cleanup_remove_invalid_links": "清理失效超链接",
-    "cleanup_remove_invalid_links_and_text_black": "清理失效链接并去色",
-    "cleanup_remove_unknown_action_links": "清理非标准动作链接",
-    "cleanup_remove_dynamic_content": "彻底清除动态内容 (JS/3D)",
-    "cleanup_remove_attachments": "移除所有内嵌附件",
-    "cleanup_remove_tags": "移除结构化标签",
-    "cleanup_remove_annotations": "清理所有高亮/批注",
-    "cleanup_remove_metadata": "清空文档元数据",
-    "cleanup_remove_all_links_bookmarks": "移除全部链接和书签",
-    "convert_pdf_version": "PDF版本转换",
-    "remove_pdf_restrictions": "PDF解除权限限制",
-    "fast_web_view": "启用线性化 (快速网页浏览)",
-}
+# 标题唯一来源是 config.rules_catalog（与 UI 勾选框同一份文案）。
+# 保留此别名以兼容 PDFProcessor.PRECHECK_OPTION_TITLES 的历史访问路径。
+PRECHECK_OPTION_TITLES = dict(rules_catalog.OPTION_TITLES)
 
 PRECHECK_DETECTABLE_OPTIONS = {
     "open_page_first",
@@ -380,7 +350,7 @@ def _add_precheck_suggestion(suggestions, option_id, reason):
         return
     suggestions[option_id] = {
         "matched": True,
-        "title": _processor_cls().PRECHECK_OPTION_TITLES.get(option_id, option_id),
+        "title": rules_catalog.option_title(option_id),
         "reason": reason,
     }
 
