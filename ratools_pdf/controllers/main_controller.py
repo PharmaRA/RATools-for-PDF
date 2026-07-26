@@ -15,6 +15,7 @@ from ratools_pdf.controllers.io_actions import (
     _collect_ectd_rename_plan,
     _io_action_metadata,
     _normalize_io_action_types,
+    common_base_dir,
 )
 from ratools_pdf.controllers.log_export import (
     _select_log_rows_for_export,
@@ -117,6 +118,22 @@ class MainController(QObject):
     def _is_precheck_running(self):
         precheck_worker = getattr(self, "precheck_worker", None)
         return bool(precheck_worker and precheck_worker.isRunning())
+
+    def ensure_idle(self, action_label):
+        """统一忙碌互斥守卫：有任务在跑时弹提示并返回 False。
+
+        action_label 用于拼接提示文案，如 "移除队列项" → "请等待当前批量处理结束后再移除队列项。"
+        """
+        if self.worker and self.worker.isRunning():
+            self.view.show_warning_message("⚠️ 正在处理中", f"请等待当前批量处理结束后再{action_label}。")
+            return False
+        if self._is_precheck_running():
+            self.view.show_warning_message("⚠️ 正在预检", f"请等待当前预检结束后再{action_label}。")
+            return False
+        if self._is_detection_running():
+            self.view.show_warning_message("⚠️ 正在检测", f"请等待当前检测结束后再{action_label}。")
+            return False
+        return True
 
     def _mark_precheck_stale(self):
         self.precheck_result_current = False
@@ -559,14 +576,7 @@ class MainController(QObject):
         处理树节点的移除操作。
         逻辑：递归收集所有选中的文件路径 -> 更新后台数据 -> 删除 UI 节点 -> 自动清理空文件夹
         """
-        if self.worker and self.worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再移除队列项。")
-            return
-        if self._is_precheck_running():
-            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再移除队列项。")
-            return
-        if self._is_detection_running():
-            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测结束后再移除队列项。")
+        if not self.ensure_idle("移除队列项"):
             return
 
         paths_to_remove = set()
@@ -679,6 +689,7 @@ class MainController(QObject):
             self.add_files(file_paths)
 
     def add_files(self, paths):
+        # 批量处理运行中允许追加文件（历史行为），只挡预检与检测
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再添加文件。")
             return
@@ -702,12 +713,8 @@ class MainController(QObject):
                 self.view.show_info_message("ℹ️ 提示", "添加的文件或文件夹中没有新的 PDF 文件，或文件已存在于列表中。")
             return
 
-        # 智能算法：获取这一次批量拖入文件的公共根路径
-        dirs = [os.path.dirname(os.path.abspath(p)) for p in to_add]
-        try:
-            common_base = os.path.commonpath(dirs)
-        except ValueError:
-            common_base = ""  # 如果跨盘符（如C盘和D盘），则降级使用绝对路径树
+        # 智能算法：获取这一次批量拖入文件的公共根路径（跨盘符时降级为绝对路径树）
+        common_base = common_base_dir(to_add)
 
         for path in to_add:
             self.loaded_files.append(path)
@@ -793,14 +800,7 @@ class MainController(QObject):
             self.add_files([folder_path])
 
     def clear_list(self):
-        if self.worker and self.worker.isRunning():
-            self.view.show_warning_message("⚠️ 正在处理中", "请等待当前批量处理结束后再清空待处理队列。")
-            return
-        if self._is_precheck_running():
-            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再清空待处理队列。")
-            return
-        if self._is_detection_running():
-            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测结束后再清空待处理队列。")
+        if not self.ensure_idle("清空待处理队列"):
             return
 
         if not self.loaded_files:
@@ -913,11 +913,7 @@ class MainController(QObject):
             out_dir = os.path.join(user_selected_dir, "RATools_Output")
             self.last_output_dir = out_dir
 
-            try:
-                dirs = [os.path.dirname(os.path.abspath(f)) for f in processing_files]
-                common_base = os.path.commonpath(dirs)
-            except ValueError:
-                common_base = ""
+            common_base = common_base_dir(processing_files)
 
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("■ 停止处理")
@@ -1147,11 +1143,7 @@ class MainController(QObject):
         self.view.show_error_message(f"❌ {kind_title}失败", f"检测过程中发生错误：\n{error_msg}")
 
     def _get_loaded_files_common_base(self):
-        try:
-            dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
-            return os.path.commonpath(dirs)
-        except ValueError:
-            return ""
+        return common_base_dir(self.loaded_files)
 
     def handle_io_wizard(self, default_data_kind):
         if not self.loaded_files:
@@ -1280,26 +1272,26 @@ class MainController(QObject):
             self.process_log_rows.append(row)
             self.process_log_starts.pop(file_path, None)
 
-    def precheck_finished(self, summary):
-        self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
+    def _reset_precheck_ui(self):
+        """预检结束/异常后的按钮与状态复位（finished 与 error 共用）。"""
         self.view.btn_precheck.setText("🔎 预检")
         self.view.btn_precheck.setProperty("precheckMode", False)
-        self.precheck_result_current = True
-        self.view.btn_precheck.setProperty("precheckResultCurrent", True)
-        self.view.btn_precheck.hide()
         self.view.btn_start.setEnabled(True)
         self.precheck_files = []
         self.precheck_worker = None
+
+    def precheck_finished(self, summary):
+        self.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"
+        self._reset_precheck_ui()
+        self.precheck_result_current = True
+        self.view.btn_precheck.setProperty("precheckResultCurrent", True)
+        self.view.btn_precheck.hide()
         self.view.refresh_selection_summary()
         self.view.show_info_message("🔎 预检完成", summary)
 
     def precheck_error(self, error_msg):
         self.process_logs += f"\n{'!' * 56}\n[预检错误] {error_msg}\n{'!' * 56}\n"
-        self.view.btn_precheck.setText("🔎 预检")
-        self.view.btn_precheck.setProperty("precheckMode", False)
-        self.view.btn_start.setEnabled(True)
-        self.precheck_files = []
-        self.precheck_worker = None
+        self._reset_precheck_ui()
         self.view.refresh_selection_summary()
         self.view.show_error_message("❌ 预检失败", f"预检过程中发生错误：\n{error_msg}")
 
@@ -1328,21 +1320,14 @@ class MainController(QObject):
             lines.extend(["", worker_summary])
         return "\n".join(lines)
 
-    def processing_finished(self, summary):
-        batch_summary = self._build_batch_result_summary(summary)
-        self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{batch_summary}\n{'=' * 56}\n"
+    def _reset_processing_ui(self):
+        """批处理结束/异常后的按钮与状态复位（finished 与 error 共用）。"""
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("▶ 开始批量处理")
         self.view.btn_start.setProperty("stopMode", False)
-        self.precheck_result_current = False
-        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_precheck.show()
-        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
-        self.view.btn_apply_precheck.hide()
-        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
-        self.view.btn_process_precheck_suggested.hide()
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
@@ -1360,6 +1345,18 @@ class MainController(QObject):
         self.processing_parallel_mode = False
         self.processing_worker_count = 1
         self._last_processing_hint = ""
+
+    def processing_finished(self, summary):
+        batch_summary = self._build_batch_result_summary(summary)
+        self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{batch_summary}\n{'=' * 56}\n"
+        # 处理会改变文件状态，上一轮预检结果随之失效
+        self.precheck_result_current = False
+        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
+        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
+        self.view.btn_apply_precheck.hide()
+        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
+        self.view.btn_process_precheck_suggested.hide()
+        self._reset_processing_ui()
 
         if "任务已停止" in summary:
             self.view.show_info_message("⏹️ 已停止", batch_summary)
@@ -1375,29 +1372,7 @@ class MainController(QObject):
 
     def processing_error(self, error_msg):
         self.process_logs += f"\n{'!' * 56}\n[致命错误] {error_msg}\n{'!' * 56}\n"
-        self.processing_timer.stop()
-        self.view.processing_hint_label.setText("")
-        self.view.btn_start.setEnabled(True)
-        self.view.btn_start.setText("▶ 开始批量处理")
-        self.view.btn_start.setProperty("stopMode", False)
-        self.view.btn_precheck.show()
-        self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
-        self.view.btn_skip_current.setEnabled(False)
-        self.view.btn_skip_current.hide()
-        self.view.btn_skip_current.setText("⏭ 跳过当前文件")
-        self.view.btn_skip_current.setToolTip("")
-        self.view.style().unpolish(self.view.btn_start)
-        self.view.style().polish(self.view.btn_start)
-        self.view.refresh_selection_summary()
-        self.processing_started_at = None
-        self.processing_total = 0
-        self.processing_done = 0
-        self.processing_done_paths.clear()
-        self.processing_files = []
-        self.processing_current_file = ""
-        self.processing_parallel_mode = False
-        self.processing_worker_count = 1
-        self._last_processing_hint = ""
+        self._reset_processing_ui()
         self.view.show_error_message("❌ 处理异常", f"处理过程中发生错误：\n{error_msg}")
 
     def _refresh_processing_hint(self, status_text="", file_path=""):
@@ -1487,11 +1462,10 @@ class MainController(QObject):
         elif self.view.settings_dialog.default_output_edit.text().strip() and os.path.isdir(self.view.settings_dialog.default_output_edit.text().strip()):
             default_dir = self.view.settings_dialog.default_output_edit.text().strip()
         elif self.loaded_files:
-            try:
-                file_dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
-                default_dir = os.path.commonpath(file_dirs)
-            except ValueError:
-                default_dir = os.path.dirname(os.path.abspath(self.loaded_files[0]))
+            default_dir = common_base_dir(
+                self.loaded_files,
+                fallback=os.path.dirname(os.path.abspath(self.loaded_files[0])),
+            )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"RATools_process_logs_{timestamp}.csv"
@@ -1534,11 +1508,10 @@ class MainController(QObject):
         if default_output_dir and os.path.isdir(default_output_dir):
             default_dir = default_output_dir
         elif self.loaded_files:
-            try:
-                file_dirs = [os.path.dirname(os.path.abspath(f)) for f in self.loaded_files]
-                default_dir = os.path.commonpath(file_dirs)
-            except ValueError:
-                default_dir = os.path.dirname(os.path.abspath(self.loaded_files[0]))
+            default_dir = common_base_dir(
+                self.loaded_files,
+                fallback=os.path.dirname(os.path.abspath(self.loaded_files[0])),
+            )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"RATools_precheck_results_{timestamp}.csv"

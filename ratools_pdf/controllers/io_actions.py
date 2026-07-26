@@ -2,6 +2,15 @@ import os
 import re
 
 
+def common_base_dir(file_paths, fallback=""):
+    """求一组文件所在目录的公共根；跨盘符等场景返回 fallback。"""
+    try:
+        dirs = [os.path.dirname(os.path.abspath(p)) for p in file_paths]
+        return os.path.commonpath(dirs)
+    except ValueError:
+        return fallback
+
+
 def _safe_relative_subdir(file_path, common_base):
     if not common_base:
         return ''
