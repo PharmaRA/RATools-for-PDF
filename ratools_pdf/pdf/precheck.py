@@ -6,11 +6,7 @@ from urllib.parse import unquote, urlparse
 import fitz
 
 from ratools_pdf.config import rules_catalog
-
-
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
+from ratools_pdf.pdf import qpdf
 
 
 def _option_title(option_id):
@@ -23,13 +19,13 @@ def _precheck_option_matches_selected(option_id, selected_options):
     selected_options = set(selected_options or [])
     if option_id in selected_options:
         return True
-    return bool(_processor_cls().PRECHECK_OPTION_ALIASES.get(option_id, set()) & selected_options)
+    return bool(PRECHECK_OPTION_ALIASES.get(option_id, set()) & selected_options)
 
 
 def _selected_precheck_option_id(option_id, selected_options):
     if selected_options is None or option_id in set(selected_options or []):
         return option_id
-    for alias in _processor_cls().PRECHECK_OPTION_ALIASES.get(option_id, set()):
+    for alias in PRECHECK_OPTION_ALIASES.get(option_id, set()):
         if alias in selected_options:
             return alias
     return option_id
@@ -41,9 +37,9 @@ def _filtered_precheck_options(selected_options):
     selected_options = set(selected_options or [])
     filtered = set()
     for option_id in selected_options:
-        if option_id in _processor_cls().PRECHECK_DETECTABLE_OPTIONS:
+        if option_id in PRECHECK_DETECTABLE_OPTIONS:
             filtered.add(option_id)
-    for option_id, aliases in _processor_cls().PRECHECK_OPTION_ALIASES.items():
+    for option_id, aliases in PRECHECK_OPTION_ALIASES.items():
         if option_id in selected_options or aliases & selected_options:
             filtered.add(option_id)
             filtered.update(aliases & selected_options)
@@ -117,7 +113,7 @@ def _normalize_font_name(font_name):
 
 
 def _is_base14_font(font_name):
-    return _processor_cls()._normalize_font_name(font_name) in _processor_cls().BASE14_FONT_NAMES
+    return _normalize_font_name(font_name) in BASE14_FONT_NAMES
 
 
 def _format_font_page_numbers(page_numbers):
@@ -171,7 +167,7 @@ def _font_object_has_embedded_file(doc, xref, seen=None):
 
     known = True
     for ref in refs:
-        embedded, child_known = _processor_cls()._font_object_has_embedded_file(doc, ref, seen)
+        embedded, child_known = _font_object_has_embedded_file(doc, ref, seen)
         known = known and child_known
         if embedded:
             return True, True
@@ -185,7 +181,7 @@ def _font_tuple_value(font_tuple, index):
 
 
 def _font_tuple_embedded_fallback(font_tuple):
-    ext = str(_processor_cls()._font_tuple_value(font_tuple, 1) or "").strip().lower()
+    ext = str(_font_tuple_value(font_tuple, 1) or "").strip().lower()
     if ext and ext not in {"n/a", "none", "null"}:
         return True, True
     if ext in {"n/a", "none", "null"}:
@@ -202,20 +198,20 @@ def _collect_font_precheck_findings(doc):
             continue
 
         for font_tuple in page_fonts:
-            original_name = str(_processor_cls()._font_tuple_value(font_tuple, 3) or "").strip()
+            original_name = str(_font_tuple_value(font_tuple, 3) or "").strip()
             if not original_name:
-                original_name = str(_processor_cls()._font_tuple_value(font_tuple, 4) or "").strip()
-            normalized_name = _processor_cls()._normalize_font_name(original_name)
+                original_name = str(_font_tuple_value(font_tuple, 4) or "").strip()
+            normalized_name = _normalize_font_name(original_name)
             if not normalized_name:
                 continue
 
             try:
-                xref = int(_processor_cls()._font_tuple_value(font_tuple, 0) or 0)
+                xref = int(_font_tuple_value(font_tuple, 0) or 0)
             except Exception:
                 xref = 0
-            embedded, known = _processor_cls()._font_object_has_embedded_file(doc, xref)
+            embedded, known = _font_object_has_embedded_file(doc, xref)
             if not embedded and known:
-                embedded, known = _processor_cls()._font_tuple_embedded_fallback(font_tuple)
+                embedded, known = _font_tuple_embedded_fallback(font_tuple)
 
             entry = fonts.setdefault(normalized_name, {
                 "font_name": original_name,
@@ -225,7 +221,7 @@ def _collect_font_precheck_findings(doc):
                 "has_unembedded": False,
                 "has_embedded": False,
                 "embedding_unknown": False,
-                "base14": _processor_cls()._is_base14_font(normalized_name),
+                "base14": _is_base14_font(normalized_name),
             })
             entry["original_names"].add(original_name)
             entry["pages"].add(page_index)
@@ -292,7 +288,7 @@ def _collect_font_precheck_findings(doc):
         if item["substitution_risk"]:
             labels.append("替代风险")
         detail_parts.append(
-            f"{item['normalized_name']}({_processor_cls()._format_font_page_numbers(item['pages'])}，{'，'.join(labels)})"
+            f"{item['normalized_name']}({_format_font_page_numbers(item['pages'])}，{'，'.join(labels)})"
         )
 
     return {
@@ -325,7 +321,7 @@ def _collect_font_precheck_for_path(pdf_path):
                 "font_details": "",
                 "font_findings": [],
             }
-        font_precheck = _processor_cls()._collect_font_precheck_findings(doc)
+        font_precheck = _collect_font_precheck_findings(doc)
         font_precheck["available"] = True
         font_precheck["error"] = ""
         return font_precheck
@@ -436,7 +432,7 @@ def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, 
             if kind == fitz.LINK_GOTOR
             else "链接目标完整性检查：外部文件链接目标不存在"
         )
-        _processor_cls()._add_precheck_report_finding(
+        _add_precheck_report_finding(
             suggestions,
             finding_id,
             title,
@@ -444,27 +440,27 @@ def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, 
         )
         return
 
-    decoded_path, target_path, is_relative = _processor_cls()._resolve_external_file_target(base_dir, file_path)
+    decoded_path, target_path, is_relative = _resolve_external_file_target(base_dir, file_path)
     if not decoded_path:
         return
 
     if not os.path.isfile(target_path):
         if kind == fitz.LINK_GOTOR:
-            _processor_cls()._add_precheck_report_finding(
+            _add_precheck_report_finding(
                 suggestions,
                 "link_target_integrity_gotor_missing_file",
                 "链接目标完整性检查：GoToR目标文件不存在",
                 f"{source_label} 指向的目标文件不存在: {decoded_path}",
             )
         else:
-            _processor_cls()._add_precheck_report_finding(
+            _add_precheck_report_finding(
                 suggestions,
                 "link_target_integrity_missing_file",
                 "链接目标完整性检查：外部文件链接目标不存在",
                 f"{source_label} 指向的目标文件不存在: {decoded_path}",
             )
         if is_relative:
-            _processor_cls()._add_precheck_report_finding(
+            _add_precheck_report_finding(
                 suggestions,
                 "link_target_integrity_broken_relative_path",
                 "链接目标完整性检查：eCTD相对路径链接断链",
@@ -475,7 +471,7 @@ def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, 
     if kind != fitz.LINK_GOTOR:
         return
 
-    page_count = _processor_cls()._read_target_pdf_page_count(target_path)
+    page_count = _read_target_pdf_page_count(target_path)
     if page_count is None:
         return
     try:
@@ -483,7 +479,7 @@ def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, 
     except Exception:
         target_page_index = -1
     if target_page_index < 0 or target_page_index >= page_count:
-        _processor_cls()._add_precheck_report_finding(
+        _add_precheck_report_finding(
             suggestions,
             "link_target_integrity_gotor_page_out_of_range",
             "链接目标完整性检查：GoToR目标页码越界",
@@ -499,7 +495,7 @@ def _catalog_key(doc, catalog_xref, key):
 
 
 def _catalog_key_is_present(doc, catalog_xref, key):
-    kind, value = _processor_cls()._catalog_key(doc, catalog_xref, key)
+    kind, value = _catalog_key(doc, catalog_xref, key)
     return kind != "null" and value != "null"
 
 
@@ -514,8 +510,8 @@ def _dereference_xref_value(doc, value):
 
 
 def _catalog_key_resolved_value(doc, catalog_xref, key):
-    _kind, value = _processor_cls()._catalog_key(doc, catalog_xref, key)
-    return _processor_cls()._dereference_xref_value(doc, value)
+    _kind, value = _catalog_key(doc, catalog_xref, key)
+    return _dereference_xref_value(doc, value)
 
 
 def _pdf_has_signature(input_path):
@@ -708,7 +704,7 @@ def _collect_annotation_findings_for_path(pdf_path):
         doc = fitz.open(pdf_path)
         if doc.needs_pass:
             return {"available": False, "error": "该PDF需要密码，无法执行批注检测", "has_annotations": False, "count": 0, "summary": "", "details": ""}
-        findings = _processor_cls()._collect_annotation_findings(doc)
+        findings = _collect_annotation_findings(doc)
         findings["available"] = True
         findings["error"] = ""
         return findings
@@ -734,7 +730,7 @@ def _collect_broken_reference_findings_for_path(pdf_path):
         doc = fitz.open(pdf_path)
         if doc.needs_pass:
             return {"available": False, "error": "该PDF需要密码，无法执行失效引用检测", "has_broken_reference": False, "count": 0, "summary": "", "details": ""}
-        findings = _processor_cls()._collect_broken_reference_findings(doc)
+        findings = _collect_broken_reference_findings(doc)
         findings["available"] = True
         findings["error"] = ""
         return findings
@@ -749,18 +745,18 @@ def _collect_broken_reference_findings_for_path(pdf_path):
 
 
 def build_precheck_report(input_path, selected_options=None):
-    selected_options = _processor_cls()._filtered_precheck_options(selected_options)
+    selected_options = _filtered_precheck_options(selected_options)
 
     def wants(*option_ids):
         if selected_options is None:
             return True
-        return any(_processor_cls()._precheck_option_matches_selected(option_id, selected_options) for option_id in option_ids)
+        return any(_precheck_option_matches_selected(option_id, selected_options) for option_id in option_ids)
 
     def add_suggestion(option_id, reason):
         if not wants(option_id):
             return
-        suggestion_id = _processor_cls()._selected_precheck_option_id(option_id, selected_options)
-        _processor_cls()._add_precheck_suggestion(suggestions, suggestion_id, reason)
+        suggestion_id = _selected_precheck_option_id(option_id, selected_options)
+        _add_precheck_suggestion(suggestions, suggestion_id, reason)
 
     report = {
         "available": False,
@@ -804,21 +800,21 @@ def build_precheck_report(input_path, selected_options=None):
             add_suggestion("title_from_filename", "PDF标题属性与文件名不一致或为空")
 
         if wants("initial_view_bookmarks_and_page"):
-            page_mode_kind, page_mode_value = _processor_cls()._catalog_key(doc, catalog_xref, "PageMode")
+            page_mode_kind, page_mode_value = _catalog_key(doc, catalog_xref, "PageMode")
             if has_bookmarks and not (page_mode_kind == "name" and page_mode_value == "/UseOutlines"):
                 add_suggestion("initial_view_bookmarks_and_page", "文档包含书签，但打开时未设置为显示书签面板")
             elif not has_bookmarks and page_mode_kind == "name" and page_mode_value != "/UseNone":
                 add_suggestion("initial_view_bookmarks_and_page", "文档不含书签，但初始导览标签不是页面视图")
 
-        if wants("page_layout_default") and _processor_cls()._catalog_key_is_present(doc, catalog_xref, "PageLayout"):
+        if wants("page_layout_default") and _catalog_key_is_present(doc, catalog_xref, "PageLayout"):
             add_suggestion("page_layout_default", "文档设置了显式页面布局")
 
         if wants("open_page_first", "zoom_default"):
-            open_action_kind, open_action_value = _processor_cls()._catalog_key(doc, catalog_xref, "OpenAction")
+            open_action_kind, open_action_value = _catalog_key(doc, catalog_xref, "OpenAction")
         else:
             open_action_kind, open_action_value = "null", "null"
         if open_action_kind != "null" and doc.page_count > 0:
-            open_action_value = _processor_cls()._dereference_xref_value(doc, open_action_value)
+            open_action_value = _dereference_xref_value(doc, open_action_value)
             first_page_ref = f"{doc[0].xref} 0 R"
             compact_action = open_action_value.replace(" ", "")
             if wants("open_page_first") and first_page_ref.replace(" ", "") not in compact_action:
@@ -854,7 +850,7 @@ def build_precheck_report(input_path, selected_options=None):
                 if wants("bookmark_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
                     add_suggestion("bookmark_open_new_window", "部分外部文件书签未设置为新窗口打开")
                 if selected_options is None:
-                    _processor_cls()._add_link_target_integrity_findings(
+                    _add_link_target_integrity_findings(
                         suggestions,
                         base_dir,
                         kind,
@@ -910,7 +906,7 @@ def build_precheck_report(input_path, selected_options=None):
                     if wants("link_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
                         add_suggestion("link_open_new_window", "部分外部文件链接未设置为新窗口打开")
                     if selected_options is None:
-                        _processor_cls()._add_link_target_integrity_findings(
+                        _add_link_target_integrity_findings(
                             suggestions,
                             base_dir,
                             kind,
@@ -945,8 +941,8 @@ def build_precheck_report(input_path, selected_options=None):
             add_suggestion("cleanup_remove_attachments", f"文档包含 {doc.embfile_count()} 个内嵌附件")
 
         if wants("cleanup_remove_tags") and (
-            _processor_cls()._catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
-            or _processor_cls()._catalog_key_is_present(doc, catalog_xref, "MarkInfo")
+            _catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
+            or _catalog_key_is_present(doc, catalog_xref, "MarkInfo")
         ):
             add_suggestion("cleanup_remove_tags", "文档包含结构化标签信息")
 
@@ -956,7 +952,7 @@ def build_precheck_report(input_path, selected_options=None):
                 for key, value in meta.items()
                 if key not in ["format", "encryption"] and str(value or "").strip()
             ]
-            if metadata_values or _processor_cls()._catalog_key_is_present(doc, catalog_xref, "PieceInfo"):
+            if metadata_values or _catalog_key_is_present(doc, catalog_xref, "PieceInfo"):
                 add_suggestion("cleanup_remove_metadata", "文档包含可清理的元数据")
 
         if wants("cleanup_remove_dynamic_content"):
@@ -965,26 +961,26 @@ def build_precheck_report(input_path, selected_options=None):
                 catalog_object = doc.xref_object(catalog_xref)
             except Exception:
                 catalog_object = ""
-            names_kind, _names_value = _processor_cls()._catalog_key(doc, catalog_xref, "Names")
-            names_value = _processor_cls()._catalog_key_resolved_value(doc, catalog_xref, "Names")
+            names_kind, _names_value = _catalog_key(doc, catalog_xref, "Names")
+            names_value = _catalog_key_resolved_value(doc, catalog_xref, "Names")
             dynamic_probe = f"{catalog_object}\n{names_value}"
             if names_kind != "null" and any(marker in dynamic_probe for marker in ["/JavaScript", "/JS", "/RichMedia", "/3D"]):
                 add_suggestion("cleanup_remove_dynamic_content", "文档包含 JavaScript、3D 或富媒体入口")
 
         if wants("convert_pdf_version"):
-            pdf_version = _processor_cls()._read_pdf_header_version(input_path)
+            pdf_version = qpdf._read_pdf_header_version(input_path)
             if pdf_version and pdf_version != "1.7":
                 add_suggestion("convert_pdf_version", f"当前PDF版本为 {pdf_version}，不是 1.7")
 
-        if wants("fast_web_view") and not _processor_cls()._is_pdf_linearized(input_path):
+        if wants("fast_web_view") and not qpdf._is_pdf_linearized(input_path):
             add_suggestion("fast_web_view", "文档未启用线性化快速网页浏览")
 
-        if wants("remove_pdf_restrictions") and _processor_cls()._qpdf_reports_restrictions(input_path):
+        if wants("remove_pdf_restrictions") and qpdf._qpdf_reports_restrictions(input_path):
             add_suggestion("remove_pdf_restrictions", "文档存在打印、复制或编辑权限限制")
 
         if selected_options is None:
             try:
-                font_precheck = _processor_cls()._collect_font_precheck_findings(doc)
+                font_precheck = _collect_font_precheck_findings(doc)
                 report["font_summary"] = font_precheck.get("font_summary", "")
                 report["font_details"] = font_precheck.get("font_details", "")
                 report["font_findings"] = font_precheck.get("font_findings", [])
@@ -992,7 +988,7 @@ def build_precheck_report(input_path, selected_options=None):
                     reason = report["font_summary"]
                     if report["font_details"]:
                         reason = f"{reason}；明细：{report['font_details']}"
-                    _processor_cls()._add_precheck_report_finding(
+                    _add_precheck_report_finding(
                         suggestions,
                         "font_precheck_review",
                         "字体预检：需要复核",
@@ -1002,14 +998,14 @@ def build_precheck_report(input_path, selected_options=None):
                 pass
 
             try:
-                annotation_precheck = _processor_cls()._collect_annotation_findings(doc)
+                annotation_precheck = _collect_annotation_findings(doc)
                 if annotation_precheck.get("has_annotations"):
                     report["annotation_summary"] = annotation_precheck.get("summary", "")
                     report["annotation_details"] = annotation_precheck.get("details", "")
                     reason = report["annotation_summary"]
                     if report["annotation_details"]:
                         reason = f"{reason}；明细：{report['annotation_details']}"
-                    _processor_cls()._add_precheck_report_finding(
+                    _add_precheck_report_finding(
                         suggestions,
                         "annotation_precheck_review",
                         "批注检查：需要复核",
@@ -1019,14 +1015,14 @@ def build_precheck_report(input_path, selected_options=None):
                 pass
 
             try:
-                broken_reference_precheck = _processor_cls()._collect_broken_reference_findings(doc)
+                broken_reference_precheck = _collect_broken_reference_findings(doc)
                 if broken_reference_precheck.get("has_broken_reference"):
                     report["broken_reference_summary"] = broken_reference_precheck.get("summary", "")
                     report["broken_reference_details"] = broken_reference_precheck.get("details", "")
                     reason = report["broken_reference_summary"]
                     if report["broken_reference_details"]:
                         reason = f"{reason}；明细：{report['broken_reference_details']}"
-                    _processor_cls()._add_precheck_report_finding(
+                    _add_precheck_report_finding(
                         suggestions,
                         "broken_reference_precheck_review",
                         "失效引用/链接文本检查：需要复核",
@@ -1066,9 +1062,9 @@ def resolve_processing_options(input_path, options, processing_mode="smart"):
             "log": "处理模式: 全部处理（强制执行全部勾选规则）",
         }
 
-    actionable_selected = selected_options - _processor_cls().NON_PROCESSING_OPTIONS
-    unsupported = actionable_selected - _processor_cls().PRECHECK_DETECTABLE_OPTIONS
-    report = _processor_cls().build_precheck_report(input_path, selected_options=actionable_selected)
+    actionable_selected = selected_options - NON_PROCESSING_OPTIONS
+    unsupported = actionable_selected - PRECHECK_DETECTABLE_OPTIONS
+    report = build_precheck_report(input_path, selected_options=actionable_selected)
     if not report.get("available"):
         reason = report.get("error") or "预检不可用"
         return {
@@ -1086,32 +1082,32 @@ def resolve_processing_options(input_path, options, processing_mode="smart"):
         for option_id, item in report.get("suggestions", {}).items()
         if not item.get("report_only")
     }
-    effective = set(selected_options & _processor_cls().NON_PROCESSING_OPTIONS)
+    effective = set(selected_options & NON_PROCESSING_OPTIONS)
     effective.update(actionable_selected & suggested)
     effective.update(unsupported)
 
     skipped = sorted(
         option_id
         for option_id in actionable_selected
-        if option_id in _processor_cls().PRECHECK_DETECTABLE_OPTIONS and option_id not in effective
+        if option_id in PRECHECK_DETECTABLE_OPTIONS and option_id not in effective
     )
     forced_unsupported = sorted(unsupported)
     log_parts = ["处理模式: 智能处理（仅处理预检发现的问题）"]
     if suggested:
         log_parts.append(
-            "预检命中: " + "、".join(_processor_cls()._option_title(option_id) for option_id in sorted(suggested))
+            "预检命中: " + "、".join(_option_title(option_id) for option_id in sorted(suggested))
         )
     else:
         log_parts.append("预检命中: 无")
     if forced_unsupported:
         log_parts.append(
             "无法可靠预检但已执行: "
-            + "、".join(_processor_cls()._option_title(option_id) for option_id in forced_unsupported)
+            + "、".join(_option_title(option_id) for option_id in forced_unsupported)
         )
     if skipped:
         log_parts.append(
             "已跳过未命中规则: "
-            + "、".join(_processor_cls()._option_title(option_id) for option_id in skipped)
+            + "、".join(_option_title(option_id) for option_id in skipped)
         )
     return {
         "mode": "smart",

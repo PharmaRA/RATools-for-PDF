@@ -1,11 +1,6 @@
 import fitz
 
 
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
-
-
 def _transform_rect(rect, scale, dx, dy):
     return fitz.Rect(
         rect.x0 * scale + dx,
@@ -42,7 +37,7 @@ def _resize_pages_with_padding(doc, target_rect):
     page_transforms = []
     for page in doc:
         src_rect = page.rect
-        page_target_rect = _processor_cls()._get_oriented_target_rect(target_rect, src_rect)
+        page_target_rect = _get_oriented_target_rect(target_rect, src_rect)
 
         if abs(src_rect.width - page_target_rect.width) <= 1 and abs(src_rect.height - page_target_rect.height) <= 1:
             page_transforms.append(None)
@@ -88,7 +83,7 @@ def _resize_pages_with_padding(doc, target_rect):
 
         for link in links:
             try:
-                link["from"] = _processor_cls()._transform_rect(fitz.Rect(link["from"]), scale, dx, dy)
+                link["from"] = _transform_rect(fitz.Rect(link["from"]), scale, dx, dy)
                 if link.get("kind") == fitz.LINK_GOTO and link.get("to") is not None:
                     dest_page = int(link.get("page", page_index))
                     dest_transform = page_transforms[dest_page] if 0 <= dest_page < len(page_transforms) else None
@@ -98,14 +93,14 @@ def _resize_pages_with_padding(doc, target_rect):
                         d_dy = dest_transform["dy"]
                         to_point = link.get("to")
                         if hasattr(to_point, "x") and hasattr(to_point, "y"):
-                            link["to"] = _processor_cls()._transform_point(to_point, d_scale, d_dx, d_dy)
+                            link["to"] = _transform_point(to_point, d_scale, d_dx, d_dy)
                 page.update_link(link)
             except Exception:
                 continue
 
         for annot in annots:
             try:
-                annot.set_rect(_processor_cls()._transform_rect(annot.rect, scale, dx, dy))
+                annot.set_rect(_transform_rect(annot.rect, scale, dx, dy))
                 annot.update()
             except Exception:
                 continue
@@ -133,7 +128,7 @@ def _resize_pages_with_padding(doc, target_rect):
             scale = transform["scale"]
             dx = transform["dx"]
             dy = transform["dy"]
-            dest["to"] = _processor_cls()._transform_point(to_point, scale, dx, dy)
+            dest["to"] = _transform_point(to_point, scale, dx, dy)
             toc_changed = True
 
         if toc_changed:

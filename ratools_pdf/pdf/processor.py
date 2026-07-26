@@ -69,276 +69,55 @@ class _PhaseProfiler:
         return head + ": " + " | ".join(parts)
 
 
-class PDFProcessor:
-    PRECHECK_OPTION_TITLES = precheck.PRECHECK_OPTION_TITLES
-    PRECHECK_DETECTABLE_OPTIONS = precheck.PRECHECK_DETECTABLE_OPTIONS
-    PRECHECK_OPTION_ALIASES = precheck.PRECHECK_OPTION_ALIASES
-    NON_PROCESSING_OPTIONS = precheck.NON_PROCESSING_OPTIONS
-    BASE14_FONT_NAMES = precheck.BASE14_FONT_NAMES
+def _mark_change(change_list, label):
+    if label not in change_list:
+        change_list.append(label)
 
-    @staticmethod
-    def _get_qpdf_path():
-        return qpdf._get_qpdf_path()
 
-    @staticmethod
-    def _rewrite_with_qpdf(input_pdf, output_pdf, force_version=None, linearize=False, decrypt_restrictions=False):
-        return qpdf._rewrite_with_qpdf(input_pdf, output_pdf, force_version, linearize, decrypt_restrictions)
+def _increase_change_count(change_counts, label, amount=1):
+    if amount <= 0:
+        return
+    change_counts[label] = change_counts.get(label, 0) + amount
 
-    @staticmethod
-    def _format_qpdf_error(error):
-        return qpdf._format_qpdf_error(error)
 
-    @staticmethod
-    def _option_title(option_id):
-        return precheck._option_title(option_id)
-
-    @staticmethod
-    def _precheck_option_matches_selected(option_id, selected_options):
-        return precheck._precheck_option_matches_selected(option_id, selected_options)
-
-    @staticmethod
-    def _selected_precheck_option_id(option_id, selected_options):
-        return precheck._selected_precheck_option_id(option_id, selected_options)
-
-    @staticmethod
-    def _filtered_precheck_options(selected_options):
-        return precheck._filtered_precheck_options(selected_options)
-
-    @staticmethod
-    def _normalize_font_name(font_name):
-        return precheck._normalize_font_name(font_name)
-
-    @staticmethod
-    def _is_base14_font(font_name):
-        return precheck._is_base14_font(font_name)
-
-    @staticmethod
-    def _format_font_page_numbers(page_numbers):
-        return precheck._format_font_page_numbers(page_numbers)
-
-    @staticmethod
-    def _font_object_has_embedded_file(doc, xref, seen=None):
-        return precheck._font_object_has_embedded_file(doc, xref, seen)
-
-    @staticmethod
-    def _font_tuple_value(font_tuple, index):
-        return precheck._font_tuple_value(font_tuple, index)
-
-    @staticmethod
-    def _font_tuple_embedded_fallback(font_tuple):
-        return precheck._font_tuple_embedded_fallback(font_tuple)
-
-    @staticmethod
-    def _collect_font_precheck_findings(doc):
-        return precheck._collect_font_precheck_findings(doc)
-
-    @staticmethod
-    def _font_precheck_has_embedding_risk(font_precheck):
-        return precheck._font_precheck_has_embedding_risk(font_precheck)
-
-    @staticmethod
-    def _collect_annotation_findings(doc):
-        return precheck._collect_annotation_findings(doc)
-
-    @staticmethod
-    def _collect_broken_reference_findings(doc):
-        return precheck._collect_broken_reference_findings(doc)
-
-    @staticmethod
-    def _collect_annotation_findings_for_path(pdf_path):
-        return precheck._collect_annotation_findings_for_path(pdf_path)
-
-    @staticmethod
-    def _collect_broken_reference_findings_for_path(pdf_path):
-        return precheck._collect_broken_reference_findings_for_path(pdf_path)
-
-    @staticmethod
-    def _collect_font_precheck_for_path(pdf_path):
-        return precheck._collect_font_precheck_for_path(pdf_path)
-
-    @staticmethod
-    def _add_precheck_suggestion(suggestions, option_id, reason):
-        return precheck._add_precheck_suggestion(suggestions, option_id, reason)
-
-    @staticmethod
-    def _add_precheck_report_finding(suggestions, finding_id, title, reason):
-        return precheck._add_precheck_report_finding(suggestions, finding_id, title, reason)
-
-    @staticmethod
-    def _resolve_external_file_target(base_dir, file_path):
-        return precheck._resolve_external_file_target(base_dir, file_path)
-
-    @staticmethod
-    def _read_target_pdf_page_count(target_path):
-        return precheck._read_target_pdf_page_count(target_path)
-
-    @staticmethod
-    def _add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, target_page=None, source_label="链接"):
-        return precheck._add_link_target_integrity_findings(suggestions, base_dir, kind, file_path, target_page, source_label)
-
-    @staticmethod
-    def _catalog_key(doc, catalog_xref, key):
-        return precheck._catalog_key(doc, catalog_xref, key)
-
-    @staticmethod
-    def _catalog_key_is_present(doc, catalog_xref, key):
-        return precheck._catalog_key_is_present(doc, catalog_xref, key)
-
-    @staticmethod
-    def _read_pdf_header_version(input_path):
-        return qpdf._read_pdf_header_version(input_path)
-
-    @staticmethod
-    def _is_pdf_linearized(input_path):
-        return qpdf._is_pdf_linearized(input_path)
-
-    @staticmethod
-    def _qpdf_encryption_info(input_path):
-        return qpdf._qpdf_encryption_info(input_path)
-
-    @staticmethod
-    def _dereference_xref_value(doc, value):
-        return precheck._dereference_xref_value(doc, value)
-
-    @staticmethod
-    def _catalog_key_resolved_value(doc, catalog_xref, key):
-        return precheck._catalog_key_resolved_value(doc, catalog_xref, key)
-
-    @staticmethod
-    def _qpdf_reports_restrictions(input_path):
-        return qpdf._qpdf_reports_restrictions(input_path)
-
-    @staticmethod
-    def build_precheck_report(input_path, selected_options=None):
-        return precheck.build_precheck_report(input_path, selected_options)
-
-    @staticmethod
-    def _pdf_has_signature(input_path):
-        return precheck._pdf_has_signature(input_path)
-
-    @staticmethod
-    def _mark_change(change_list, label):
-        if label not in change_list:
-            change_list.append(label)
-
-    @staticmethod
-    def _increase_change_count(change_counts, label, amount=1):
-        if amount <= 0:
-            return
-        change_counts[label] = change_counts.get(label, 0) + amount
-
-    @staticmethod
-    def _format_change_summary(change_counts, ordered_labels):
-        parts = []
-        for label in ordered_labels:
-            if label in change_counts:
-                count = change_counts[label]
-                if count > 1:
-                    parts.append(f"{label}({count}处)")
-                else:
-                    parts.append(label)
+def _format_change_summary(change_counts, ordered_labels):
+    parts = []
+    for label in ordered_labels:
+        if label in change_counts:
+            count = change_counts[label]
+            if count > 1:
+                parts.append(f"{label}({count}处)")
             else:
                 parts.append(label)
-        return "、".join(parts)
+        else:
+            parts.append(label)
+    return "、".join(parts)
 
-    @staticmethod
-    def resolve_processing_options(input_path, options, processing_mode="smart"):
-        return precheck.resolve_processing_options(input_path, options, processing_mode)
 
-    @staticmethod
-    def _transform_rect(rect, scale, dx, dy):
-        return page_layout._transform_rect(rect, scale, dx, dy)
+class PDFProcessor:
+    """pdf 层对外入口（controllers 只应使用本类的公开方法）。
 
-    @staticmethod
-    def _transform_point(point, scale, dx, dy):
-        return page_layout._transform_point(point, scale, dx, dy)
+    历史上此类还挂着 ~50 个转发内部函数的 static method 与常量别名，
+    现已收缩：内部函数请直接从 ratools_pdf.pdf 各子模块导入。
+    """
 
-    @staticmethod
-    def _get_oriented_target_rect(base_target_rect, src_rect):
-        return page_layout._get_oriented_target_rect(base_target_rect, src_rect)
+    # --- 预检 ---
+    build_precheck_report = staticmethod(precheck.build_precheck_report)
+    resolve_processing_options = staticmethod(precheck.resolve_processing_options)
+    _pdf_has_signature = staticmethod(precheck._pdf_has_signature)
 
-    @staticmethod
-    def _paper_rect_exact(size_name):
-        return page_layout._paper_rect_exact(size_name)
-
-    @staticmethod
-    def _resize_pages_with_padding(doc, target_rect):
-        return page_layout._resize_pages_with_padding(doc, target_rect)
-
-    @staticmethod
-    def export_bookmarks(pdf_path, csv_path):
-        return bookmarks_links.export_bookmarks(pdf_path, csv_path)
-
-    @staticmethod
-    def import_bookmarks(pdf_path, csv_path, output_path):
-        return bookmarks_links.import_bookmarks(pdf_path, csv_path, output_path)
-
-    @staticmethod
-    def export_links(pdf_path, json_path, scope="all"):
-        return bookmarks_links.export_links(pdf_path, json_path, scope=scope)
-
-    @staticmethod
-    def import_links(pdf_path, json_path, output_path, scope="all", mode="overwrite"):
-        return bookmarks_links.import_links(pdf_path, json_path, output_path, scope=scope, mode=mode)
-
-    @staticmethod
-    def _is_text_blue(page, rect):
-        return hyperlink_styles._is_text_blue(page, rect)
-
-    @staticmethod
-    def _overlay_text_color_in_rect(page, rect, color, skip_if_already_blue=False, erase_background=False):
-        return hyperlink_styles._overlay_text_color_in_rect(page, rect, color, skip_if_already_blue, erase_background)
-
-    @staticmethod
-    def _link_has_visible_border(doc, link_obj):
-        return hyperlink_styles._link_has_visible_border(doc, link_obj)
-
-    @staticmethod
-    def _force_link_new_window(doc, xref):
-        return hyperlink_styles._force_link_new_window(doc, xref)
-
-    @staticmethod
-    def _rects_intersect(a, b):
-        return hyperlink_styles._rects_intersect(a, b)
-
-    @staticmethod
-    def _point_in_any_rect(point, rects):
-        return hyperlink_styles._point_in_any_rect(point, rects)
-
-    @staticmethod
-    def _make_text_block_blue(block_text):
-        return hyperlink_styles._make_text_block_blue(block_text)
-
-    @staticmethod
-    def _make_text_block_color(block_text, color_rgb):
-        return hyperlink_styles._make_text_block_color(block_text, color_rgb)
-
-    @staticmethod
-    def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, only_if_blue=False):
-        return hyperlink_styles._apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, only_if_blue)
-
-    @staticmethod
-    def _collect_page_state(page):
-        return hyperlink_styles._collect_page_state(page)
-
-    @staticmethod
-    def _apply_blue_text_via_content_stream(doc, page, link_rects=None):
-        return hyperlink_styles._apply_blue_text_via_content_stream(doc, page, link_rects)
-
-    @staticmethod
-    def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_links=None):
-        return hyperlink_styles._apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_links)
-
-    @staticmethod
-    def _apply_hyperlink_styles(doc, page, options, link_objs=None, link_rects=None):
-        return hyperlink_styles._apply_hyperlink_styles(doc, page, options, link_objs, link_rects)
+    # --- 书签 / 链接导入导出 ---
+    export_bookmarks = staticmethod(bookmarks_links.export_bookmarks)
+    import_bookmarks = staticmethod(bookmarks_links.import_bookmarks)
+    export_links = staticmethod(bookmarks_links.export_links)
+    import_links = staticmethod(bookmarks_links.import_links)
 
     @staticmethod
     def process_document(input_path, output_path, options, processing_mode="smart"):
         prof = _PhaseProfiler()
         try:
             with prof.phase("预检/选项解析"):
-                mode_resolution = PDFProcessor.resolve_processing_options(input_path, options, processing_mode)
+                mode_resolution = precheck.resolve_processing_options(input_path, options, processing_mode)
             options = set(mode_resolution["options"])
             mode_log = mode_resolution.get("log", "")
 
@@ -363,7 +142,7 @@ class PDFProcessor:
                     meta["title"] = base_name;
                     doc.set_metadata(meta);
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "标题同步为文件名")
+                    _mark_change(applied_changes, "标题同步为文件名")
             elif "fast_web_view" in options:
                 base_name = Path(input_path).stem
                 meta = doc.metadata
@@ -371,7 +150,7 @@ class PDFProcessor:
                     meta["title"] = base_name
                     doc.set_metadata(meta)
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "标题补全为文件名")
+                    _mark_change(applied_changes, "标题补全为文件名")
 
             if "open_page_first" in options or "zoom_default" in options:
                 if doc.page_count > 0:
@@ -381,22 +160,22 @@ class PDFProcessor:
                     doc.xref_set_key(catalog_xref, "OpenAction", action_str);
                     changed = True
                     if "open_page_first" in options:
-                        PDFProcessor._mark_change(applied_changes, "打开页设为第一页")
+                        _mark_change(applied_changes, "打开页设为第一页")
                     if "zoom_default" in options:
-                        PDFProcessor._mark_change(applied_changes, "打开缩放设为默认")
+                        _mark_change(applied_changes, "打开缩放设为默认")
 
             if "page_layout_default" in options:
                 # 恢复为 PDF 阅读器默认行为：移除显式 PageLayout 设置
                 doc.xref_set_key(catalog_xref, "PageLayout", "null");
                 changed = True
-                PDFProcessor._mark_change(applied_changes, "页面布局恢复默认")
+                _mark_change(applied_changes, "页面布局恢复默认")
 
             if "initial_view_bookmarks_and_page" in options:
                 has_bookmarks = len(doc.get_toc(simple=False)) > 0
                 page_mode = "/UseOutlines" if has_bookmarks else "/UseNone"
                 doc.xref_set_key(catalog_xref, "PageMode", page_mode)
                 changed = True
-                PDFProcessor._mark_change(applied_changes, "初始视图设为书签/页面")
+                _mark_change(applied_changes, "初始视图设为书签/页面")
 
             if "collapse_all_bookmarks" in options:
                 toc = doc.get_toc(simple=False)
@@ -405,17 +184,17 @@ class PDFProcessor:
                         if isinstance(item[-1], dict): item[-1]["collapse"] = True
                     doc.set_toc(toc);
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "折叠全部书签")
+                    _mark_change(applied_changes, "折叠全部书签")
 
             if "page_size_a4" in options or "page_size_letter" in options:
-                target_rect = PDFProcessor._paper_rect_exact("a4") if "page_size_a4" in options else PDFProcessor._paper_rect_exact(
+                target_rect = page_layout._paper_rect_exact("a4") if "page_size_a4" in options else page_layout._paper_rect_exact(
                     "letter")
                 with prof.phase("页面尺寸标准化"):
-                    resized_pages = PDFProcessor._resize_pages_with_padding(doc, target_rect)
+                    resized_pages = page_layout._resize_pages_with_padding(doc, target_rect)
                 if resized_pages > 0:
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "页面尺寸标准化")
-                    PDFProcessor._increase_change_count(change_counts, "页面尺寸标准化", resized_pages)
+                    _mark_change(applied_changes, "页面尺寸标准化")
+                    _increase_change_count(change_counts, "页面尺寸标准化", resized_pages)
 
             def _to_point(value):
                 if hasattr(value, "x") and hasattr(value, "y"):
@@ -584,7 +363,7 @@ class PDFProcessor:
 
                             doc.set_toc(fallback_toc)
                         changed = True
-                        PDFProcessor._mark_change(applied_changes, "书签规则已更新")
+                        _mark_change(applied_changes, "书签规则已更新")
 
             hyperlink_options = ["link_abs_to_rel_path", "link_inherit_zoom",
                                  "link_open_new_window", "link_text_blue",
@@ -593,8 +372,8 @@ class PDFProcessor:
             if any(opt in options for opt in hyperlink_options):
                 with prof.phase("超链接遍历"):
                     for page in doc:
-                        page_state = PDFProcessor._collect_page_state(page)
-                        if PDFProcessor._apply_hyperlink_actions(
+                        page_state = hyperlink_styles._collect_page_state(page)
+                        if hyperlink_styles._apply_hyperlink_actions(
                             doc,
                             page,
                             options,
@@ -602,8 +381,8 @@ class PDFProcessor:
                             page_links=page_state["links"],
                         ):
                             changed = True
-                            PDFProcessor._mark_change(applied_changes, "超链接动作已更新")
-                        if PDFProcessor._apply_hyperlink_styles(
+                            _mark_change(applied_changes, "超链接动作已更新")
+                        if hyperlink_styles._apply_hyperlink_styles(
                             doc,
                             page,
                             options,
@@ -611,7 +390,7 @@ class PDFProcessor:
                             link_rects=page_state["link_rects"],
                         ):
                             changed = True
-                            PDFProcessor._mark_change(applied_changes, "超链接外观已更新")
+                            _mark_change(applied_changes, "超链接外观已更新")
 
             cleanup_options = ["cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black",
                                "cleanup_remove_invalid_links", "cleanup_remove_invalid_links_and_text_black",
@@ -644,14 +423,14 @@ class PDFProcessor:
                                 page.delete_link(link)
                                 removed_count += 1
                                 changed = True
-                                PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
-                                PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
+                                _mark_change(applied_changes, "已删除外部URI链接")
+                                _increase_change_count(change_counts, "已删除外部URI链接")
                             except Exception:
                                 pass
 
                         # 仅在需要去色时触发内容流改色
                         if decolor_rects and "cleanup_remove_external_uri_and_text_black" in options:
-                            if PDFProcessor._apply_text_color_via_content_stream(
+                            if hyperlink_styles._apply_text_color_via_content_stream(
                                 doc,
                                 page,
                                 decolor_rects,
@@ -659,7 +438,7 @@ class PDFProcessor:
                                 only_if_blue=True,
                             ):
                                 changed = True
-                                PDFProcessor._mark_change(applied_changes, "已将链接文本恢复为黑色")
+                                _mark_change(applied_changes, "已将链接文本恢复为黑色")
 
                         # 兼容兜底：若仍有 URI 链接残留，再做一次注释级删除
                         if removed_count > 0 and any(
@@ -675,15 +454,15 @@ class PDFProcessor:
                                     if uri:
                                         page.delete_annot(annot)
                                         changed = True
-                                        PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
-                                        PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
+                                        _mark_change(applied_changes, "已删除外部URI链接")
+                                        _increase_change_count(change_counts, "已删除外部URI链接")
                                 except Exception:
                                     pass
 
                 elif "cleanup_remove_all_links_bookmarks" in options:
                     doc.set_toc([])
                     for page in doc:
-                        page_state = PDFProcessor._collect_page_state(page)
+                        page_state = hyperlink_styles._collect_page_state(page)
                         # 直接删除 Link 注释，避免部分 PDF 中 delete_link 命中不到
                         for annot in page_state["annots"]:
                             try:
@@ -698,10 +477,10 @@ class PDFProcessor:
                             except Exception:
                                 pass
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "已删除全部链接和书签")
+                    _mark_change(applied_changes, "已删除全部链接和书签")
                 else:
                     for page in doc:
-                        page_state = PDFProcessor._collect_page_state(page)
+                        page_state = hyperlink_styles._collect_page_state(page)
                         decolor_rects = []
 
                         # 外部 URI 链接：优先用 delete_annot 方式确保真的移除可点击行为
@@ -724,8 +503,8 @@ class PDFProcessor:
                                             decolor_rects.append(annot.rect)
                                         page.delete_annot(annot)
                                         changed = True
-                                        PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
-                                        PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
+                                        _mark_change(applied_changes, "已删除外部URI链接")
+                                        _increase_change_count(change_counts, "已删除外部URI链接")
                                 except Exception:
                                     pass
 
@@ -752,21 +531,21 @@ class PDFProcessor:
                                 page.delete_link(link)
                                 changed = True
                                 if kind == fitz.LINK_URI:
-                                    PDFProcessor._mark_change(applied_changes, "已删除外部URI链接")
-                                    PDFProcessor._increase_change_count(change_counts, "已删除外部URI链接")
+                                    _mark_change(applied_changes, "已删除外部URI链接")
+                                    _increase_change_count(change_counts, "已删除外部URI链接")
                                 elif kind == fitz.LINK_NONE:
-                                    PDFProcessor._mark_change(applied_changes, "已删除失效链接")
-                                    PDFProcessor._increase_change_count(change_counts, "已删除失效链接")
+                                    _mark_change(applied_changes, "已删除失效链接")
+                                    _increase_change_count(change_counts, "已删除失效链接")
                                 else:
-                                    PDFProcessor._mark_change(applied_changes, "已删除未知动作链接")
-                                    PDFProcessor._increase_change_count(change_counts, "已删除未知动作链接")
+                                    _mark_change(applied_changes, "已删除未知动作链接")
+                                    _increase_change_count(change_counts, "已删除未知动作链接")
 
                         # 去色：对刚刚删除的外部 URI 区域叠加黑色文字
                         if decolor_rects and (
                             "cleanup_remove_external_uri_and_text_black" in options
                             or "cleanup_remove_invalid_links_and_text_black" in options
                         ):
-                            if PDFProcessor._apply_text_color_via_content_stream(
+                            if hyperlink_styles._apply_text_color_via_content_stream(
                                 doc,
                                 page,
                                 decolor_rects,
@@ -774,7 +553,7 @@ class PDFProcessor:
                                 only_if_blue=True,
                             ):
                                 changed = True
-                                PDFProcessor._mark_change(applied_changes, "已将链接文本恢复为黑色")
+                                _mark_change(applied_changes, "已将链接文本恢复为黑色")
 
                 if _cleanup_ctx is not None:
                     _cleanup_ctx.__exit__(None, None, None)
@@ -788,32 +567,32 @@ class PDFProcessor:
                                 try:
                                     page.delete_annot(annot)
                                     changed = True
-                                    PDFProcessor._mark_change(applied_changes, "已删除PDF注释")
-                                    PDFProcessor._increase_change_count(change_counts, "已删除PDF注释")
+                                    _mark_change(applied_changes, "已删除PDF注释")
+                                    _increase_change_count(change_counts, "已删除PDF注释")
                                 except Exception:
                                     pass
 
                 if "cleanup_remove_dynamic_content" in options:
                     doc.xref_set_key(catalog_xref, "Names", "null");
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "已删除动态内容/JavaScript")
+                    _mark_change(applied_changes, "已删除动态内容/JavaScript")
                 if "cleanup_remove_attachments" in options:
                     if doc.embfile_count() > 0:
                         attachment_count = doc.embfile_count()
                         for emb in doc.embfile_names(): doc.embfile_del(emb)
                         changed = True
-                        PDFProcessor._mark_change(applied_changes, "已删除文档附件")
-                        PDFProcessor._increase_change_count(change_counts, "已删除文档附件", attachment_count)
+                        _mark_change(applied_changes, "已删除文档附件")
+                        _increase_change_count(change_counts, "已删除文档附件", attachment_count)
                 if "cleanup_remove_tags" in options:
                     doc.xref_set_key(catalog_xref, "StructTreeRoot", "null")
                     doc.xref_set_key(catalog_xref, "MarkInfo", "null");
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "已删除文档标签")
+                    _mark_change(applied_changes, "已删除文档标签")
                 if "cleanup_remove_metadata" in options:
                     doc.set_metadata({});
                     doc.xref_set_key(catalog_xref, "PieceInfo", "null");
                     changed = True
-                    PDFProcessor._mark_change(applied_changes, "已删除文档元数据")
+                    _mark_change(applied_changes, "已删除文档元数据")
 
             is_linear = "fast_web_view" in options
             force_pdf_version = "1.7" if "convert_pdf_version" in options else None
@@ -828,7 +607,7 @@ class PDFProcessor:
                         doc.close()
                     try:
                         with prof.phase("qpdf重写"):
-                            PDFProcessor._rewrite_with_qpdf(
+                            qpdf._rewrite_with_qpdf(
                                 temp_pdf,
                                 output_path,
                                 force_version=force_pdf_version,
@@ -836,11 +615,11 @@ class PDFProcessor:
                                 decrypt_restrictions=remove_pdf_restrictions,
                             )
                         if remove_pdf_restrictions:
-                            PDFProcessor._mark_change(applied_changes, "已解除PDF权限限制")
+                            _mark_change(applied_changes, "已解除PDF权限限制")
                         if force_pdf_version:
-                            PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
+                            _mark_change(applied_changes, "已转换PDF版本")
                         if is_linear:
-                            PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
+                            _mark_change(applied_changes, "已启用快速网页浏览")
                     finally:
                         if os.path.exists(temp_pdf):
                             os.remove(temp_pdf)
@@ -851,7 +630,7 @@ class PDFProcessor:
             else:
                 doc.close()
                 if needs_qpdf_rewrite:
-                    PDFProcessor._rewrite_with_qpdf(
+                    qpdf._rewrite_with_qpdf(
                         input_path,
                         output_path,
                         force_version=force_pdf_version,
@@ -859,16 +638,16 @@ class PDFProcessor:
                         decrypt_restrictions=remove_pdf_restrictions,
                     )
                     if remove_pdf_restrictions:
-                        PDFProcessor._mark_change(applied_changes, "已解除PDF权限限制")
+                        _mark_change(applied_changes, "已解除PDF权限限制")
                     if force_pdf_version:
-                        PDFProcessor._mark_change(applied_changes, "已转换PDF版本")
+                        _mark_change(applied_changes, "已转换PDF版本")
                     if is_linear:
-                        PDFProcessor._mark_change(applied_changes, "已启用快速网页浏览")
+                        _mark_change(applied_changes, "已启用快速网页浏览")
                 else:
                     shutil.copy2(input_path, output_path)
 
             if applied_changes:
-                result_msg = f"✅ 处理成功；修改项：{PDFProcessor._format_change_summary(change_counts, applied_changes)}"
+                result_msg = f"✅ 处理成功；修改项：{_format_change_summary(change_counts, applied_changes)}"
             else:
                 result_msg = "✅ 处理成功；无实际修改"
             if mode_log:
@@ -882,5 +661,5 @@ class PDFProcessor:
             return False, f"⚠️ 缺少引擎组件: {str(e)}"
         except Exception as e:
             if "remove_pdf_restrictions" in options:
-                return False, f"❌ 处理失败: {PDFProcessor._format_qpdf_error(e)}"
+                return False, f"❌ 处理失败: {qpdf._format_qpdf_error(e)}"
             return False, f"❌ 处理失败: {str(e)}"

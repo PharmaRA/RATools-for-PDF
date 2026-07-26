@@ -27,6 +27,7 @@ from ratools_pdf.controllers.workers import (
     ProcessWorker,
     UpdateCheckWorker,
 )
+from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services import system_shell
 from ratools_pdf.ui.dialogs import IODataWizardDialog, LogDialog
@@ -473,9 +474,9 @@ class MainController(QObject):
         try:
             import fitz
             doc = fitz.open(path)
-            pdf_version = PDFProcessor._read_pdf_header_version(path) or "未知"
-            linearized = "是" if PDFProcessor._is_pdf_linearized(path) else "否"
-            restrictions = "是" if PDFProcessor._qpdf_reports_restrictions(path) else "否"
+            pdf_version = pdf_inspect.read_pdf_header_version(path) or "未知"
+            linearized = "是" if pdf_inspect.is_pdf_linearized(path) else "否"
+            restrictions = "是" if pdf_inspect.qpdf_reports_restrictions(path) else "否"
 
             details.extend([
                 "",
@@ -503,8 +504,8 @@ class MainController(QObject):
 
             catalog_xref = doc.pdf_catalog()
             has_tags = (
-                PDFProcessor._catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
-                or PDFProcessor._catalog_key_is_present(doc, catalog_xref, "MarkInfo")
+                pdf_inspect.catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
+                or pdf_inspect.catalog_key_is_present(doc, catalog_xref, "MarkInfo")
             )
             metadata_values = [
                 value
@@ -982,7 +983,7 @@ class MainController(QObject):
         """
         signed_files = [
             path for path in processing_files
-            if PDFProcessor._pdf_has_signature(path)
+            if pdf_inspect.pdf_has_signature(path)
         ]
         if not signed_files:
             return processing_files

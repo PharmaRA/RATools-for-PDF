@@ -12,6 +12,7 @@ from ratools_pdf.controllers.io_actions import (
     _normalize_io_action_types,
     _normalized_ectd_name,
 )
+from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 
 if ENABLE_UPDATE_CHECK:
@@ -525,10 +526,10 @@ class DetectionWorker(QThread):
 
     def _collect(self, file_path):
         if self.detection_kind == "annotation":
-            findings = PDFProcessor._collect_annotation_findings_for_path(file_path)
+            findings = pdf_inspect.collect_annotation_findings_for_path(file_path)
             hit = bool(findings.get("has_annotations"))
         else:
-            findings = PDFProcessor._collect_broken_reference_findings_for_path(file_path)
+            findings = pdf_inspect.collect_broken_reference_findings_for_path(file_path)
             hit = bool(findings.get("has_broken_reference"))
         return findings, hit
 

@@ -5,11 +5,6 @@ from urllib.parse import unquote
 import fitz
 
 
-def _processor_cls():
-    from ratools_pdf.pdf.processor import PDFProcessor
-    return PDFProcessor
-
-
 def export_bookmarks(pdf_path, csv_path):
     """Export bookmarks to CSV with enough action data for round-trip import."""
     doc = fitz.open(pdf_path)
