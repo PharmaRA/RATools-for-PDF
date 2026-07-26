@@ -32,6 +32,9 @@ class MainWindow(QMainWindow):
     # 类属性保留原名，兼容既有引用（controller/tests）。
     PRESET_OPTIONS = rules_catalog.PRESETS
 
+    # 通用设置类勾选框：不参与预设/清空/规则统计（key 同时是显示文案）
+    GENERAL_SETTING_OPTIONS = ("处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)")
+
     def __init__(self):
         super().__init__()
         self.custom_selection_before_preset = set()
@@ -654,21 +657,27 @@ class MainWindow(QMainWindow):
         self.refresh_selection_summary()
         self.show_success_message("✅ 已保存", "当前处理规则已保存为我的常用。")
 
-    def restore_custom_selection(self):
-        checkbox_groups = {}
+    def _rule_checkbox_groups(self):
+        """规则勾选框按控件聚合（同一控件可能挂多个 option id 别名）。"""
+        groups = {}
         for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
+            if opt_id in self.GENERAL_SETTING_OPTIONS:
                 continue
-            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+            groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
+        return groups
 
+    def _set_rule_selection(self, target_options):
+        """按目标 id 集合刷勾选状态（预设应用/恢复自定义/清空共用）。"""
         self.is_applying_preset = True
         try:
-            for group in checkbox_groups.values():
-                should_check = any(key in self.custom_selection_before_preset for key in group["keys"])
+            for group in self._rule_checkbox_groups().values():
+                should_check = any(key in target_options for key in group["keys"])
                 group["checkbox"].setChecked(should_check)
         finally:
             self.is_applying_preset = False
 
+    def restore_custom_selection(self):
+        self._set_rule_selection(self.custom_selection_before_preset)
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.persist_all_settings()
@@ -690,19 +699,7 @@ class MainWindow(QMainWindow):
         self.apply_preset(preset_key)
 
     def clear_selected_options(self):
-        checkbox_groups = {}
-        for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
-                continue
-            checkbox_groups.setdefault(id(cb), cb)
-
-        self.is_applying_preset = True
-        try:
-            for cb in checkbox_groups.values():
-                cb.setChecked(False)
-        finally:
-            self.is_applying_preset = False
-
+        self._set_rule_selection(set())
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.custom_selection_before_preset = set()
@@ -721,20 +718,7 @@ class MainWindow(QMainWindow):
         if not target_options:
             return
 
-        checkbox_groups = {}
-        for opt_id, cb in self.all_checkboxes.items():
-            if opt_id in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]:
-                continue
-            checkbox_groups.setdefault(id(cb), {"checkbox": cb, "keys": set()})["keys"].add(opt_id)
-
-        self.is_applying_preset = True
-        try:
-            for group in checkbox_groups.values():
-                should_check = any(key in target_options for key in group["keys"])
-                group["checkbox"].setChecked(should_check)
-        finally:
-            self.is_applying_preset = False
-
+        self._set_rule_selection(target_options)
         self.active_preset_key = preset_key
         self._set_preset_button_state(preset_key)
         self.persist_all_settings()
@@ -795,7 +779,7 @@ class MainWindow(QMainWindow):
     def refresh_selection_summary(self):
         selected_count = len([
             opt for opt in self.get_selected_options()
-            if opt not in ["处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)"]
+            if opt not in self.GENERAL_SETTING_OPTIONS
         ])
         preset_titles = {key: value["title"] for key, value in self.PRESET_OPTIONS.items()}
         preset_titles["favorite"] = "我的常用"
