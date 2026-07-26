@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFileDialog, QMenu, QTreeWidgetItem
+from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from ratools_pdf.common.status import status_semantic
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
@@ -18,10 +18,11 @@ from ratools_pdf.controllers.font_embedding_controller import FontEmbeddingContr
 from ratools_pdf.controllers.io_controller import IOController
 from ratools_pdf.controllers.log_controller import LogController
 from ratools_pdf.controllers.precheck_controller import PrecheckController
+from ratools_pdf.controllers.tree_actions_controller import TreeActionsController
 from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import ProcessWorker
 from ratools_pdf.pdf import inspect as pdf_inspect
-from ratools_pdf.services import pdf_inspector, system_shell
+from ratools_pdf.services import system_shell
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
@@ -59,6 +60,7 @@ class MainController(QObject):
         self.font_embedding = FontEmbeddingController(self.view, parent=self)
         self.logs = LogController(self, self.view, parent=self)
         self.precheck = PrecheckController(self, self.view, parent=self)
+        self.tree_actions = TreeActionsController(self, self.view, parent=self)
         self.updates = UpdateController(self.view, parent=self)
 
         self.setup_connections()
@@ -99,9 +101,9 @@ class MainController(QObject):
         self.setup_exclusive_options()
 
         # 绑定树形图的右键菜单请求事件
-        self.view.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
+        self.view.tree.customContextMenuRequested.connect(self.tree_actions.show_tree_context_menu)
         # 绑定树形图双击事件
-        self.view.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.view.tree.itemDoubleClicked.connect(self.tree_actions.on_item_double_clicked)
 
     def _is_precheck_running(self):
         return self.precheck.is_running()
@@ -148,77 +150,6 @@ class MainController(QObject):
 
     def check_updates_on_startup(self):
         self.updates.check_updates_on_startup()
-
-    # ================= 核心：右键菜单生成与分发 =================
-    def show_tree_context_menu(self, pos):
-        selected_items = self.view.tree.selectedItems()
-        if not selected_items:
-            return
-
-        # 菜单样式由应用级中央 QSS（theme.py 的 QMenu 段）提供，明暗主题自动适配
-        menu = QMenu(self.view.tree)
-
-        action_remove = menu.addAction("🗑️ 移除选中项")
-
-        # menu.addSeparator()
-
-        # 只有在选中单个文件/文件夹时，才允许执行详情查看和定位
-        is_single_selection = len(selected_items) == 1
-        target_path = selected_items[0].text(1) if is_single_selection else ""
-
-        action_extend_1 = menu.addAction("🔍 定位到文件位置")
-        action_extend_1.setEnabled(is_single_selection)
-
-        action_extend_2 = menu.addAction("📄 查看文件详情...")
-        action_extend_2.setEnabled(is_single_selection)
-
-        # 映射坐标并在当前鼠标位置弹出
-        action = menu.exec(self.view.tree.viewport().mapToGlobal(pos))
-
-        if action == action_remove:
-            self.remove_selected_items(selected_items)
-        elif action == action_extend_1:
-            self.locate_file(target_path)
-        elif action == action_extend_2:
-            self.show_file_details(target_path)
-
-    def on_item_double_clicked(self, item, column):
-        """双击列表项直接使用系统默认软件打开 PDF 文件"""
-        path = item.text(1)
-        if not os.path.exists(path):
-            self.view.show_warning_message("⚠️ 警告", "无法打开，该文件或文件夹可能已被移动或删除！")
-            return
-
-        # 仅打开文件（如果是PDF文件），如果是文件夹则展开/收起节点（由组件默认处理）
-        if os.path.isfile(path) and path.lower().endswith('.pdf'):
-            try:
-                system_shell.open_with_default_app(path)
-            except Exception as e:
-                self.view.show_error_message("❌ 打开失败", f"无法使用默认程序打开文件：\n{str(e)}")
-
-    def locate_file(self, path):
-        """定位文件或文件夹位置（在系统文件资源管理器中打开并高亮显示）"""
-        if not os.path.exists(path):
-            self.view.show_warning_message("⚠️ 警告", "无法定位，该文件或文件夹可能已被移动或删除！")
-            return
-
-        try:
-            system_shell.reveal_in_file_manager(path)
-        except Exception as e:
-            self.view.show_error_message("❌ 定位失败", f"无法打开系统资源管理器：\n{str(e)}")
-
-    def show_file_details(self, path):
-        """读取并弹窗显示选中项的系统属性以及 PDF 特有元数据"""
-        if not os.path.exists(path):
-            self.view.show_warning_message("⚠️ 警告", "无法读取信息，该文件或文件夹可能已被移动或删除！")
-            return
-
-        try:
-            info_text = pdf_inspector.build_pdf_detail_text(path)
-            self.view.show_info_message("📄 文件详细信息", info_text)
-
-        except Exception as e:
-            self.view.show_error_message("❌ 读取失败", f"获取文件信息时发生异常：\n{str(e)}")
 
     def remove_selected_items(self, selected_items):
         """
