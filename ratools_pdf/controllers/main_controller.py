@@ -1,4 +1,3 @@
-import csv
 import os
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +12,11 @@ from ratools_pdf.controllers.io_actions import (
     _collect_ectd_rename_plan,
     common_base_dir,
 )
-from ratools_pdf.controllers.log_export import (
-    _select_log_rows_for_export,
-    _structured_log_row_from_event,
-)
+from ratools_pdf.controllers.log_export import _structured_log_row_from_event
 from ratools_pdf.controllers.detection_controller import DetectionController
 from ratools_pdf.controllers.font_embedding_controller import FontEmbeddingController
 from ratools_pdf.controllers.io_controller import IOController
+from ratools_pdf.controllers.log_controller import LogController
 from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import (
     PreCheckWorker,
@@ -28,7 +25,6 @@ from ratools_pdf.controllers.workers import (
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services import system_shell
-from ratools_pdf.ui.dialogs import LogDialog
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
@@ -69,6 +65,7 @@ class MainController(QObject):
         self.detection = DetectionController(self, self.view, parent=self)
         self.io = IOController(self, self.view, parent=self)
         self.font_embedding = FontEmbeddingController(self.view, parent=self)
+        self.logs = LogController(self, self.view, parent=self)
         self.updates = UpdateController(self.view, parent=self)
 
         self.setup_connections()
@@ -94,7 +91,7 @@ class MainController(QObject):
         self.view.btn_process_precheck_suggested.clicked.connect(self.start_precheck_suggested_processing)
         self.view.btn_precheck.clicked.connect(self.start_precheck)
         self.view.btn_start.clicked.connect(lambda _checked=False: self.start_processing())
-        self.view.btn_log.clicked.connect(self.show_log_dialog)
+        self.view.btn_log.clicked.connect(self.logs.show_log_dialog)
         btn_embed_missing_fonts = getattr(self.view, "btn_embed_missing_fonts", None)
         if btn_embed_missing_fonts is not None:
             btn_embed_missing_fonts.clicked.connect(self.font_embedding.open_selected_files_in_acrobat)
@@ -1072,128 +1069,6 @@ class MainController(QObject):
             return
 
         self.view.show_warning_message("⚠️ 未选择正在处理的文件", "请选择状态为“正在处理...”的 PDF 后再终止。")
-
-    def show_log_dialog(self):
-        if not hasattr(self, 'log_dialog'):
-            self.log_dialog = LogDialog(self.view)
-            self.log_dialog.btn_export.clicked.connect(self.export_logs)
-            self.log_dialog.btn_export_precheck.clicked.connect(self.export_precheck_results)
-
-        self.log_dialog.set_log_data(
-            self.process_logs if self.process_logs else "暂无处理日志...",
-            self.process_log_rows,
-        )
-        self.log_dialog.btn_export_precheck.setEnabled(bool(self.last_precheck_results))
-        self.log_dialog.btn_export_precheck.setToolTip(
-            "导出最近一次批量预检结果" if self.last_precheck_results else "请先执行一次批量预检"
-        )
-        self.log_dialog.show()
-        self.log_dialog.raise_()
-        self.log_dialog.activateWindow()
-
-    def export_logs(self):
-        if not self.process_logs:
-            self.view.show_warning_message("⚠️ 提示", "目前暂无任何日志可供导出！")
-            return
-
-        default_dir = ""
-        if hasattr(self, 'last_output_dir') and self.last_output_dir and os.path.isdir(self.last_output_dir):
-            default_dir = self.last_output_dir
-        elif self.view.settings_dialog.default_output_edit.text().strip() and os.path.isdir(self.view.settings_dialog.default_output_edit.text().strip()):
-            default_dir = self.view.settings_dialog.default_output_edit.text().strip()
-        elif self.loaded_files:
-            default_dir = common_base_dir(
-                self.loaded_files,
-                fallback=os.path.dirname(os.path.abspath(self.loaded_files[0])),
-            )
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_filename = f"RATools_process_logs_{timestamp}.csv"
-        default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
-
-        file_path, selected_filter = QFileDialog.getSaveFileName(
-            self.view,
-            "导出处理日志",
-            default_path,
-            "CSV Summary (*.csv);;Text Files (*.txt);;All Files (*)"
-        )
-        if file_path:
-            try:
-                export_csv = file_path.lower().endswith('.csv') or selected_filter.startswith("CSV")
-
-                if export_csv and not file_path.lower().endswith('.csv'):
-                    file_path += '.csv'
-                if not export_csv and selected_filter.startswith("Text") and not file_path.lower().endswith('.txt'):
-                    file_path += '.txt'
-
-                if export_csv:
-                    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-                        writer = csv.DictWriter(f, fieldnames=["time", "file_original", "file_output", "status", "success", "duration_sec", "changes"])
-                        writer.writeheader()
-                        writer.writerows(_select_log_rows_for_export(self.process_log_rows, self.process_logs))
-                else:
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(self.process_logs)
-                self.view.show_success_message("✅ 导出成功", "处理日志已成功保存！")
-            except Exception as e:
-                self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
-
-    def export_precheck_results(self):
-        if not self.last_precheck_results:
-            self.view.show_warning_message("⚠️ 提示", "请先执行一次批量预检，再导出预检结果。")
-            return
-
-        default_dir = ""
-        default_output_dir = self.view.settings_dialog.default_output_edit.text().strip()
-        if default_output_dir and os.path.isdir(default_output_dir):
-            default_dir = default_output_dir
-        elif self.loaded_files:
-            default_dir = common_base_dir(
-                self.loaded_files,
-                fallback=os.path.dirname(os.path.abspath(self.loaded_files[0])),
-            )
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_filename = f"RATools_precheck_results_{timestamp}.csv"
-        default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
-
-        file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self.view,
-            "导出预检结果",
-            default_path,
-            "CSV Files (*.csv);;All Files (*)",
-        )
-        if not file_path:
-            return
-        if not file_path.lower().endswith(".csv"):
-            file_path += ".csv"
-
-        try:
-            fieldnames = [
-                "file_name",
-                "file_path",
-                "status",
-                "suggestions",
-                "suggestion_ids",
-                "error",
-                "font_summary",
-                "font_details",
-                "annotation_summary",
-                "annotation_details",
-                "broken_reference_summary",
-                "broken_reference_details",
-            ]
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                rows = []
-                for row in self.last_precheck_results:
-                    export_row = {key: row.get(key, "") for key in fieldnames}
-                    rows.append(export_row)
-                writer.writerows(rows)
-            self.view.show_success_message("✅ 导出成功", "预检结果已成功保存！")
-        except Exception as e:
-            self.view.show_error_message("❌ 导出失败", f"文件保存失败：\n{str(e)}")
 
     def _open_directory(self, dir_path):
         try:
