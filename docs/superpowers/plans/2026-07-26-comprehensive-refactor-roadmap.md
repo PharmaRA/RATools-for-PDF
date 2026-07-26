@@ -124,6 +124,14 @@ v0.7.0 已完成第一轮结构重构（Phase 1–3：扁平脚本 → `ratools_
 
 ### Phase 4：MainController 拆分
 
+> **执行记录（2026-07-26）**：已拆出 precheck / detection / io / log / font_embedding /
+> tree_actions / update 七个子控制器与 system_shell / pdf_inspector 两个服务，
+> MainController 1717 → 785 行。**决策**：批处理生命周期与文件队列保留在
+> MainController —— 二者共享 loaded_files/file_nodes/日志缓冲，且 update_progress
+> 是全部 worker 的共享进度路由，强拆会制造大量 host 间接调用，可读性反而下降。
+> MainController 的收敛职责即"文件队列 + 批处理协调 + 组合根"。
+> 原计划中的 file_queue_controller / processing_controller 不再单独拆出。
+
 前置件（已在 Phase 2 就位：status 常量、system_shell、file_path 进度协议）。
 
 1. `controllers/task_guard.py`：集中持有各 worker 引用，`ensure_idle(action) -> bool`，消灭 6 处忙碌守卫重复。
