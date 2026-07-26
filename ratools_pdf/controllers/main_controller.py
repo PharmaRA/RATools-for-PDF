@@ -1,7 +1,6 @@
 import csv
 import os
-import webbrowser
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer
@@ -21,12 +20,12 @@ from ratools_pdf.controllers.log_export import (
     _select_log_rows_for_export,
     _structured_log_row_from_event,
 )
+from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import (
     DetectionWorker,
     IOActionWorker,
     PreCheckWorker,
     ProcessWorker,
-    UpdateCheckWorker,
 )
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
@@ -66,17 +65,18 @@ class MainController(QObject):
         self.folder_nodes = {}
         self.file_nodes = {}
 
-        self.setup_connections()
         self.worker = None
         self.precheck_worker = None
         self.precheck_files = []
         self.detection_worker = None
         self.detection_files = []
         self.last_detection_results = []
-        self.update_worker = None
+        self.updates = UpdateController(self.view, parent=self)
+
+        self.setup_connections()
         app = QCoreApplication.instance()
         if app:
-            app.aboutToQuit.connect(self.shutdown_update_worker)
+            app.aboutToQuit.connect(self.updates.shutdown)
 
     def setup_connections(self):
         self.view.drop_zone.files_dropped.connect(self.add_files)
@@ -101,7 +101,7 @@ class MainController(QObject):
         if btn_embed_missing_fonts is not None:
             btn_embed_missing_fonts.clicked.connect(self.open_selected_files_in_acrobat_for_font_embedding)
         if ENABLE_UPDATE_CHECK:
-            self.view.btn_top_about.clicked.connect(self._wire_about_dialog_updates)
+            self.view.btn_top_about.clicked.connect(self.updates.wire_about_dialog)
 
         self.view.btn_bookmark_io_wizard.clicked.connect(lambda: self.handle_io_wizard("bookmarks"))
         self.view.btn_link_io_wizard.clicked.connect(lambda: self.handle_io_wizard("links"))
@@ -199,82 +199,6 @@ class MainController(QObject):
         self.view.refresh_selection_summary()
         self.view.show_success_message("✅ 已应用", f"已自动勾选 {len(suggested_options)} 条预检建议规则。")
 
-    def _wire_about_dialog_updates(self):
-        if not ENABLE_UPDATE_CHECK:
-            return
-        dialog = getattr(self.view, "about_dialog", None)
-        if not dialog or getattr(dialog, "_update_buttons_wired", False):
-            return
-
-        dialog.btn_check_updates.clicked.connect(self.check_updates_manually)
-        dialog.btn_open_release.clicked.connect(self.open_release_url)
-        dialog._update_buttons_wired = True
-
-    def check_updates_manually(self):
-        if not ENABLE_UPDATE_CHECK:
-            return
-        self._wire_about_dialog_updates()
-        dialog = getattr(self.view, "about_dialog", None)
-        started = self._start_update_check(silent=False)
-        if dialog and started:
-            dialog.set_update_checking()
-        elif dialog:
-            dialog.set_update_result("已有更新检查正在进行，请稍后再试。")
-
-    def check_updates_on_startup(self):
-        if not ENABLE_UPDATE_CHECK:
-            return
-        settings = getattr(self.view, "app_settings", None)
-        if not settings:
-            return
-
-        today = date.today().isoformat()
-        if settings.value("Update/LastSilentCheckDate") == today:
-            return
-
-        if self._start_update_check(silent=True):
-            settings.setValue("Update/LastSilentCheckDate", today)
-
-    def _start_update_check(self, silent=False):
-        if not ENABLE_UPDATE_CHECK:
-            return False
-        worker = getattr(self, "update_worker", None)
-        if worker and worker.isRunning():
-            return False
-
-        worker = UpdateCheckWorker(silent=silent, parent=self)
-        worker.finished_check.connect(self._handle_update_result)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(lambda checked_worker=worker: self._clear_update_worker(checked_worker))
-        self.update_worker = worker
-        worker.start()
-        return True
-
-    def _clear_update_worker(self, worker):
-        if getattr(self, "update_worker", None) is worker:
-            self.update_worker = None
-
-    def shutdown_update_worker(self):
-        worker = getattr(self, "update_worker", None)
-        if worker and worker.isRunning():
-            worker.wait(9000)
-
-    def open_release_url(self, release_url=""):
-        if not release_url:
-            dialog = getattr(self.view, "about_dialog", None)
-            release_url = getattr(dialog, "latest_release_url", "") if dialog else ""
-        if not release_url:
-            return
-
-        try:
-            opened = webbrowser.open(release_url)
-        except Exception as exc:
-            self.view.show_error_message("打开失败", f"无法打开发布页：{exc}")
-            return
-
-        if not opened:
-            self.view.show_error_message("打开失败", "无法打开发布页：浏览器拒绝打开链接")
-
     @staticmethod
     def _find_acrobat_executable():
         return system_shell.find_acrobat_executable()
@@ -337,59 +261,8 @@ class MainController(QObject):
             lambda paths=tuple(pdf_paths): self._open_pdf_paths_in_acrobat_for_font_embedding(list(paths)),
         )
 
-    def _handle_silent_update_result(self, result):
-        if not result.ok or not result.has_update or not result.is_major or not result.latest_release:
-            return
-
-        settings = getattr(self.view, "app_settings", None)
-        if not settings:
-            return
-
-        release = result.latest_release
-        if settings.value("Update/IgnoredVersion", "") == release.version_text:
-            return
-
-        today = date.today().isoformat()
-        prompt_marker = f"{today}:{release.version_text}"
-        if settings.value("Update/LastPromptedVersion", "") == prompt_marker:
-            return
-
-        settings.setValue("Update/LastPromptedVersion", prompt_marker)
-        action = self.view.show_major_update_prompt(result.current_version, release)
-
-        if action == "open":
-            self.open_release_url(release.html_url)
-        elif action == "ignore":
-            settings.setValue("Update/IgnoredVersion", release.version_text)
-
-    def _handle_update_result(self, result, silent):
-        if silent:
-            handler = getattr(self, "_handle_silent_update_result", None)
-            if handler:
-                handler(result)
-            return
-
-        dialog = getattr(self.view, "about_dialog", None)
-        if not dialog:
-            return
-
-        if not result.ok:
-            dialog.set_update_result(f"检查更新失败：{result.error}")
-            return
-
-        if not result.has_update or not result.latest_release:
-            dialog.set_update_result(f"当前已是最新版本：{result.current_version}")
-            return
-
-        release = result.latest_release
-        published_at = release.published_at or "未知"
-        message = (
-            f"发现新版本：{release.version_text}\n"
-            f"当前版本：{result.current_version}\n"
-            f"发布标题：{release.title}\n"
-            f"发布时间：{published_at}"
-        )
-        dialog.set_update_result(message, release.html_url)
+    def check_updates_on_startup(self):
+        self.updates.check_updates_on_startup()
 
     # ================= 核心：右键菜单生成与分发 =================
     def show_tree_context_menu(self, pos):
