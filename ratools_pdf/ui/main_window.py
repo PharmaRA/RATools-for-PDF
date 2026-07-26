@@ -85,6 +85,73 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        self._build_header(main_layout)
+        self._build_middle(main_layout)
+        self._build_preset_bar(main_layout)
+        self._build_footer(main_layout)
+
+        self.nav_btn_group.idClicked.connect(self.switch_settings_page)
+
+        # 立刻触发一次以展示第一页内容
+        self.switch_settings_page(0)
+        self.apply_stylesheet()
+
+        self.settings_key_map = {
+            "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
+            "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
+        }
+        for i, mod in enumerate(self.MODULES_DATA):
+            for j, opt in enumerate(mod["options"]):
+                self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
+
+        self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
+        self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
+        self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+        self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
+
+        self.settings_dialog.set_theme_mode(theme_mode)
+        for mode, btn in self.settings_dialog.theme_buttons.items():
+            btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
+
+        self.load_all_settings()
+        self.refresh_selection_summary()
+
+    def show_info_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="info", parent=self).exec()
+
+    def show_success_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="success", parent=self).exec()
+
+    def show_warning_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
+
+    def show_error_message(self, title, message):
+        CustomMessageBox(title, message, msg_type="error", parent=self).exec()
+
+    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
+        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
+        dlg.exec()
+
+    def show_confirm_message(self, title, message):
+        dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
+        return dlg.exec() == QDialog.Accepted
+
+    def show_major_update_prompt(self, current_version, release):
+        dlg = MajorUpdatePromptDialog(current_version, release, parent=self)
+        dlg.exec()
+        return dlg.chosen_action
+
+    def show_signed_files_prompt(self, signed_files):
+        """检测到已签名文件时的三选一提示：跳过 / 全部处理 / 取消。
+
+        返回 "skip"、"process_all" 或 "cancel"。
+        """
+        dlg = SignedFilesPromptDialog(signed_files, parent=self)
+        dlg.exec()
+        return dlg.chosen_action
+
+    def _build_header(self, main_layout):
+        """顶部 Header：全局设置 / 关于按钮。"""
         # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
@@ -104,6 +171,9 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
+
+    def _build_middle(self, main_layout):
+        """中段：左侧导航 + 中间队列视图（拖放区/文件树）+ 右侧规则设置区。"""
 
         middle_container = QFrame()
         middle_layout = QHBoxLayout(middle_container)
@@ -347,6 +417,9 @@ class MainWindow(QMainWindow):
         middle_layout.addWidget(right_sidebar)
         main_layout.addWidget(middle_container)
 
+    def _build_preset_bar(self, main_layout):
+        """快速预设栏：中国/美国 eCTD、我的常用、保存与清空。"""
+
         preset_bar = QFrame()
         preset_bar.setObjectName("presetBar")
         preset_layout = QHBoxLayout(preset_bar)
@@ -396,6 +469,9 @@ class MainWindow(QMainWindow):
         preset_layout.addWidget(self.btn_clear_selected_options)
         main_layout.addWidget(preset_bar)
 
+
+    def _build_footer(self, main_layout):
+        """底部操作栏：日志、处理模式、动作按钮组、开始按钮。"""
         # ================= 底部操作栏 =================
         footer = QFrame()
         footer.setObjectName("footer")
@@ -467,65 +543,6 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
 
-        self.nav_btn_group.idClicked.connect(self.switch_settings_page)
-
-        # 立刻触发一次以展示第一页内容
-        self.switch_settings_page(0)
-        self.apply_stylesheet()
-
-        self.settings_key_map = {
-            "处理完成后自动打开输出文件夹": "Settings/AutoOpenOutput",
-            "覆盖原始文件 (不推荐)": "Settings/OverwriteOriginal"
-        }
-        for i, mod in enumerate(self.MODULES_DATA):
-            for j, opt in enumerate(mod["options"]):
-                self.settings_key_map[opt["id"]] = f"Modules/Mod_{i}_Opt_{j}"
-
-        self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
-        self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
-        self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
-        self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
-
-        self.settings_dialog.set_theme_mode(theme_mode)
-        for mode, btn in self.settings_dialog.theme_buttons.items():
-            btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
-
-        self.load_all_settings()
-        self.refresh_selection_summary()
-
-    def show_info_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="info", parent=self).exec()
-
-    def show_success_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="success", parent=self).exec()
-
-    def show_warning_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="warning", parent=self).exec()
-
-    def show_error_message(self, title, message):
-        CustomMessageBox(title, message, msg_type="error", parent=self).exec()
-
-    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
-        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
-        dlg.exec()
-
-    def show_confirm_message(self, title, message):
-        dlg = CustomMessageBox(title, message, msg_type="question", show_cancel=True, parent=self)
-        return dlg.exec() == QDialog.Accepted
-
-    def show_major_update_prompt(self, current_version, release):
-        dlg = MajorUpdatePromptDialog(current_version, release, parent=self)
-        dlg.exec()
-        return dlg.chosen_action
-
-    def show_signed_files_prompt(self, signed_files):
-        """检测到已签名文件时的三选一提示：跳过 / 全部处理 / 取消。
-
-        返回 "skip"、"process_all" 或 "cancel"。
-        """
-        dlg = SignedFilesPromptDialog(signed_files, parent=self)
-        dlg.exec()
-        return dlg.chosen_action
 
     def load_all_settings(self):
         self.is_applying_preset = True
