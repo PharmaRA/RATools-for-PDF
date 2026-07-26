@@ -744,19 +744,341 @@ def _collect_broken_reference_findings_for_path(pdf_path):
                 pass
 
 
-def build_precheck_report(input_path, selected_options=None):
-    selected_options = _filtered_precheck_options(selected_options)
+class _PrecheckContext:
+    """build_precheck_report 各检查组之间共享的状态。"""
 
-    def wants(*option_ids):
-        if selected_options is None:
+    def __init__(self, doc, input_path, selected_options, report):
+        self.doc = doc
+        self.input_path = input_path
+        self.selected_options = selected_options
+        self.report = report
+        self.suggestions = report["suggestions"]
+        self.base_dir = os.path.dirname(os.path.abspath(input_path))
+        self.catalog_xref = doc.pdf_catalog()
+        self.toc = doc.get_toc(simple=False)
+        self.has_bookmarks = len(self.toc) > 0
+        self.meta = doc.metadata or {}
+        self.base_name = Path(input_path).stem
+        # 跨检查组共享的中间发现：链接扫描时顺带识别的非链接批注
+        self.has_non_link_annotation = False
+
+    def wants(self, *option_ids):
+        if self.selected_options is None:
             return True
-        return any(_precheck_option_matches_selected(option_id, selected_options) for option_id in option_ids)
+        return any(
+            _precheck_option_matches_selected(option_id, self.selected_options)
+            for option_id in option_ids
+        )
 
-    def add_suggestion(option_id, reason):
-        if not wants(option_id):
+    def add_suggestion(self, option_id, reason):
+        if not self.wants(option_id):
             return
-        suggestion_id = _selected_precheck_option_id(option_id, selected_options)
-        _add_precheck_suggestion(suggestions, suggestion_id, reason)
+        suggestion_id = _selected_precheck_option_id(option_id, self.selected_options)
+        _add_precheck_suggestion(self.suggestions, suggestion_id, reason)
+
+    @property
+    def full_scan(self):
+        """未限定选项时执行完整预检（包含 report_only 复核项）。"""
+        return self.selected_options is None
+
+
+# ============================================================================
+# 预检检查组。每组接收 _PrecheckContext，按需读取选项并写入 suggestions。
+# 执行顺序与历史行为一致。
+# ============================================================================
+
+
+def _check_document_properties(ctx):
+    """标题一致性 / 导览标签 / 页面布局。"""
+    doc = ctx.doc
+    if ctx.wants("title_from_filename") and (ctx.meta.get("title") or "") != ctx.base_name:
+        ctx.add_suggestion("title_from_filename", "PDF标题属性与文件名不一致或为空")
+
+    if ctx.wants("initial_view_bookmarks_and_page"):
+        page_mode_kind, page_mode_value = _catalog_key(doc, ctx.catalog_xref, "PageMode")
+        if ctx.has_bookmarks and not (page_mode_kind == "name" and page_mode_value == "/UseOutlines"):
+            ctx.add_suggestion("initial_view_bookmarks_and_page", "文档包含书签，但打开时未设置为显示书签面板")
+        elif not ctx.has_bookmarks and page_mode_kind == "name" and page_mode_value != "/UseNone":
+            ctx.add_suggestion("initial_view_bookmarks_and_page", "文档不含书签，但初始导览标签不是页面视图")
+
+    if ctx.wants("page_layout_default") and _catalog_key_is_present(doc, ctx.catalog_xref, "PageLayout"):
+        ctx.add_suggestion("page_layout_default", "文档设置了显式页面布局")
+
+
+def _check_open_action(ctx):
+    """打开动作：首页指向 / 默认缩放。"""
+    doc = ctx.doc
+    if ctx.wants("open_page_first", "zoom_default"):
+        open_action_kind, open_action_value = _catalog_key(doc, ctx.catalog_xref, "OpenAction")
+    else:
+        open_action_kind, open_action_value = "null", "null"
+    if open_action_kind == "null" or doc.page_count <= 0:
+        return
+    open_action_value = _dereference_xref_value(doc, open_action_value)
+    first_page_ref = f"{doc[0].xref} 0 R"
+    compact_action = open_action_value.replace(" ", "")
+    if ctx.wants("open_page_first") and first_page_ref.replace(" ", "") not in compact_action:
+        ctx.add_suggestion("open_page_first", "文档打开动作没有指向第一页")
+    if ctx.wants("zoom_default") and "/XYZnullnullnull" not in compact_action:
+        ctx.add_suggestion("zoom_default", "文档打开动作使用了固定缩放或非默认视图")
+
+
+def _check_bookmarks(ctx):
+    """书签组：折叠状态、缩放、新窗口、外链、失效目标、未知动作、目标完整性。"""
+    doc = ctx.doc
+    bookmark_wanted = ctx.wants(
+        "collapse_all_bookmarks",
+        "bookmark_inherit_zoom",
+        "bookmark_open_new_window",
+        "bookmark_remove_external_links",
+        "bookmark_remove_invalid",
+        "bookmark_remove_unknown_actions",
+        "cleanup_remove_all_links_bookmarks",
+    )
+    if not (ctx.has_bookmarks and bookmark_wanted):
+        return
+
+    if not ctx.full_scan and ctx.wants("cleanup_remove_all_links_bookmarks"):
+        ctx.add_suggestion("cleanup_remove_all_links_bookmarks", "文档包含可清理的书签")
+    if ctx.wants("collapse_all_bookmarks") and any(
+        isinstance(item[-1], dict) and item[-1].get("collapse") is not True for item in ctx.toc
+    ):
+        ctx.add_suggestion("collapse_all_bookmarks", "文档包含未折叠的书签")
+
+    for item in ctx.toc:
+        try:
+            _level, _title, bm_page, dest = item
+        except Exception:
+            continue
+        if not isinstance(dest, dict):
+            dest = {}
+        kind = dest.get("kind", fitz.LINK_NONE)
+        if ctx.wants("bookmark_inherit_zoom") and kind == fitz.LINK_GOTO and dest.get("zoom", 0.0) not in [0, 0.0, None]:
+            ctx.add_suggestion("bookmark_inherit_zoom", "部分内部书签使用了固定缩放比例")
+        if ctx.wants("bookmark_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
+            ctx.add_suggestion("bookmark_open_new_window", "部分外部文件书签未设置为新窗口打开")
+        if ctx.full_scan:
+            _add_link_target_integrity_findings(
+                ctx.suggestions,
+                ctx.base_dir,
+                kind,
+                dest.get("file", ""),
+                dest.get("page", 0),
+                "书签",
+            )
+        if ctx.wants("bookmark_remove_external_links") and kind == fitz.LINK_URI:
+            ctx.add_suggestion("bookmark_remove_external_links", "书签中包含外部URI链接")
+        if ctx.wants("bookmark_remove_invalid") and (
+            kind == fitz.LINK_NONE or (kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count))
+        ):
+            ctx.add_suggestion("bookmark_remove_invalid", "书签中存在失效目标")
+        if ctx.wants("bookmark_remove_unknown_actions") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+            ctx.add_suggestion("bookmark_remove_unknown_actions", "书签中存在非标准动作")
+
+
+def _check_page_links(ctx):
+    """页面链接组：路径/缩放/新窗口/URI/失效/未知动作/目标完整性 + 注释 URI。"""
+    doc = ctx.doc
+    link_wanted = ctx.wants(
+        "link_abs_to_rel_path",
+        "link_inherit_zoom",
+        "link_open_new_window",
+        "cleanup_remove_external_uri",
+        "cleanup_remove_external_uri_and_text_black",
+        "cleanup_remove_invalid_links",
+        "cleanup_remove_invalid_links_and_text_black",
+        "cleanup_remove_unknown_action_links",
+        "cleanup_remove_all_links_bookmarks",
+        "cleanup_remove_annotations",
+    )
+    if not link_wanted:
+        return
+
+    link_file_kind = getattr(fitz, "LINK_FILE", None)
+    file_like_link_kinds = {fitz.LINK_GOTOR}
+    if link_file_kind is not None:
+        file_like_link_kinds.add(link_file_kind)
+
+    for page in doc:
+        links = page.get_links()
+        if not ctx.full_scan and ctx.wants("cleanup_remove_all_links_bookmarks") and links:
+            ctx.add_suggestion("cleanup_remove_all_links_bookmarks", "页面中包含可清理的链接")
+        for link in links:
+            kind = link.get("kind", fitz.LINK_NONE)
+            if ctx.wants("link_abs_to_rel_path") and kind in file_like_link_kinds:
+                file_path = link.get("file", "") or ""
+                decoded_file_path = unquote(file_path)
+                if decoded_file_path and (
+                    ":" in decoded_file_path
+                    or decoded_file_path.startswith("/")
+                    or decoded_file_path.startswith("\\")
+                ):
+                    ctx.add_suggestion("link_abs_to_rel_path", "外部文件链接中包含绝对路径")
+            if ctx.wants("link_inherit_zoom") and kind == fitz.LINK_GOTO and link.get("zoom", 0.0) not in [0, 0.0, None]:
+                ctx.add_suggestion("link_inherit_zoom", "部分内部超链接使用了固定缩放比例")
+            if ctx.wants("link_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
+                ctx.add_suggestion("link_open_new_window", "部分外部文件链接未设置为新窗口打开")
+            if ctx.full_scan:
+                _add_link_target_integrity_findings(
+                    ctx.suggestions,
+                    ctx.base_dir,
+                    kind,
+                    link.get("file", ""),
+                    link.get("page", 0),
+                    "页面链接",
+                )
+            if ctx.wants("cleanup_remove_external_uri") and kind == fitz.LINK_URI:
+                ctx.add_suggestion("cleanup_remove_external_uri", "页面中包含外部URI链接")
+            if ctx.wants("cleanup_remove_invalid_links") and kind == fitz.LINK_NONE:
+                ctx.add_suggestion("cleanup_remove_invalid_links", "页面中存在无有效动作的链接区域")
+            if ctx.wants("cleanup_remove_unknown_action_links") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+                ctx.add_suggestion("cleanup_remove_unknown_action_links", "页面中存在非标准链接动作")
+
+        for annot in page.annots() or []:
+            try:
+                if annot.type[0] == 8:
+                    uri = getattr(annot, "uri", "") or ""
+                    if not uri and hasattr(annot, "info"):
+                        uri = annot.info.get("uri", "") or ""
+                    if ctx.wants("cleanup_remove_external_uri") and uri:
+                        ctx.add_suggestion("cleanup_remove_external_uri", "页面注释中包含外部URI链接")
+                else:
+                    ctx.has_non_link_annotation = True
+            except Exception:
+                continue
+
+
+def _check_cleanup_targets(ctx):
+    """清理组：批注 / 附件 / 结构标签 / 元数据 / 动态内容。"""
+    doc = ctx.doc
+    if ctx.wants("cleanup_remove_annotations") and ctx.has_non_link_annotation:
+        ctx.add_suggestion("cleanup_remove_annotations", "文档包含高亮、文本框或其它批注")
+
+    if ctx.wants("cleanup_remove_attachments") and doc.embfile_count() > 0:
+        ctx.add_suggestion("cleanup_remove_attachments", f"文档包含 {doc.embfile_count()} 个内嵌附件")
+
+    if ctx.wants("cleanup_remove_tags") and (
+        _catalog_key_is_present(doc, ctx.catalog_xref, "StructTreeRoot")
+        or _catalog_key_is_present(doc, ctx.catalog_xref, "MarkInfo")
+    ):
+        ctx.add_suggestion("cleanup_remove_tags", "文档包含结构化标签信息")
+
+    if ctx.wants("cleanup_remove_metadata"):
+        metadata_values = [
+            value
+            for key, value in ctx.meta.items()
+            if key not in ["format", "encryption"] and str(value or "").strip()
+        ]
+        if metadata_values or _catalog_key_is_present(doc, ctx.catalog_xref, "PieceInfo"):
+            ctx.add_suggestion("cleanup_remove_metadata", "文档包含可清理的元数据")
+
+    if ctx.wants("cleanup_remove_dynamic_content"):
+        catalog_object = ""
+        try:
+            catalog_object = doc.xref_object(ctx.catalog_xref)
+        except Exception:
+            catalog_object = ""
+        names_kind, _names_value = _catalog_key(doc, ctx.catalog_xref, "Names")
+        names_value = _catalog_key_resolved_value(doc, ctx.catalog_xref, "Names")
+        dynamic_probe = f"{catalog_object}\n{names_value}"
+        if names_kind != "null" and any(marker in dynamic_probe for marker in ["/JavaScript", "/JS", "/RichMedia", "/3D"]):
+            ctx.add_suggestion("cleanup_remove_dynamic_content", "文档包含 JavaScript、3D 或富媒体入口")
+
+
+def _check_file_level(ctx):
+    """文件级：PDF 版本 / 线性化 / 权限限制（需读原始文件或调 qpdf 子进程）。"""
+    input_path = ctx.input_path
+    if ctx.wants("convert_pdf_version"):
+        pdf_version = qpdf._read_pdf_header_version(input_path)
+        if pdf_version and pdf_version != "1.7":
+            ctx.add_suggestion("convert_pdf_version", f"当前PDF版本为 {pdf_version}，不是 1.7")
+
+    if ctx.wants("fast_web_view") and not qpdf._is_pdf_linearized(input_path):
+        ctx.add_suggestion("fast_web_view", "文档未启用线性化快速网页浏览")
+
+    if ctx.wants("remove_pdf_restrictions") and qpdf._qpdf_reports_restrictions(input_path):
+        ctx.add_suggestion("remove_pdf_restrictions", "文档存在打印、复制或编辑权限限制")
+
+
+def _check_report_only_reviews(ctx):
+    """仅完整预检追加的复核项：字体嵌入 / 批注 / 失效引用文本。"""
+    if not ctx.full_scan:
+        return
+    doc, report, suggestions = ctx.doc, ctx.report, ctx.suggestions
+
+    try:
+        font_precheck = _collect_font_precheck_findings(doc)
+        report["font_summary"] = font_precheck.get("font_summary", "")
+        report["font_details"] = font_precheck.get("font_details", "")
+        report["font_findings"] = font_precheck.get("font_findings", [])
+        if report["font_summary"]:
+            reason = report["font_summary"]
+            if report["font_details"]:
+                reason = f"{reason}；明细：{report['font_details']}"
+            _add_precheck_report_finding(
+                suggestions,
+                "font_precheck_review",
+                "字体预检：需要复核",
+                reason,
+            )
+    except Exception:
+        pass
+
+    try:
+        annotation_precheck = _collect_annotation_findings(doc)
+        if annotation_precheck.get("has_annotations"):
+            report["annotation_summary"] = annotation_precheck.get("summary", "")
+            report["annotation_details"] = annotation_precheck.get("details", "")
+            reason = report["annotation_summary"]
+            if report["annotation_details"]:
+                reason = f"{reason}；明细：{report['annotation_details']}"
+            _add_precheck_report_finding(
+                suggestions,
+                "annotation_precheck_review",
+                "批注检查：需要复核",
+                reason,
+            )
+    except Exception:
+        pass
+
+    try:
+        broken_reference_precheck = _collect_broken_reference_findings(doc)
+        if broken_reference_precheck.get("has_broken_reference"):
+            report["broken_reference_summary"] = broken_reference_precheck.get("summary", "")
+            report["broken_reference_details"] = broken_reference_precheck.get("details", "")
+            reason = report["broken_reference_summary"]
+            if report["broken_reference_details"]:
+                reason = f"{reason}；明细：{report['broken_reference_details']}"
+            _add_precheck_report_finding(
+                suggestions,
+                "broken_reference_precheck_review",
+                "失效引用/链接文本检查：需要复核",
+                reason,
+            )
+    except Exception:
+        pass
+
+
+# 检查组顺序即执行顺序（页面链接组必须先于清理组：后者消费其副产物
+# has_non_link_annotation）。
+_PRECHECK_GROUPS = (
+    _check_document_properties,
+    _check_open_action,
+    _check_bookmarks,
+    _check_page_links,
+    _check_cleanup_targets,
+    _check_file_level,
+    _check_report_only_reviews,
+)
+
+
+def build_precheck_report(input_path, selected_options=None):
+    """只读预检：依序执行检查组，汇总建议与复核项。
+
+    selected_options 为 None 时执行完整预检（含 report_only 复核项）；
+    传入选项集合时只检查勾选的可预检项。
+    """
+    selected_options = _filtered_precheck_options(selected_options)
 
     report = {
         "available": False,
@@ -780,7 +1102,6 @@ def build_precheck_report(input_path, selected_options=None):
         report["error"] = "不是PDF文件"
         return report
 
-    suggestions = report["suggestions"]
     doc = None
     try:
         doc = fitz.open(input_path)
@@ -789,247 +1110,9 @@ def build_precheck_report(input_path, selected_options=None):
             return report
 
         report["available"] = True
-        base_dir = os.path.dirname(os.path.abspath(input_path))
-        catalog_xref = doc.pdf_catalog()
-        toc = doc.get_toc(simple=False)
-        has_bookmarks = len(toc) > 0
-        meta = doc.metadata or {}
-        base_name = Path(input_path).stem
-
-        if wants("title_from_filename") and (meta.get("title") or "") != base_name:
-            add_suggestion("title_from_filename", "PDF标题属性与文件名不一致或为空")
-
-        if wants("initial_view_bookmarks_and_page"):
-            page_mode_kind, page_mode_value = _catalog_key(doc, catalog_xref, "PageMode")
-            if has_bookmarks and not (page_mode_kind == "name" and page_mode_value == "/UseOutlines"):
-                add_suggestion("initial_view_bookmarks_and_page", "文档包含书签，但打开时未设置为显示书签面板")
-            elif not has_bookmarks and page_mode_kind == "name" and page_mode_value != "/UseNone":
-                add_suggestion("initial_view_bookmarks_and_page", "文档不含书签，但初始导览标签不是页面视图")
-
-        if wants("page_layout_default") and _catalog_key_is_present(doc, catalog_xref, "PageLayout"):
-            add_suggestion("page_layout_default", "文档设置了显式页面布局")
-
-        if wants("open_page_first", "zoom_default"):
-            open_action_kind, open_action_value = _catalog_key(doc, catalog_xref, "OpenAction")
-        else:
-            open_action_kind, open_action_value = "null", "null"
-        if open_action_kind != "null" and doc.page_count > 0:
-            open_action_value = _dereference_xref_value(doc, open_action_value)
-            first_page_ref = f"{doc[0].xref} 0 R"
-            compact_action = open_action_value.replace(" ", "")
-            if wants("open_page_first") and first_page_ref.replace(" ", "") not in compact_action:
-                add_suggestion("open_page_first", "文档打开动作没有指向第一页")
-            if wants("zoom_default") and "/XYZnullnullnull" not in compact_action:
-                add_suggestion("zoom_default", "文档打开动作使用了固定缩放或非默认视图")
-
-        bookmark_wanted = wants(
-            "collapse_all_bookmarks",
-            "bookmark_inherit_zoom",
-            "bookmark_open_new_window",
-            "bookmark_remove_external_links",
-            "bookmark_remove_invalid",
-            "bookmark_remove_unknown_actions",
-            "cleanup_remove_all_links_bookmarks",
-        )
-        if has_bookmarks and bookmark_wanted:
-            if selected_options is not None and wants("cleanup_remove_all_links_bookmarks"):
-                add_suggestion("cleanup_remove_all_links_bookmarks", "文档包含可清理的书签")
-            if wants("collapse_all_bookmarks") and any(isinstance(item[-1], dict) and item[-1].get("collapse") is not True for item in toc):
-                add_suggestion("collapse_all_bookmarks", "文档包含未折叠的书签")
-
-            for item in toc:
-                try:
-                    _level, _title, bm_page, dest = item
-                except Exception:
-                    continue
-                if not isinstance(dest, dict):
-                    dest = {}
-                kind = dest.get("kind", fitz.LINK_NONE)
-                if wants("bookmark_inherit_zoom") and kind == fitz.LINK_GOTO and dest.get("zoom", 0.0) not in [0, 0.0, None]:
-                    add_suggestion("bookmark_inherit_zoom", "部分内部书签使用了固定缩放比例")
-                if wants("bookmark_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
-                    add_suggestion("bookmark_open_new_window", "部分外部文件书签未设置为新窗口打开")
-                if selected_options is None:
-                    _add_link_target_integrity_findings(
-                        suggestions,
-                        base_dir,
-                        kind,
-                        dest.get("file", ""),
-                        dest.get("page", 0),
-                        "书签",
-                    )
-                if wants("bookmark_remove_external_links") and kind == fitz.LINK_URI:
-                    add_suggestion("bookmark_remove_external_links", "书签中包含外部URI链接")
-                if wants("bookmark_remove_invalid") and (
-                    kind == fitz.LINK_NONE or (kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count))
-                ):
-                    add_suggestion("bookmark_remove_invalid", "书签中存在失效目标")
-                if wants("bookmark_remove_unknown_actions") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
-                    add_suggestion("bookmark_remove_unknown_actions", "书签中存在非标准动作")
-
-        link_file_kind = getattr(fitz, "LINK_FILE", None)
-        file_like_link_kinds = {fitz.LINK_GOTOR}
-        if link_file_kind is not None:
-            file_like_link_kinds.add(link_file_kind)
-
-        has_non_link_annotation = False
-        link_wanted = wants(
-            "link_abs_to_rel_path",
-            "link_inherit_zoom",
-            "link_open_new_window",
-            "cleanup_remove_external_uri",
-            "cleanup_remove_external_uri_and_text_black",
-            "cleanup_remove_invalid_links",
-            "cleanup_remove_invalid_links_and_text_black",
-            "cleanup_remove_unknown_action_links",
-            "cleanup_remove_all_links_bookmarks",
-            "cleanup_remove_annotations",
-        )
-        if link_wanted:
-            for page in doc:
-                links = page.get_links()
-                if selected_options is not None and wants("cleanup_remove_all_links_bookmarks") and links:
-                    add_suggestion("cleanup_remove_all_links_bookmarks", "页面中包含可清理的链接")
-                for link in links:
-                    kind = link.get("kind", fitz.LINK_NONE)
-                    if wants("link_abs_to_rel_path") and kind in file_like_link_kinds:
-                        file_path = link.get("file", "") or ""
-                        decoded_file_path = unquote(file_path)
-                        if decoded_file_path and (
-                            ":" in decoded_file_path
-                            or decoded_file_path.startswith("/")
-                            or decoded_file_path.startswith("\\")
-                        ):
-                            add_suggestion("link_abs_to_rel_path", "外部文件链接中包含绝对路径")
-                    if wants("link_inherit_zoom") and kind == fitz.LINK_GOTO and link.get("zoom", 0.0) not in [0, 0.0, None]:
-                        add_suggestion("link_inherit_zoom", "部分内部超链接使用了固定缩放比例")
-                    if wants("link_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
-                        add_suggestion("link_open_new_window", "部分外部文件链接未设置为新窗口打开")
-                    if selected_options is None:
-                        _add_link_target_integrity_findings(
-                            suggestions,
-                            base_dir,
-                            kind,
-                            link.get("file", ""),
-                            link.get("page", 0),
-                            "页面链接",
-                        )
-                    if wants("cleanup_remove_external_uri") and kind == fitz.LINK_URI:
-                        add_suggestion("cleanup_remove_external_uri", "页面中包含外部URI链接")
-                    if wants("cleanup_remove_invalid_links") and kind == fitz.LINK_NONE:
-                        add_suggestion("cleanup_remove_invalid_links", "页面中存在无有效动作的链接区域")
-                    if wants("cleanup_remove_unknown_action_links") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
-                        add_suggestion("cleanup_remove_unknown_action_links", "页面中存在非标准链接动作")
-
-                for annot in page.annots() or []:
-                    try:
-                        if annot.type[0] == 8:
-                            uri = getattr(annot, "uri", "") or ""
-                            if not uri and hasattr(annot, "info"):
-                                uri = annot.info.get("uri", "") or ""
-                            if wants("cleanup_remove_external_uri") and uri:
-                                add_suggestion("cleanup_remove_external_uri", "页面注释中包含外部URI链接")
-                        else:
-                            has_non_link_annotation = True
-                    except Exception:
-                        continue
-
-        if wants("cleanup_remove_annotations") and has_non_link_annotation:
-            add_suggestion("cleanup_remove_annotations", "文档包含高亮、文本框或其它批注")
-
-        if wants("cleanup_remove_attachments") and doc.embfile_count() > 0:
-            add_suggestion("cleanup_remove_attachments", f"文档包含 {doc.embfile_count()} 个内嵌附件")
-
-        if wants("cleanup_remove_tags") and (
-            _catalog_key_is_present(doc, catalog_xref, "StructTreeRoot")
-            or _catalog_key_is_present(doc, catalog_xref, "MarkInfo")
-        ):
-            add_suggestion("cleanup_remove_tags", "文档包含结构化标签信息")
-
-        if wants("cleanup_remove_metadata"):
-            metadata_values = [
-                value
-                for key, value in meta.items()
-                if key not in ["format", "encryption"] and str(value or "").strip()
-            ]
-            if metadata_values or _catalog_key_is_present(doc, catalog_xref, "PieceInfo"):
-                add_suggestion("cleanup_remove_metadata", "文档包含可清理的元数据")
-
-        if wants("cleanup_remove_dynamic_content"):
-            catalog_object = ""
-            try:
-                catalog_object = doc.xref_object(catalog_xref)
-            except Exception:
-                catalog_object = ""
-            names_kind, _names_value = _catalog_key(doc, catalog_xref, "Names")
-            names_value = _catalog_key_resolved_value(doc, catalog_xref, "Names")
-            dynamic_probe = f"{catalog_object}\n{names_value}"
-            if names_kind != "null" and any(marker in dynamic_probe for marker in ["/JavaScript", "/JS", "/RichMedia", "/3D"]):
-                add_suggestion("cleanup_remove_dynamic_content", "文档包含 JavaScript、3D 或富媒体入口")
-
-        if wants("convert_pdf_version"):
-            pdf_version = qpdf._read_pdf_header_version(input_path)
-            if pdf_version and pdf_version != "1.7":
-                add_suggestion("convert_pdf_version", f"当前PDF版本为 {pdf_version}，不是 1.7")
-
-        if wants("fast_web_view") and not qpdf._is_pdf_linearized(input_path):
-            add_suggestion("fast_web_view", "文档未启用线性化快速网页浏览")
-
-        if wants("remove_pdf_restrictions") and qpdf._qpdf_reports_restrictions(input_path):
-            add_suggestion("remove_pdf_restrictions", "文档存在打印、复制或编辑权限限制")
-
-        if selected_options is None:
-            try:
-                font_precheck = _collect_font_precheck_findings(doc)
-                report["font_summary"] = font_precheck.get("font_summary", "")
-                report["font_details"] = font_precheck.get("font_details", "")
-                report["font_findings"] = font_precheck.get("font_findings", [])
-                if report["font_summary"]:
-                    reason = report["font_summary"]
-                    if report["font_details"]:
-                        reason = f"{reason}；明细：{report['font_details']}"
-                    _add_precheck_report_finding(
-                        suggestions,
-                        "font_precheck_review",
-                        "字体预检：需要复核",
-                        reason,
-                    )
-            except Exception:
-                pass
-
-            try:
-                annotation_precheck = _collect_annotation_findings(doc)
-                if annotation_precheck.get("has_annotations"):
-                    report["annotation_summary"] = annotation_precheck.get("summary", "")
-                    report["annotation_details"] = annotation_precheck.get("details", "")
-                    reason = report["annotation_summary"]
-                    if report["annotation_details"]:
-                        reason = f"{reason}；明细：{report['annotation_details']}"
-                    _add_precheck_report_finding(
-                        suggestions,
-                        "annotation_precheck_review",
-                        "批注检查：需要复核",
-                        reason,
-                    )
-            except Exception:
-                pass
-
-            try:
-                broken_reference_precheck = _collect_broken_reference_findings(doc)
-                if broken_reference_precheck.get("has_broken_reference"):
-                    report["broken_reference_summary"] = broken_reference_precheck.get("summary", "")
-                    report["broken_reference_details"] = broken_reference_precheck.get("details", "")
-                    reason = report["broken_reference_summary"]
-                    if report["broken_reference_details"]:
-                        reason = f"{reason}；明细：{report['broken_reference_details']}"
-                    _add_precheck_report_finding(
-                        suggestions,
-                        "broken_reference_precheck_review",
-                        "失效引用/链接文本检查：需要复核",
-                        reason,
-                    )
-            except Exception:
-                pass
+        ctx = _PrecheckContext(doc, input_path, selected_options, report)
+        for check_group in _PRECHECK_GROUPS:
+            check_group(ctx)
 
         return report
     except Exception as e:
