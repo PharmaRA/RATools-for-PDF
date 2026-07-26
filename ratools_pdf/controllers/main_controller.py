@@ -1222,17 +1222,10 @@ class MainController(QObject):
         self.io_worker.error_action.connect(self.on_io_action_error)
         self.io_worker.start()
 
-    def update_progress(self, row_index, status_text, log_msg):
-        # 获取与该行对应的精确文件路径，用于树节点的映射更新
-        processing_files = (
-            self.processing_files
-            or self.precheck_files
-            or self.detection_files
-            or self.loaded_files
-        )
-        if row_index < 0 or row_index >= len(processing_files):
+    def update_progress(self, file_path, status_text, log_msg):
+        # 信号直接携带 file_path，各类 worker 无需再依赖"当前列表 + 行索引"的隐式路由
+        if not file_path:
             return
-        file_path = processing_files[row_index]
 
         color = QColor(tree_status_color(active_palette(), status_semantic(status_text)))
 
