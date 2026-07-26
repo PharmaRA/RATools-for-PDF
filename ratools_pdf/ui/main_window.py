@@ -24,7 +24,7 @@ from ratools_pdf.ui.theme import (
     build_app_qss,
     ThemeManager,
 )
-from ratools_pdf.ui.widgets import DropZoneLabel
+from ratools_pdf.ui.widgets import DropZoneLabel, ElidedLabel
 
 
 class MainWindow(QMainWindow):
@@ -46,7 +46,9 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(get_resource_path("icon.ico")))
 
         self.resize(1100, 750)
-        self.setMinimumSize(900, 600)
+        # 970 覆盖实测布局最小宽度 962（中段三栏），底部操作栏最坏情况
+        # （重试 + 两个预检建议按钮同时可见）也在此范围内
+        self.setMinimumSize(970, 600)
 
         self.all_checkboxes = {}
         self.current_file_count = 0
@@ -313,15 +315,15 @@ class MainWindow(QMainWindow):
         right_header.setObjectName("rightHeader")
         rh_layout = QVBoxLayout(right_header)
         rh_layout.setContentsMargins(16, 18, 16, 14)
-        rh_layout.setSpacing(18)
+        rh_layout.setSpacing(10)
 
         self.rh_title = QLabel("处理规则选项")
         self.rh_title.setObjectName("rightPanelTitle")
 
         self.selection_summary_label = QLabel("尚未选择任何处理规则")
         self.selection_summary_label.setObjectName("selectionSummary")
-        rh_layout.addWidget(self.selection_summary_label)
         rh_layout.addWidget(self.rh_title)
+        rh_layout.addWidget(self.selection_summary_label)
         right_layout.addWidget(right_header)
 
         scroll_area = QScrollArea()
@@ -478,17 +480,22 @@ class MainWindow(QMainWindow):
         footer.setFixedHeight(64)
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(24, 0, 24, 0)
+        # 统一用布局间距：隐藏的条件按钮不再留下固定 addSpacing 空档
+        footer_layout.setSpacing(10)
 
-        self.btn_log = QPushButton("📋 查看/导出日志")
+        self.btn_log = QPushButton("📋 日志")
         self.btn_log.setObjectName("actionBtn")
+        self.btn_log.setToolTip("查看或导出处理日志")
         footer_layout.addWidget(self.btn_log)
         footer_layout.addStretch()
 
-        self.info_label = QLabel("0 个文件 · 0 条规则 · 中国 eCTD 预设")
+        # 三条文本提示均可能超长（文件名/风险说明），空间不足时省略号截断并挂 tooltip，
+        # 优先保住右侧按钮组不被顶出窗口。
+        self.info_label = ElidedLabel("0 个文件 · 0 条规则 · 中国 eCTD 预设")
         self.info_label.setObjectName("footerSummary")
-        self.processing_hint_label = QLabel("")
+        self.processing_hint_label = ElidedLabel("")
         self.processing_hint_label.setObjectName("processingHint")
-        self.risk_hint_label = QLabel("")
+        self.risk_hint_label = ElidedLabel("")
         self.risk_hint_label.setObjectName("footerHint")
         self.processing_mode_group = QButtonGroup(self)
         self.radio_smart_processing = QRadioButton("智能处理")
@@ -504,15 +511,15 @@ class MainWindow(QMainWindow):
         self.btn_skip_current.setObjectName("actionBtn")
         self.btn_skip_current.setEnabled(False)
         self.btn_skip_current.hide()
-        self.btn_retry_failed = QPushButton("↻ 仅处理失败项")
+        self.btn_retry_failed = QPushButton("↻ 重试失败项")
         self.btn_retry_failed.setObjectName("actionBtn")
         self.btn_retry_failed.setEnabled(False)
         self.btn_retry_failed.hide()
-        self.btn_apply_precheck = QPushButton("✓ 应用预检建议")
+        self.btn_apply_precheck = QPushButton("✓ 应用建议")
         self.btn_apply_precheck.setObjectName("actionBtn")
         self.btn_apply_precheck.setEnabled(False)
         self.btn_apply_precheck.hide()
-        self.btn_process_precheck_suggested = QPushButton("▶ 仅处理建议文件")
+        self.btn_process_precheck_suggested = QPushButton("▶ 处理建议文件")
         self.btn_process_precheck_suggested.setObjectName("actionBtn")
         self.btn_process_precheck_suggested.setEnabled(False)
         self.btn_process_precheck_suggested.hide()
@@ -521,25 +528,17 @@ class MainWindow(QMainWindow):
         self.btn_start = QPushButton("▶ 开始处理")
         self.btn_start.setObjectName("startBtn")
         footer_layout.addWidget(self.info_label)
-        footer_layout.addSpacing(16)
         footer_layout.addWidget(self.processing_hint_label)
-        footer_layout.addSpacing(16)
         footer_layout.addWidget(self.risk_hint_label)
-        footer_layout.addSpacing(16)
+        footer_layout.addSpacing(6)
         footer_layout.addWidget(self.radio_smart_processing)
-        footer_layout.addSpacing(8)
         footer_layout.addWidget(self.radio_force_processing)
-        footer_layout.addSpacing(16)
+        footer_layout.addSpacing(6)
         footer_layout.addWidget(self.btn_skip_current)
-        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_retry_failed)
-        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_apply_precheck)
-        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_process_precheck_suggested)
-        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_precheck)
-        footer_layout.addSpacing(10)
         footer_layout.addWidget(self.btn_start)
         main_layout.addWidget(footer)
 

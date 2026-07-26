@@ -203,6 +203,31 @@ class ThemeStartupTests(unittest.TestCase):
         self.assertEqual("light", manager.current_palette().name)
         self.assertIn("#F7F8FA", manager._app.stylesheet)
 
+    def test_theme_change_recolors_tree_status_column(self):
+        from PySide6.QtWidgets import QTreeWidgetItem
+
+        from ratools_pdf.controllers.main_controller import MainController
+        from ratools_pdf.ui.theme import LIGHT
+
+        window = self._create_window_with_theme("light")
+        controller = MainController(window)
+
+        done_node = QTreeWidgetItem(window.tree)
+        done_node.setText(2, "处理完成")
+        waiting_node = QTreeWidgetItem(window.tree)
+        waiting_node.setText(2, "等待处理")
+        controller.file_nodes = {"a.pdf": done_node, "b.pdf": waiting_node}
+
+        window.on_theme_mode_changed("dark")
+
+        self.assertEqual(DARK.success, done_node.foreground(2).color().name().upper())
+        self.assertEqual(DARK.text_muted, waiting_node.foreground(2).color().name().upper())
+
+        window.on_theme_mode_changed("light")
+
+        self.assertEqual(LIGHT.success, done_node.foreground(2).color().name().upper())
+        self.assertEqual(LIGHT.text_muted, waiting_node.foreground(2).color().name().upper())
+
     def test_worker_spinbox_uses_custom_stepper_buttons(self):
         window = self._create_window_with_theme("light")
         dialog = window.settings_dialog
