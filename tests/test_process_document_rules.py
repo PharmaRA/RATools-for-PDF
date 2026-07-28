@@ -271,6 +271,107 @@ class BookmarkRulesTests(unittest.TestCase):
             doc.close()
             self.assertEqual([item[1] for item in toc], ["Internal"])
 
+    def _make_named_dest_pdf(self, tmp):
+        """构造带命名目标书签的 PDF：一个悬空、一个可解析。
+
+        真实 PDF 里书签常用 ``/GoTo`` + 命名目标，PyMuPDF 会报 LINK_NAMED；
+        set_toc 写不出这种形状，只能直接改写 outline 对象。
+        """
+        source = os.path.join(tmp, "named.pdf")
+        doc = fitz.open()
+        doc.new_page()
+        doc.new_page()
+        doc.set_toc([
+            [1, "dangling-named", 1],
+            [1, "valid-named", 2],
+            [1, "internal", 1],
+        ])
+        doc.save(source)
+        doc.close()
+
+        doc = fitz.open(source)
+        page1_xref = doc[1].xref
+        # catalog /Dests 字典：RealDest 可解析到第 2 页，NoSuchDest 不存在
+        dests_xref = doc.get_new_xref()
+        doc.update_object(dests_xref, f"<< /RealDest [{page1_xref} 0 R /Fit] >>")
+        doc.xref_set_key(doc.pdf_catalog(), "Dests", f"{dests_xref} 0 R")
+
+        outline_xrefs = []
+        for xref in range(1, doc.xref_length()):
+            if doc.xref_get_key(xref, "Title")[0] != "null":
+                outline_xrefs.append((doc.xref_get_key(xref, "Title")[1], xref))
+        by_title = {title: xref for title, xref in outline_xrefs}
+
+        def _outline_xref(label):
+            for title, xref in by_title.items():
+                if label in title:
+                    return xref
+            raise AssertionError(f"未找到书签对象: {label} in {list(by_title)}")
+
+        doc.xref_set_key(_outline_xref("dangling-named"), "Dest", "null")
+        doc.xref_set_key(
+            _outline_xref("dangling-named"), "A", "<< /S /GoTo /D (NoSuchDest) >>"
+        )
+        doc.xref_set_key(_outline_xref("valid-named"), "Dest", "null")
+        doc.xref_set_key(
+            _outline_xref("valid-named"), "A", "<< /S /GoTo /D (RealDest) >>"
+        )
+        doc.saveIncr()
+        doc.close()
+
+        doc = fitz.open(source)
+        kinds = {item[1]: item[3].get("kind") for item in doc.get_toc(simple=False)}
+        doc.close()
+        # 前置条件：两个命名目标书签都必须被报成 LINK_NAMED，否则用例失去意义
+        assert kinds.get("dangling-named") == fitz.LINK_NAMED, kinds
+        assert kinds.get("valid-named") == fitz.LINK_NAMED, kinds
+        return source
+
+    def test_bookmark_remove_invalid_drops_dangling_named_dest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_remove_invalid"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            toc = doc.get_toc(simple=False)
+            doc.close()
+            titles = [item[1] for item in toc]
+            # 悬空命名目标被删除，可解析的命名目标与普通内部书签都要保留
+            self.assertEqual(titles, ["valid-named", "internal"])
+
+    def test_bookmark_remove_invalid_keeps_resolvable_named_dest_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_remove_invalid"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            toc = doc.get_toc(simple=False)
+            doc.close()
+            kept = {item[1]: item for item in toc}
+            # 命名目标降级为等价内部跳转后，仍须指向原来的第 2 页
+            self.assertEqual(kept["valid-named"][2], 2)
+            self.assertEqual(kept["valid-named"][3].get("kind"), fitz.LINK_GOTO)
+
+    def test_bookmark_rules_untouched_when_invalid_option_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            # 未勾选"清理失效书签"时，悬空书签不应被顺带删除
+            ok, msg = _process(source, output, {"bookmark_remove_external_links"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            titles = [item[1] for item in doc.get_toc(simple=False)]
+            doc.close()
+            self.assertIn("dangling-named", titles)
+
 
 class HyperlinkRulesTests(unittest.TestCase):
     def test_link_abs_to_rel_path_strips_directory(self):

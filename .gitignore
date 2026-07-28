@@ -9,3 +9,4 @@ settings.ini
 /build_pyinstaller
 /*.spec
 /.worktrees
+.claude/

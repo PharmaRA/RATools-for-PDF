@@ -159,6 +159,48 @@ class PrecheckBookmarkTests(unittest.TestCase):
             self.assertNotIn("bookmark_remove_external_links", ids)
             self.assertNotIn("bookmark_remove_invalid", ids)
 
+    def _make_named_dest_pdf(self, tmp, dest_names):
+        """构造书签动作为命名目标的 PDF。
+
+        set_toc 无法写出命名目标，只能保存后直接改写 outline 的 /A。
+        catalog 的 /Dests 里只登记 RealDest，因此 NoSuchDest 是悬空目标。
+        """
+        path = os.path.join(tmp, "named.pdf")
+        doc = fitz.open()
+        doc.new_page()
+        doc.new_page()
+        doc.set_toc([[1, name, 1] for name in dest_names])
+        doc.save(path)
+        doc.close()
+
+        doc = fitz.open(path)
+        page1_xref = doc[1].xref
+        dests = doc.get_new_xref()
+        doc.update_object(dests, f"<< /RealDest [{page1_xref} 0 R /Fit] >>")
+        doc.xref_set_key(doc.pdf_catalog(), "Dests", f"{dests} 0 R")
+        for item, name in zip(doc.get_toc(simple=False), dest_names):
+            doc.xref_set_key(item[3]["xref"], "Dest", "null")
+            doc.xref_set_key(item[3]["xref"], "A", f"<< /S /GoTo /D ({name}) >>")
+        doc.saveIncr()
+        doc.close()
+        return path
+
+    def test_dangling_named_dest_bookmark_triggers_remove_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_named_dest_pdf(tmp, ["NoSuchDest"])
+
+            report = _report(path)
+
+            self.assertIn("bookmark_remove_invalid", _suggested_ids(report))
+
+    def test_resolvable_named_dest_bookmark_no_remove_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_named_dest_pdf(tmp, ["RealDest"])
+
+            report = _report(path)
+
+            self.assertNotIn("bookmark_remove_invalid", _suggested_ids(report))
+
 
 class PrecheckLinkTests(unittest.TestCase):
     def test_absolute_file_link_triggers_abs_to_rel(self):

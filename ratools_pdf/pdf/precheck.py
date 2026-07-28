@@ -6,7 +6,7 @@ from urllib.parse import unquote, urlparse
 import fitz
 
 from ratools_pdf.config import rules_catalog
-from ratools_pdf.pdf import qpdf
+from ratools_pdf.pdf import bookmarks_links, qpdf
 
 
 def _option_title(option_id):
@@ -868,8 +868,8 @@ def _check_bookmarks(ctx):
             )
         if ctx.wants("bookmark_remove_external_links") and kind == fitz.LINK_URI:
             ctx.add_suggestion("bookmark_remove_external_links", "书签中包含外部URI链接")
-        if ctx.wants("bookmark_remove_invalid") and (
-            kind == fitz.LINK_NONE or (kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count))
+        if ctx.wants("bookmark_remove_invalid") and bookmarks_links.is_bookmark_dest_invalid(
+            dest, bm_page, doc.page_count
         ):
             ctx.add_suggestion("bookmark_remove_invalid", "书签中存在失效目标")
         if ctx.wants("bookmark_remove_unknown_actions") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:

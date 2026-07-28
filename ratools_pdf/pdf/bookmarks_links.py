@@ -119,6 +119,53 @@ def _is_external_link_kind(kind):
     return kind in _EXTERNAL_LINK_KINDS
 
 
+def _dest_page_index(dest):
+    """读取目的地里的 0 基页码；缺失或无法解析时返回 None。"""
+    value = dest.get("page")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def bookmark_named_dest_page(dest):
+    """命名目标解析出的 0 基页码；悬空（指向不存在的命名目标）时返回 None。
+
+    PyMuPDF 对 ``/GoTo`` + 命名目标一律报 LINK_NAMED：能解析时目的地里带
+    ``page`` 键，悬空时只剩 ``nameddest``。
+    """
+    page_idx = _dest_page_index(dest)
+    if page_idx is None or page_idx < 0:
+        return None
+    return page_idx
+
+
+def is_bookmark_dest_invalid(dest, bm_page, page_count):
+    """书签目标是否失效，供预检与处理共用以保证判定一致。
+
+    三类失效：无动作的空书签、内部跳转指向不存在的页码、命名目标无法解析。
+    """
+    if not isinstance(dest, dict):
+        return True
+
+    kind = dest.get("kind", fitz.LINK_NONE)
+    if kind == fitz.LINK_NONE:
+        return True
+    if kind not in (fitz.LINK_GOTO, fitz.LINK_NAMED):
+        return False
+
+    if kind == fitz.LINK_NAMED and bookmark_named_dest_page(dest) is None:
+        return True
+
+    try:
+        bm_page = int(bm_page)
+    except (TypeError, ValueError):
+        return True
+    return bm_page < 1 or bm_page > page_count
+
+
 def _rects_overlap(rect_a, rect_b, min_ratio=0.5):
     """两个矩形是否被视为“同一区域”：交集面积占较小矩形的比例达到阈值即算重复。"""
     inter = rect_a & rect_b

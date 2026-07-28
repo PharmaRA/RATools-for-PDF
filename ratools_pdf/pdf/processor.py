@@ -221,9 +221,20 @@ def _to_point(value):
 
 
 def _normalize_bookmark_dest(dest, kind):
-    """把 get_toc 返回的目的地字典规整为 set_toc 可靠接受的形状。"""
+    """把 get_toc 返回的目的地字典规整为 set_toc 可靠接受的形状。
+
+    命名目标（LINK_NAMED）没有 set_toc 能写回的形状：能解析出页码的按内部跳转
+    输出，悬空的降级为空目的地，交由失效书签规则处理。
+    """
     if not isinstance(dest, dict):
         dest = {}
+
+    if kind == fitz.LINK_NAMED:
+        named_page = bookmarks_links.bookmark_named_dest_page(dest)
+        if named_page is None:
+            return {"kind": fitz.LINK_NONE}
+        kind = fitz.LINK_GOTO
+        dest = dict(dest, kind=fitz.LINK_GOTO, page=named_page)
 
     if kind == fitz.LINK_GOTO:
         try:
@@ -341,16 +352,19 @@ def _step_bookmark_rules(ctx):
             except Exception:
                 bm_page = 1
 
+        raw_dest = dest if isinstance(dest, dict) else {}
+        kind = raw_dest.get("kind", fitz.LINK_NONE)
+        # 失效判定必须用原始目的地：规整会把命名目标折叠成 GOTO，丢掉判定依据
+        dest_invalid = bookmarks_links.is_bookmark_dest_invalid(raw_dest, bm_page, doc.page_count)
+        dest = _normalize_bookmark_dest(raw_dest, kind)
+        # 命名目标已在规整时解析为内部跳转，后续按 GOTO 处理
         kind = dest.get("kind", fitz.LINK_NONE)
-        dest = _normalize_bookmark_dest(dest, kind)
         delete_it = False
 
         if "bookmark_remove_external_links" in options and kind == fitz.LINK_URI:
             delete_it = True
-        if "bookmark_remove_invalid" in options:
-            if kind == fitz.LINK_NONE or (
-                    kind == fitz.LINK_GOTO and (bm_page < 1 or bm_page > doc.page_count)):
-                delete_it = True
+        if "bookmark_remove_invalid" in options and dest_invalid:
+            delete_it = True
         if "bookmark_remove_unknown_actions" in options:
             if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
                 delete_it = True
