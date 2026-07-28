@@ -845,6 +845,9 @@ def _check_bookmarks(ctx):
     ):
         ctx.add_suggestion("collapse_all_bookmarks", "文档包含未折叠的书签")
 
+    # 命名目标的真实缩放只能从 resolve_names 取，get_toc 会把它抹成 0.0
+    named_zooms = bookmarks_links.named_dest_zoom_map(doc) if ctx.wants("bookmark_inherit_zoom") else {}
+
     for item in ctx.toc:
         try:
             _level, _title, bm_page, dest = item
@@ -853,7 +856,11 @@ def _check_bookmarks(ctx):
         if not isinstance(dest, dict):
             dest = {}
         kind = dest.get("kind", fitz.LINK_NONE)
-        if ctx.wants("bookmark_inherit_zoom") and kind == fitz.LINK_GOTO and dest.get("zoom", 0.0) not in [0, 0.0, None]:
+        if (
+            ctx.wants("bookmark_inherit_zoom")
+            and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED)
+            and bookmarks_links.bookmark_dest_zoom(dest, named_zooms) != 0.0
+        ):
             ctx.add_suggestion("bookmark_inherit_zoom", "部分内部书签使用了固定缩放比例")
         if ctx.wants("bookmark_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
             ctx.add_suggestion("bookmark_open_new_window", "部分外部文件书签未设置为新窗口打开")
@@ -872,7 +879,7 @@ def _check_bookmarks(ctx):
             dest, bm_page, doc.page_count
         ):
             ctx.add_suggestion("bookmark_remove_invalid", "书签中存在失效目标")
-        if ctx.wants("bookmark_remove_unknown_actions") and kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
+        if ctx.wants("bookmark_remove_unknown_actions") and bookmarks_links.is_bookmark_action_unknown(dest):
             ctx.add_suggestion("bookmark_remove_unknown_actions", "书签中存在非标准动作")
 
 

@@ -189,10 +189,18 @@ def _step_collapse_bookmarks(ctx):
     toc = doc.get_toc(simple=False)
     if not toc:
         return
-    for item in toc:
-        if isinstance(item[-1], dict):
-            item[-1]["collapse"] = True
-    doc.set_toc(toc)
+    named_zooms = bookmarks_links.named_dest_zoom_map(doc)
+    new_toc = []
+    for lvl, title, bm_page, dest in toc:
+        # 必须规整后再写回：命名目标没有 set_toc 能接受的形状，
+        # 原样回写会让正常书签退化成无目标空书签（静默丢失跳转）
+        raw_dest = dest if isinstance(dest, dict) else {}
+        new_dest = _normalize_bookmark_dest(
+            raw_dest, raw_dest.get("kind", fitz.LINK_NONE), named_zooms
+        )
+        new_dest["collapse"] = True
+        new_toc.append([lvl, title, bm_page, new_dest])
+    doc.set_toc(new_toc)
     ctx.mark("折叠全部书签")
 
 
@@ -220,11 +228,12 @@ def _to_point(value):
     return fitz.Point(72.0, 36.0)
 
 
-def _normalize_bookmark_dest(dest, kind):
+def _normalize_bookmark_dest(dest, kind, named_zooms=None):
     """把 get_toc 返回的目的地字典规整为 set_toc 可靠接受的形状。
 
     命名目标（LINK_NAMED）没有 set_toc 能写回的形状：能解析出页码的按内部跳转
-    输出，悬空的降级为空目的地，交由失效书签规则处理。
+    输出，悬空的降级为空目的地，交由失效书签规则处理。转换时用 named_zooms 补回
+    真实缩放，否则 get_toc 抹成的 0.0 会让固定缩放在写回时被静默丢掉。
     """
     if not isinstance(dest, dict):
         dest = {}
@@ -234,7 +243,12 @@ def _normalize_bookmark_dest(dest, kind):
         if named_page is None:
             return {"kind": fitz.LINK_NONE}
         kind = fitz.LINK_GOTO
-        dest = dict(dest, kind=fitz.LINK_GOTO, page=named_page)
+        dest = dict(
+            dest,
+            kind=fitz.LINK_GOTO,
+            page=named_page,
+            zoom=bookmarks_links.bookmark_dest_zoom(dest, named_zooms),
+        )
 
     if kind == fitz.LINK_GOTO:
         try:
@@ -273,11 +287,14 @@ def _normalize_bookmark_dest(dest, kind):
         if file_path is None:
             file_path = ""
 
+        # 刻意不带 "to"：PyMuPDF 的 set_toc 会把传入的 "to" 转成 tuple，
+        # 而 getDestStr 处理 GOTOR 时要取 .x/.y，带上必定抛 AttributeError，
+        # 整条外部文档书签会被兜底逻辑降级成普通内部书签（丢掉目标文件）。
+        # 省略后 set_toc 自己填入 Point，代价是目标点回退为目标页顶部。
         return {
             "kind": fitz.LINK_GOTOR,
             "file": str(file_path),
             "page": page_idx,
-            "to": _to_point(dest.get("to")),
             "zoom": zoom,
             "newWindow": bool(dest.get("newWindow", False)),
         }
@@ -334,7 +351,10 @@ def _step_bookmark_rules(ctx):
     if not toc:
         return
 
+    named_zooms = bookmarks_links.named_dest_zoom_map(doc)
     new_toc = []
+    # 与 new_toc 同下标：记录写回后需要补回 outline 对象的动作信息
+    post_fixups = []
     toc_modified = False
     for item in toc:
         lvl, title, bm_page, dest = item
@@ -354,9 +374,14 @@ def _step_bookmark_rules(ctx):
 
         raw_dest = dest if isinstance(dest, dict) else {}
         kind = raw_dest.get("kind", fitz.LINK_NONE)
-        # 失效判定必须用原始目的地：规整会把命名目标折叠成 GOTO，丢掉判定依据
+        # 失效/非标准判定必须用原始目的地：规整会把命名目标折叠成 GOTO，丢掉判定依据
         dest_invalid = bookmarks_links.is_bookmark_dest_invalid(raw_dest, bm_page, doc.page_count)
-        dest = _normalize_bookmark_dest(raw_dest, kind)
+        action_unknown = bookmarks_links.is_bookmark_action_unknown(raw_dest)
+        # /Launch 与 /GoToR 都被回读成 LINK_GOTOR，只能在改写前记下原始子类型
+        was_launch = kind == fitz.LINK_GOTOR and _outline_action_subtype(
+            doc, raw_dest.get("xref")
+        ) == "/Launch"
+        dest = _normalize_bookmark_dest(raw_dest, kind, named_zooms)
         # 命名目标已在规整时解析为内部跳转，后续按 GOTO 处理
         kind = dest.get("kind", fitz.LINK_NONE)
         delete_it = False
@@ -365,9 +390,8 @@ def _step_bookmark_rules(ctx):
             delete_it = True
         if "bookmark_remove_invalid" in options and dest_invalid:
             delete_it = True
-        if "bookmark_remove_unknown_actions" in options:
-            if kind not in [fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
-                delete_it = True
+        if "bookmark_remove_unknown_actions" in options and action_unknown:
+            delete_it = True
 
         if delete_it:
             toc_modified = True
@@ -391,6 +415,7 @@ def _step_bookmark_rules(ctx):
                 toc_modified = True
 
         new_toc.append([lvl, title, bm_page, dest])
+        post_fixups.append((bool(dest.get("newWindow")), was_launch))
 
     if not toc_modified:
         return
@@ -421,8 +446,79 @@ def _step_bookmark_rules(ctx):
             fallback_toc.append([lvl, title, bm_page])
             prev_lvl = lvl
 
+        # 兜底路径只写标题+页码，动作信息本已丢弃，无需再补动作细节
         doc.set_toc(fallback_toc)
+    else:
+        _apply_bookmark_action_fixups(doc, post_fixups)
     ctx.mark("书签规则已更新")
+
+
+def _outline_action_subtype(doc, xref):
+    """读取 outline 对象动作的 /S 子类型名；读不到时返回空串。
+
+    PyMuPDF 把 ``/Launch`` 和 ``/GoToR`` 都报成 LINK_GOTOR，只有原始 /S 能区分。
+    """
+    try:
+        xref = int(xref)
+    except (TypeError, ValueError):
+        return ""
+    try:
+        key_type, value = doc.xref_get_key(xref, "A/S")
+    except Exception:
+        return ""
+    if key_type != "name":
+        return ""
+    return str(value)
+
+
+def _apply_bookmark_action_fixups(doc, fixups):
+    """补写 set_toc 无法表达的书签动作细节。
+
+    两项都是 set_toc/getDestStr 的能力缺口，只能在写回后直接改 outline 对象：
+    - ``/NewWindow``：getDestStr 只输出 /F 文件说明，从不写出该键
+    - ``/S``：``/Launch`` 会被回读成 GOTOR，写回时变成 ``/GoToR``，需还原子类型
+    """
+    if not any(need_new_window or is_launch for need_new_window, is_launch in fixups):
+        return
+    try:
+        toc = doc.get_toc(simple=False)
+    except Exception:
+        return
+    # set_toc 按顺序逐条写回，条目数与顺序一致，可按下标对齐
+    if len(toc) != len(fixups):
+        return
+    for item, (need_new_window, is_launch) in zip(toc, fixups):
+        if not (need_new_window or is_launch):
+            continue
+        dest = item[3]
+        xref = dest.get("xref") if isinstance(dest, dict) else None
+        if not xref:
+            continue
+        try:
+            xref = int(xref)
+        except (TypeError, ValueError):
+            continue
+        if is_launch:
+            # 整体重写动作字典：/Launch 没有 /D，逐键改写会残留 GoToR 的 /D
+            try:
+                spec_type, spec = doc.xref_get_key(xref, "A/F")
+            except Exception:
+                spec_type, spec = "null", ""
+            if spec_type != "null":
+                action = f"<</S/Launch/F{spec}"
+                if need_new_window:
+                    action += "/NewWindow true"
+                action += ">>"
+                try:
+                    doc.xref_set_key(xref, "A", action)
+                except Exception:
+                    pass
+                continue
+        if need_new_window:
+            try:
+                doc.xref_set_key(xref, "A/NewWindow", "true")
+            except Exception:
+                pass
 
 
 _HYPERLINK_RULE_OPTIONS = (

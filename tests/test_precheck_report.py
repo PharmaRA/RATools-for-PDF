@@ -159,11 +159,12 @@ class PrecheckBookmarkTests(unittest.TestCase):
             self.assertNotIn("bookmark_remove_external_links", ids)
             self.assertNotIn("bookmark_remove_invalid", ids)
 
-    def _make_named_dest_pdf(self, tmp, dest_names):
+    def _make_named_dest_pdf(self, tmp, dest_names, real_dest_view="/Fit"):
         """构造书签动作为命名目标的 PDF。
 
         set_toc 无法写出命名目标，只能保存后直接改写 outline 的 /A。
         catalog 的 /Dests 里只登记 RealDest，因此 NoSuchDest 是悬空目标。
+        real_dest_view 用于切换 RealDest 的视图（如 /XYZ 72 720 2.5 带固定缩放）。
         """
         path = os.path.join(tmp, "named.pdf")
         doc = fitz.open()
@@ -176,7 +177,7 @@ class PrecheckBookmarkTests(unittest.TestCase):
         doc = fitz.open(path)
         page1_xref = doc[1].xref
         dests = doc.get_new_xref()
-        doc.update_object(dests, f"<< /RealDest [{page1_xref} 0 R /Fit] >>")
+        doc.update_object(dests, f"<< /RealDest [{page1_xref} 0 R {real_dest_view}] >>")
         doc.xref_set_key(doc.pdf_catalog(), "Dests", f"{dests} 0 R")
         for item, name in zip(doc.get_toc(simple=False), dest_names):
             doc.xref_set_key(item[3]["xref"], "Dest", "null")
@@ -200,6 +201,44 @@ class PrecheckBookmarkTests(unittest.TestCase):
             report = _report(path)
 
             self.assertNotIn("bookmark_remove_invalid", _suggested_ids(report))
+
+    def test_named_dest_fixed_zoom_triggers_inherit_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # get_toc 对命名目标一律回报 zoom 0.0，真实缩放只能靠 resolve_names 取回
+            path = self._make_named_dest_pdf(
+                tmp, ["RealDest"], real_dest_view="/XYZ 72 720 2.5"
+            )
+
+            report = _report(path)
+
+            self.assertIn("bookmark_inherit_zoom", _suggested_ids(report))
+
+    def test_resolvable_named_dest_not_reported_as_unknown_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # 可解析的 /GoTo 命名目标是标准内部跳转，不应被判为非标准动作
+            path = self._make_named_dest_pdf(tmp, ["RealDest"])
+
+            report = _report(path)
+
+            self.assertNotIn("bookmark_remove_unknown_actions", _suggested_ids(report))
+
+    def test_dangling_named_dest_reported_as_unknown_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_named_dest_pdf(tmp, ["NoSuchDest"])
+
+            report = _report(path)
+
+            self.assertIn("bookmark_remove_unknown_actions", _suggested_ids(report))
+
+    def test_named_dest_inherit_zoom_no_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_named_dest_pdf(
+                tmp, ["RealDest"], real_dest_view="/XYZ 72 720 null"
+            )
+
+            report = _report(path)
+
+            self.assertNotIn("bookmark_inherit_zoom", _suggested_ids(report))
 
 
 class PrecheckLinkTests(unittest.TestCase):

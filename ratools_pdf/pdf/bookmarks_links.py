@@ -142,6 +142,72 @@ def bookmark_named_dest_page(dest):
     return page_idx
 
 
+def named_dest_zoom_map(doc):
+    """命名目标名 -> 真实缩放值。
+
+    ``get_toc`` 对 LINK_NAMED 一律回报 ``zoom: 0.0``（丢失 /XYZ 里的真实缩放），
+    使固定缩放的命名目标书签看起来已经是"承前缩放"。``resolve_names`` 保留了这
+    个信息，用它补齐判定依据。旧版 PyMuPDF 没有该 API 时返回空表（退化为不判定）。
+    """
+    resolve = getattr(doc, "resolve_names", None)
+    if not callable(resolve):
+        return {}
+    try:
+        names = resolve() or {}
+    except Exception:
+        return {}
+
+    zooms = {}
+    for name, info in names.items():
+        if not isinstance(info, dict):
+            continue
+        try:
+            zooms[str(name)] = float(info.get("zoom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return zooms
+
+
+def bookmark_dest_zoom(dest, named_zooms=None):
+    """书签目的地的有效缩放值；命名目标优先取 resolve_names 解析出的真实值。"""
+    if not isinstance(dest, dict):
+        return 0.0
+
+    if dest.get("kind") == fitz.LINK_NAMED and named_zooms:
+        name = dest.get("nameddest")
+        if name is not None and str(name) in named_zooms:
+            return named_zooms[str(name)]
+
+    try:
+        return float(dest.get("zoom", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+_STANDARD_BOOKMARK_KINDS = {
+    fitz.LINK_GOTO,
+    fitz.LINK_GOTOR,
+    fitz.LINK_LAUNCH,
+    # /GoTo + 命名目标：PyMuPDF 报 LINK_NAMED，本质仍是标准内部跳转
+    fitz.LINK_NAMED,
+}
+
+
+def is_bookmark_action_unknown(dest):
+    """书签动作是否属于"非标准动作"，供预检与处理共用。
+
+    标准动作为内部跳转、外部文档、调用命令。命名目标（LINK_NAMED）能解析时等价
+    于内部跳转，不算非标准；悬空的命名目标交由失效书签规则处理，这里不重复判定。
+    """
+    if not isinstance(dest, dict):
+        return True
+
+    kind = dest.get("kind", fitz.LINK_NONE)
+    if kind == fitz.LINK_NAMED:
+        return bookmark_named_dest_page(dest) is None
+    return kind not in _STANDARD_BOOKMARK_KINDS
+
+
 def is_bookmark_dest_invalid(dest, bm_page, page_count):
     """书签目标是否失效，供预检与处理共用以保证判定一致。
 

@@ -271,11 +271,12 @@ class BookmarkRulesTests(unittest.TestCase):
             doc.close()
             self.assertEqual([item[1] for item in toc], ["Internal"])
 
-    def _make_named_dest_pdf(self, tmp):
+    def _make_named_dest_pdf(self, tmp, real_dest_view="/Fit"):
         """构造带命名目标书签的 PDF：一个悬空、一个可解析。
 
         真实 PDF 里书签常用 ``/GoTo`` + 命名目标，PyMuPDF 会报 LINK_NAMED；
         set_toc 写不出这种形状，只能直接改写 outline 对象。
+        real_dest_view 用于切换 RealDest 的视图（如 /XYZ 72 720 2.5 带固定缩放）。
         """
         source = os.path.join(tmp, "named.pdf")
         doc = fitz.open()
@@ -293,7 +294,7 @@ class BookmarkRulesTests(unittest.TestCase):
         page1_xref = doc[1].xref
         # catalog /Dests 字典：RealDest 可解析到第 2 页，NoSuchDest 不存在
         dests_xref = doc.get_new_xref()
-        doc.update_object(dests_xref, f"<< /RealDest [{page1_xref} 0 R /Fit] >>")
+        doc.update_object(dests_xref, f"<< /RealDest [{page1_xref} 0 R {real_dest_view}] >>")
         doc.xref_set_key(doc.pdf_catalog(), "Dests", f"{dests_xref} 0 R")
 
         outline_xrefs = []
@@ -371,6 +372,156 @@ class BookmarkRulesTests(unittest.TestCase):
             titles = [item[1] for item in doc.get_toc(simple=False)]
             doc.close()
             self.assertIn("dangling-named", titles)
+
+    def test_collapse_all_bookmarks_keeps_named_dest_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            # 折叠步骤同样要经过目的地规整：原样回写会把命名目标
+            # 退化成无目标空书签（静默丢失跳转）
+            ok, msg = _process(source, output, {"collapse_all_bookmarks"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            kept = {item[1]: item for item in doc.get_toc(simple=False)}
+            doc.close()
+            self.assertEqual(kept["valid-named"][2], 2)
+            self.assertEqual(kept["valid-named"][3].get("kind"), fitz.LINK_GOTO)
+
+    def test_bookmark_inherit_zoom_resets_named_dest_fixed_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp, real_dest_view="/XYZ 72 720 2.5")
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            kept = {item[1]: item for item in doc.get_toc(simple=False)}
+            doc.close()
+            # 命名目标的真实缩放 2.5 必须被识别并重置为承前缩放
+            self.assertEqual(kept["valid-named"][3].get("zoom"), 0.0)
+            self.assertEqual(kept["valid-named"][2], 2)
+
+    def test_bookmark_remove_unknown_actions_keeps_resolvable_named_dest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_remove_unknown_actions"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            titles = [item[1] for item in doc.get_toc(simple=False)]
+            doc.close()
+            # 可解析的命名目标等价于内部跳转，不属于非标准动作；仅悬空的应被删除
+            self.assertEqual(titles, ["valid-named", "internal"])
+
+    def test_collapse_all_bookmarks_preserves_named_dest_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_pdf(tmp, real_dest_view="/XYZ 72 720 2.5")
+            output = os.path.join(tmp, "out.pdf")
+
+            # 只勾选折叠时不得顺带改动缩放：命名目标的真实缩放要原样保留
+            ok, msg = _process(source, output, {"collapse_all_bookmarks"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            kept = {item[1]: item for item in doc.get_toc(simple=False)}
+            doc.close()
+            self.assertEqual(kept["valid-named"][3].get("zoom"), 2.5)
+            self.assertEqual(kept["internal"][3].get("zoom"), 0.0)
+
+    def _make_external_bookmark_pdf(self, tmp, subtype, file_name):
+        """构造外部文件书签（/GoToR 或 /Launch）+ 一条普通内部书签。
+
+        set_toc 写不出带 to 的 GOTOR（PyMuPDF 内部把 to 转成 tuple，
+        getDestStr 又要求 .x/.y），因此直接改写 outline 的 /A。
+        """
+        source = os.path.join(tmp, f"{subtype.strip('/')}.pdf")
+        doc = fitz.open()
+        doc.new_page()
+        doc.new_page()
+        doc.set_toc([[1, "ext", 1], [1, "internal", 2]])
+        doc.save(source)
+        doc.close()
+
+        doc = fitz.open(source)
+        ext_xref = None
+        for xref in range(1, doc.xref_length()):
+            title = doc.xref_get_key(xref, "Title")
+            if title[0] != "null" and "ext" in title[1]:
+                ext_xref = xref
+                break
+        assert ext_xref is not None, "未找到 ext 书签对象"
+        doc.xref_set_key(ext_xref, "Dest", "null")
+        fspec = f"<</Type/Filespec/F({file_name})/UF({file_name})>>"
+        if subtype == "/GoToR":
+            action = f"<</S/GoToR/D[0/XYZ 72 720 0]/F{fspec}>>"
+        else:
+            action = f"<</S/Launch/F{fspec}>>"
+        doc.xref_set_key(ext_xref, "A", action)
+        doc.saveIncr()
+        doc.close()
+        return source
+
+    def _ext_bookmark_state(self, path):
+        doc = fitz.open(path)
+        state = {}
+        for item in doc.get_toc(simple=False):
+            dest = item[3]
+            xref = dest.get("xref")
+            state[item[1]] = {
+                "kind": dest.get("kind"),
+                "file": dest.get("file"),
+                "subtype": doc.xref_get_key(int(xref), "A/S")[1] if xref else None,
+                "new_window": doc.xref_get_key(int(xref), "A/NewWindow")[1] if xref else None,
+            }
+        doc.close()
+        return state
+
+    def test_bookmark_open_new_window_keeps_gotor_file_and_sets_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_external_bookmark_pdf(tmp, "/GoToR", "other.pdf")
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_open_new_window"})
+
+            self.assertTrue(ok, msg)
+            state = self._ext_bookmark_state(output)
+            # 写回不得丢失外部文件目标（此前会异常降级为普通内部书签）
+            self.assertEqual(state["ext"]["file"], "other.pdf")
+            self.assertEqual(state["ext"]["subtype"], "/GoToR")
+            # set_toc 从不写出 /NewWindow，必须在写回后补上
+            self.assertEqual(state["ext"]["new_window"], "true")
+
+    def test_bookmark_open_new_window_preserves_launch_subtype(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_external_bookmark_pdf(tmp, "/Launch", "run.exe")
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"bookmark_open_new_window"})
+
+            self.assertTrue(ok, msg)
+            state = self._ext_bookmark_state(output)
+            self.assertEqual(state["ext"]["file"], "run.exe")
+            # PyMuPDF 把 /Launch 回读成 GOTOR，写回时须还原子类型而非退化成 /GoToR
+            self.assertEqual(state["ext"]["subtype"], "/Launch")
+            self.assertEqual(state["ext"]["new_window"], "true")
+
+    def test_other_bookmark_rule_keeps_external_file_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_external_bookmark_pdf(tmp, "/GoToR", "other.pdf")
+            output = os.path.join(tmp, "out.pdf")
+
+            # 触发重写的是另一条规则：外部文件书签仍不能被写坏
+            ok, msg = _process(source, output, {"bookmark_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            state = self._ext_bookmark_state(output)
+            self.assertEqual(state["ext"]["file"], "other.pdf")
+            self.assertEqual(state["ext"]["subtype"], "/GoToR")
 
 
 class HyperlinkRulesTests(unittest.TestCase):
