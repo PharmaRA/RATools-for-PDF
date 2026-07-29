@@ -1,5 +1,6 @@
 import csv
 import json
+import re
 from urllib.parse import unquote
 
 import fitz
@@ -182,6 +183,66 @@ def bookmark_dest_zoom(dest, named_zooms=None):
         return float(dest.get("zoom", 0.0) or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+_XYZ_ZOOM_RE = re.compile(r"/XYZ\s+(\S+)\s+(\S+)\s+(\S+)")
+
+
+def _parse_xyz_zoom(dest_array_text):
+    """从目的地数组文本里取 /XYZ 的缩放值；非 /XYZ 视图或 null 返回 0.0。
+
+    只有 ``/XYZ`` 视图带缩放；``/Fit`` ``/FitH`` 等按定义没有固定缩放。
+    """
+    if not dest_array_text:
+        return 0.0
+    match = _XYZ_ZOOM_RE.search(dest_array_text)
+    if not match:
+        return 0.0
+    raw = match.group(3).rstrip("]").strip()
+    if raw in ("null", "", "/Fit"):
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def link_dest_zoom(doc, link, named_zooms=None):
+    """页面链接的真实缩放值。
+
+    ``get_links`` 对内部跳转一律回报 ``zoom: 0.0``，即使 ``/XYZ`` 里写着固定缩放
+    （与 ``get_toc`` 恰好相反：后者丢的是命名目标的缩放）。因此内部跳转必须回到原始
+    对象上读 ``/A/D`` 或 ``/Dest``；命名目标链接 ``get_links`` 报的缩放是准的。
+    """
+    if not isinstance(link, dict):
+        return 0.0
+
+    kind = link.get("kind", fitz.LINK_NONE)
+    if kind == fitz.LINK_NAMED:
+        return bookmark_dest_zoom(link, named_zooms)
+    if kind != fitz.LINK_GOTO:
+        return 0.0
+
+    xref = link.get("xref") or 0
+    try:
+        xref = int(xref)
+    except (TypeError, ValueError):
+        return 0.0
+    if xref <= 0:
+        return 0.0
+
+    for key in ("A/D", "Dest"):
+        try:
+            key_type, value = doc.xref_get_key(xref, key)
+        except Exception:
+            continue
+        if key_type == "array":
+            return _parse_xyz_zoom(value)
+        if key_type in ("string", "name") and named_zooms:
+            name = str(value).lstrip("/")
+            if name in named_zooms:
+                return named_zooms[name]
+    return 0.0
 
 
 _STANDARD_BOOKMARK_KINDS = {

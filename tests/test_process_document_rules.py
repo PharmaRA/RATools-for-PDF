@@ -570,9 +570,76 @@ class HyperlinkRulesTests(unittest.TestCase):
 
             self.assertTrue(ok, msg)
             doc = fitz.open(output)
-            link = doc[0].get_links()[0]
+            raw = doc.xref_object(doc[0].get_links()[0]["xref"])
             doc.close()
-            self.assertIn(link.get("zoom", 0.0), (0, 0.0, None))
+            # 必须断言原始对象：get_links 的 zoom 恒为 0.0，
+            # 用它断言的话规则完全不生效也照样通过
+            compact = " ".join(raw.split())
+            self.assertIn("/XYZ 72 698 0", compact)
+
+    def _make_named_dest_link_pdf(self, tmp, view="/XYZ 72 720 2.5"):
+        """构造动作为命名目标的页面链接。
+
+        insert_link 写不出命名目标，只能存盘后改写链接注释的 /A。
+        """
+        source = os.path.join(tmp, "s.pdf")
+        doc = fitz.open()
+        doc.new_page()
+        doc.new_page()
+        doc[0].insert_link({
+            "kind": fitz.LINK_GOTO,
+            "from": fitz.Rect(50, 50, 150, 70),
+            "page": 1,
+            "to": fitz.Point(0, 0),
+        })
+        doc.save(source)
+        doc.close()
+
+        doc = fitz.open(source)
+        page1_xref = doc[1].xref
+        dests = doc.get_new_xref()
+        doc.update_object(dests, f"<< /RealDest [{page1_xref} 0 R {view}] >>")
+        doc.xref_set_key(doc.pdf_catalog(), "Dests", f"{dests} 0 R")
+        doc.xref_set_key(doc[0].get_links()[0]["xref"], "A", "<< /S /GoTo /D (RealDest) >>")
+        doc.saveIncr()
+        doc.close()
+
+        doc = fitz.open(source)
+        kind = doc[0].get_links()[0].get("kind")
+        doc.close()
+        # 前置条件：必须被报成 LINK_NAMED，否则用例失去意义
+        assert kind == fitz.LINK_NAMED, kind
+        return source
+
+    def test_link_inherit_zoom_resets_named_dest_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_link_pdf(tmp)
+            output = os.path.join(tmp, "out.pdf")
+
+            ok, msg = _process(source, output, {"link_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            xref = doc[0].get_links()[0]["xref"]
+            dest_type, dest_value = doc.xref_get_key(xref, "A/D")
+            doc.close()
+            self.assertEqual(dest_type, "array")
+            # 缩放归零，且跳转点仍是原来的 y=720（不得因坐标翻转而偏移）
+            self.assertIn("/XYZ 72 720 0", " ".join(dest_value.split()))
+
+    def test_link_inherit_zoom_keeps_fit_view_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_named_dest_link_pdf(tmp, view="/Fit")
+            output = os.path.join(tmp, "out.pdf")
+
+            # /Fit 按定义没有固定缩放，不该被改写
+            ok, msg = _process(source, output, {"link_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            dest_type, dest_value = doc.xref_get_key(doc[0].get_links()[0]["xref"], "A/D")
+            doc.close()
+            self.assertEqual((dest_type, dest_value), ("string", "RealDest"))
 
     def test_link_open_new_window_patches_gotor_action(self):
         with tempfile.TemporaryDirectory() as tmp:

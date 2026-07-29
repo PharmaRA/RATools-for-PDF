@@ -277,10 +277,9 @@ class PrecheckLinkTests(unittest.TestCase):
 
             self.assertIn("cleanup_remove_external_uri", _suggested_ids(report))
 
-    def test_fixed_zoom_goto_link_not_detected_current_behavior(self):
-        # 已知局限（特征测试固化现状）：PyMuPDF 1.27 的 get_links() 不回读
-        # /XYZ 目标里的 zoom（恒为 0.0），因此链接固定缩放目前无法被预检发现。
-        # 书签的 zoom 经 get_toc(simple=False) 可正常回读，不受影响。
+    def test_fixed_zoom_goto_link_triggers_inherit_zoom(self):
+        # get_links() 不回读 /XYZ 里的 zoom（恒为 0.0），所以判定必须回到原始对象
+        # 上解析 /A/D。此前因信任 get_links 的值，链接固定缩放完全无法被发现。
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "s.pdf")
             doc = fitz.open()
@@ -300,10 +299,14 @@ class PrecheckLinkTests(unittest.TestCase):
             stored = probe.xref_object(probe[0].get_links()[0]["xref"])
             probe.close()
             self.assertIn("/XYZ 72 698 2", stored.replace("\n", " ").replace("  ", " "))
+            # 前置条件：get_links 确实丢掉了真实缩放，否则用例失去意义
+            probe = fitz.open(path)
+            self.assertEqual(probe[0].get_links()[0].get("zoom"), 0.0)
+            probe.close()
 
             report = _report(path)
 
-            self.assertNotIn("link_inherit_zoom", _suggested_ids(report))
+            self.assertIn("link_inherit_zoom", _suggested_ids(report))
 
 
 class PrecheckCleanupTests(unittest.TestCase):

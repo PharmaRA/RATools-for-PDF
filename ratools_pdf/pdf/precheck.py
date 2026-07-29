@@ -906,6 +906,9 @@ def _check_page_links(ctx):
     if link_file_kind is not None:
         file_like_link_kinds.add(link_file_kind)
 
+    # get_links 对内部跳转一律回报 zoom 0.0，命名目标的真实缩放要另外解析
+    link_named_zooms = bookmarks_links.named_dest_zoom_map(doc) if ctx.wants("link_inherit_zoom") else {}
+
     for page in doc:
         links = page.get_links()
         if not ctx.full_scan and ctx.wants("cleanup_remove_all_links_bookmarks") and links:
@@ -921,7 +924,11 @@ def _check_page_links(ctx):
                     or decoded_file_path.startswith("\\")
                 ):
                     ctx.add_suggestion("link_abs_to_rel_path", "外部文件链接中包含绝对路径")
-            if ctx.wants("link_inherit_zoom") and kind == fitz.LINK_GOTO and link.get("zoom", 0.0) not in [0, 0.0, None]:
+            if (
+                ctx.wants("link_inherit_zoom")
+                and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED)
+                and bookmarks_links.link_dest_zoom(doc, link, link_named_zooms) != 0.0
+            ):
                 ctx.add_suggestion("link_inherit_zoom", "部分内部超链接使用了固定缩放比例")
             if ctx.wants("link_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
                 ctx.add_suggestion("link_open_new_window", "部分外部文件链接未设置为新窗口打开")

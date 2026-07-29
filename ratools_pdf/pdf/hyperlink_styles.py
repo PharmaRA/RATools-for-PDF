@@ -4,6 +4,8 @@ from urllib.parse import unquote
 
 import fitz
 
+from ratools_pdf.pdf import bookmarks_links
+
 
 def _is_text_blue(page, rect):
     text_dict = page.get_text("dict", clip=rect)
@@ -283,9 +285,43 @@ def _apply_blue_text_via_content_stream(doc, page, link_rects=None):
     )
 
 
+def _flip_link_target(doc, link):
+    """把命名目标给出的原始 PDF 坐标翻转成 update_link 期望的页面坐标。
+
+    ``get_links`` 对 LINK_GOTO 回报的 ``to`` 已按页面坐标翻转过 y，``update_link``
+    会再翻回去，因此原样往返是安全的。命名目标回报的却是未翻转的原始坐标，直接交给
+    ``update_link`` 会让跳转点上下颠倒，所以这里先按目标页高度反向翻转一次。
+    """
+    point = link.get("to")
+    if point is None:
+        return fitz.Point(0.0, 0.0)
+    try:
+        x = float(point.x)
+        y = float(point.y)
+    except (AttributeError, TypeError, ValueError):
+        return fitz.Point(0.0, 0.0)
+
+    try:
+        page_index = int(link.get("page", 0))
+    except (TypeError, ValueError):
+        return fitz.Point(x, y)
+    if page_index < 0 or page_index >= doc.page_count:
+        return fitz.Point(x, y)
+
+    try:
+        height = float(doc.page_cropbox(page_index).height)
+    except Exception:
+        return fitz.Point(x, y)
+    return fitz.Point(x, height - y)
+
+
 def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_links=None):
     changed = False
 
+    # get_links 对内部跳转恒报 zoom 0.0，命名目标的真实缩放要另外解析
+    named_zooms = (
+        bookmarks_links.named_dest_zoom_map(doc) if "link_inherit_zoom" in options else {}
+    )
     links = page_links if page_links is not None else page.get_links()
     for link in links:
         link_modified = False
@@ -301,9 +337,18 @@ def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_link
                 link["file"] = os.path.basename(decoded_file_path.replace("\\", "/"))
                 link_modified = True
 
-        if "link_inherit_zoom" in options and kind == fitz.LINK_GOTO:
-            if link.get("zoom") != 0.0:
+        if "link_inherit_zoom" in options and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED):
+            # get_links 对内部跳转恒报 zoom 0.0，必须回到原始对象读真实缩放，
+            # 否则条件永不成立、规则完全不生效
+            if bookmarks_links.link_dest_zoom(doc, link, named_zooms) != 0.0:
                 link["zoom"] = 0.0
+                if kind == fitz.LINK_NAMED:
+                    # 命名目标没有能保留名字的写回形状，改为等价的显式页码跳转，
+                    # 否则 update_link 无法落盘、规则对这类链接依旧不生效。
+                    # get_links 只对 GOTO 回报翻转后的 y，命名目标给的是原始 PDF 坐标，
+                    # 而 update_link 一律按 GOTO 约定翻转，这里先反向翻转以免跳转点偏移。
+                    link["kind"] = fitz.LINK_GOTO
+                    link["to"] = _flip_link_target(doc, link)
                 link_modified = True
 
         if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
