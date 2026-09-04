@@ -772,6 +772,122 @@ def _step_cleanup(ctx):
         ctx.mark("已删除文档元数据")
 
 
+def _step_image_compression(ctx):
+    """图像压缩：重采样到目标 DPI"""
+    if "compress_images" not in ctx.options:
+        return
+
+    # 从配置文件读取 DPI（由 UI 层在勾选时设置）
+    try:
+        from ratools_pdf.config.paths import get_app_dir
+        from PySide6.QtCore import QSettings
+        import os
+        settings = QSettings(os.path.join(get_app_dir(), "settings.ini"), QSettings.Format.IniFormat)
+        target_dpi = int(settings.value("Compression/ImageDPI", 300))
+    except Exception:
+        target_dpi = 300  # 默认 300 DPI
+
+    doc = ctx.doc
+    compressed_count = 0
+    skipped_count = 0
+
+    # 尝试导入 Pillow
+    try:
+        from PIL import Image
+        from io import BytesIO
+    except ImportError:
+        ctx.mark("图像压缩需要安装 Pillow 库")
+        return
+
+    with ctx.prof.phase(f"图像压缩(目标{target_dpi}DPI)"):
+        for page_num, page in enumerate(doc):
+            img_list = page.get_images(full=True)
+
+            for img_index, img in enumerate(img_list):
+                try:
+                    xref = img[0]
+
+                    # 获取图像基本信息
+                    base_image = doc.extract_image(xref)
+                    if not base_image:
+                        continue
+
+                    image_bytes = base_image["image"]
+                    img_size_kb = len(image_bytes) / 1024
+
+                    # 使用 PIL 打开图像
+                    try:
+                        img_pil = Image.open(BytesIO(image_bytes))
+                    except Exception:
+                        # 无法解析的图像格式，跳过
+                        skipped_count += 1
+                        continue
+
+                    width_px, height_px = img_pil.size
+
+                    # 判断是否需要压缩：
+                    # 1. 图像大于 500KB
+                    # 2. 或者尺寸明显超过目标 DPI 下的 A4 尺寸（宽约 8.27 英寸，高约 11.69 英寸）
+                    max_width_at_target = int(target_dpi * 8.5)  # A4 宽度约 8.27 英寸，取整为 8.5
+                    max_height_at_target = int(target_dpi * 11.7)  # A4 高度约 11.69 英寸
+
+                    needs_compression = (
+                        img_size_kb > 500 or
+                        width_px > max_width_at_target or
+                        height_px > max_height_at_target
+                    )
+
+                    if not needs_compression:
+                        continue
+
+                    # 计算缩放比例
+                    scale_x = max_width_at_target / width_px if width_px > max_width_at_target else 1.0
+                    scale_y = max_height_at_target / height_px if height_px > max_height_at_target else 1.0
+                    scale = min(scale_x, scale_y, 1.0)  # 只缩小不放大
+
+                    if scale < 1.0:
+                        new_width = int(width_px * scale)
+                        new_height = int(height_px * scale)
+
+                        # 重采样（使用 LANCZOS 高质量算法）
+                        img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+                        # 转换为 JPEG（质量 85）
+                        output = BytesIO()
+
+                        # 处理透明通道
+                        if img_pil.mode in ('RGBA', 'LA', 'P'):
+                            # 转换为 RGB（白色背景）
+                            if img_pil.mode == 'P':
+                                img_resized = img_resized.convert('RGBA')
+                            rgb_img = Image.new('RGB', img_resized.size, (255, 255, 255))
+                            if img_resized.mode == 'RGBA':
+                                rgb_img.paste(img_resized, mask=img_resized.split()[3])
+                            else:
+                                rgb_img.paste(img_resized)
+                            img_resized = rgb_img
+                        elif img_pil.mode not in ('RGB', 'L'):
+                            # 其他模式转为 RGB
+                            img_resized = img_resized.convert('RGB')
+
+                        # 保存为 JPEG
+                        img_resized.save(output, format='JPEG', quality=85, optimize=True)
+                        new_image_bytes = output.getvalue()
+
+                        # 只有压缩后更小才更新
+                        if len(new_image_bytes) < len(image_bytes):
+                            doc.update_stream(xref, new_image_bytes)
+                            compressed_count += 1
+
+                except Exception as e:
+                    # 单个图像失败不影响整体处理
+                    skipped_count += 1
+                    continue
+
+    if compressed_count > 0:
+        ctx.mark("图像压缩", count=compressed_count)
+
+
 # 处理管线：按序执行。步骤内部自行判断选项是否命中。
 _PIPELINE_STEPS = (
     _step_document_title,
@@ -783,6 +899,7 @@ _PIPELINE_STEPS = (
     _step_bookmark_rules,
     _step_hyperlink_rules,
     _step_cleanup,
+    _step_image_compression,  # 新增：在保存前压缩图像
 )
 
 
@@ -791,6 +908,15 @@ def _finalize_output(ctx, input_path, output_path):
     options = ctx.options
     doc = ctx.doc
     prof = ctx.prof
+
+    # 确定 garbage 回收级别和 clean 模式
+    garbage_level = 2  # 默认
+    clean_mode = False
+    if "compress_aggressive" in options:
+        garbage_level = 4
+        clean_mode = True
+    elif "compress_standard" in options:
+        garbage_level = 3
 
     is_linear = "fast_web_view" in options
     force_pdf_version = "1.7" if "convert_pdf_version" in options else None
@@ -805,11 +931,19 @@ def _finalize_output(ctx, input_path, output_path):
         if is_linear:
             _mark_change(ctx.applied_changes, "已启用快速网页浏览")
 
+    def _mark_compression_changes():
+        if "compress_standard" in options:
+            _mark_change(ctx.applied_changes, "已应用标准压缩")
+        if "compress_aggressive" in options:
+            _mark_change(ctx.applied_changes, "已应用深度压缩")
+
+    save_phase_name = f"保存(deflate+garbage{garbage_level}+objstms" + ("+clean" if clean_mode else "") + ")"
+
     if ctx.changed:
         if needs_qpdf_rewrite:
             temp_pdf = str(output_path) + ".tmp.pdf"
-            with prof.phase("保存(deflate+garbage2+objstms)"):
-                doc.save(temp_pdf, garbage=2, deflate=True, use_objstms=1)
+            with prof.phase(save_phase_name):
+                doc.save(temp_pdf, garbage=garbage_level, deflate=True, use_objstms=1, clean=clean_mode)
                 doc.close()
             try:
                 with prof.phase("qpdf重写"):
@@ -821,13 +955,15 @@ def _finalize_output(ctx, input_path, output_path):
                         decrypt_restrictions=remove_pdf_restrictions,
                     )
                 _mark_qpdf_changes()
+                _mark_compression_changes()
             finally:
                 if os.path.exists(temp_pdf):
                     os.remove(temp_pdf)
         else:
-            with prof.phase("保存(deflate+garbage2+objstms)"):
-                doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
+            with prof.phase(save_phase_name):
+                doc.save(output_path, garbage=garbage_level, deflate=True, use_objstms=1, clean=clean_mode)
                 doc.close()
+            _mark_compression_changes()
     else:
         doc.close()
         if needs_qpdf_rewrite:
@@ -839,8 +975,10 @@ def _finalize_output(ctx, input_path, output_path):
                 decrypt_restrictions=remove_pdf_restrictions,
             )
             _mark_qpdf_changes()
+            _mark_compression_changes()
         else:
             shutil.copy2(input_path, output_path)
+            _mark_compression_changes()
 
 
 def process_document(input_path, output_path, options, processing_mode="smart"):

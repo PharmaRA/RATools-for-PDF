@@ -78,6 +78,9 @@ PRECHECK_DETECTABLE_OPTIONS = {
     "convert_pdf_version",
     "remove_pdf_restrictions",
     "fast_web_view",
+    "compress_standard",
+    "compress_aggressive",
+    "compress_images",
 }
 
 PRECHECK_OPTION_ALIASES = {
@@ -1107,6 +1110,8 @@ def build_precheck_report(input_path, selected_options=None):
         "broken_reference_summary": "",
         "broken_reference_details": "",
         "error": "",
+        "file_size_mb": 0.0,
+        "size_warning": False,
     }
 
     if not os.path.exists(input_path):
@@ -1115,6 +1120,15 @@ def build_precheck_report(input_path, selected_options=None):
     if not os.path.isfile(input_path):
         report["error"] = "不是PDF文件"
         return report
+
+    # 获取文件大小
+    try:
+        file_size_bytes = os.path.getsize(input_path)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        report["file_size_mb"] = round(file_size_mb, 2)
+        report["size_warning"] = file_size_mb > 20
+    except Exception:
+        pass
 
     doc = None
     try:
@@ -1127,6 +1141,14 @@ def build_precheck_report(input_path, selected_options=None):
         ctx = _PrecheckContext(doc, input_path, selected_options, report)
         for check_group in _PRECHECK_GROUPS:
             check_group(ctx)
+
+        # 根据文件大小添加压缩建议
+        if report["file_size_mb"] > 20:
+            if "compress_standard" not in report["suggestions"]:
+                report["suggestions"]["compress_standard"] = _option_title("compress_standard")
+        if report["file_size_mb"] > 40:
+            if "compress_aggressive" not in report["suggestions"]:
+                report["suggestions"]["compress_aggressive"] = _option_title("compress_aggressive")
 
         return report
     except Exception as e:

@@ -14,6 +14,7 @@ from ratools_pdf.config.paths import get_app_dir, get_resource_path
 from ratools_pdf.ui.dialogs import (
     AboutDialog,
     CustomMessageBox,
+    DpiSelectionDialog,
     ManualFontEmbeddingDialog,
     SettingsDialog,
 )
@@ -369,7 +370,12 @@ class MainWindow(QMainWindow):
             page_layout.setSpacing(14)
 
             for opt in mod["options"]:
-                page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
+                checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
+                page_layout.addWidget(checkbox_widget)
+
+                # 为"压缩内嵌图像"添加特殊处理：勾选时弹出 DPI 选择对话框
+                if opt["id"] == "compress_images":
+                    self.all_checkboxes["compress_images"].toggled.connect(self._on_compress_images_toggled)
 
             if mod["title"] == "页面与字体标准化":
                 page_layout.addSpacing(12)
@@ -942,6 +948,21 @@ class MainWindow(QMainWindow):
             layout.addWidget(desc_lbl)
 
         return container
+
+    def _on_compress_images_toggled(self, checked):
+        """处理'压缩内嵌图像'复选框切换事件，勾选时弹出 DPI 选择对话框"""
+        if checked:
+            dialog = DpiSelectionDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                dpi = dialog.get_selected_dpi()
+                self.app_settings.setValue("Compression/ImageDPI", dpi)
+            else:
+                # 用户取消，取消勾选
+                self.all_checkboxes["compress_images"].blockSignals(True)
+                self.all_checkboxes["compress_images"].setChecked(False)
+                self.all_checkboxes["compress_images"].blockSignals(False)
+                # 需要手动触发一次摘要刷新，因为信号被阻塞了
+                self.refresh_selection_summary()
 
     def apply_stylesheet(self):
         # 视觉样式全部集中在 theme.py 的应用级 QSS 中，由 ThemeManager 应用到
