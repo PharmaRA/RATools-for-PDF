@@ -374,8 +374,9 @@ class MainWindow(QMainWindow):
                 page_layout.addWidget(checkbox_widget)
 
                 # 为"压缩内嵌图像"添加特殊处理：勾选时弹出 DPI 选择对话框
+                # 注意：初始化完成后才连接信号，避免启动时恢复勾选状态触发对话框
                 if opt["id"] == "compress_images":
-                    self.all_checkboxes["compress_images"].toggled.connect(self._on_compress_images_toggled)
+                    self.compress_images_checkbox_created = True
 
             if mod["title"] == "页面与字体标准化":
                 page_layout.addSpacing(12)
@@ -581,6 +582,10 @@ class MainWindow(QMainWindow):
         self.custom_selection_before_preset = set(self.get_selected_options())
         self.active_preset_key = None
         self._set_preset_button_state(None)
+
+        # 初始化完成后再连接"压缩内嵌图像"的特殊处理
+        if hasattr(self, "compress_images_checkbox_created") and "compress_images" in self.all_checkboxes:
+            self.all_checkboxes["compress_images"].toggled.connect(self._on_compress_images_toggled)
 
     def closeEvent(self, event):
         self.persist_all_settings()

@@ -912,6 +912,8 @@ def _finalize_output(ctx, input_path, output_path):
     # 确定 garbage 回收级别和 clean 模式
     garbage_level = 2  # 默认
     clean_mode = False
+    has_compression_options = bool({"compress_standard", "compress_aggressive", "compress_images"} & options)
+
     if "compress_aggressive" in options:
         garbage_level = 4
         clean_mode = True
@@ -939,7 +941,8 @@ def _finalize_output(ctx, input_path, output_path):
 
     save_phase_name = f"保存(deflate+garbage{garbage_level}+objstms" + ("+clean" if clean_mode else "") + ")"
 
-    if ctx.changed:
+    # 如果有任何修改，或者选择了压缩选项，都需要重新保存
+    if ctx.changed or has_compression_options:
         if needs_qpdf_rewrite:
             temp_pdf = str(output_path) + ".tmp.pdf"
             with prof.phase(save_phase_name):

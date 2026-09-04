@@ -1145,10 +1145,18 @@ def build_precheck_report(input_path, selected_options=None):
         # 根据文件大小添加压缩建议
         if report["file_size_mb"] > 20:
             if "compress_standard" not in report["suggestions"]:
-                report["suggestions"]["compress_standard"] = _option_title("compress_standard")
+                _add_precheck_suggestion(
+                    report["suggestions"],
+                    "compress_standard",
+                    f"文件大小 {report['file_size_mb']:.1f} MB 超过建议阈值"
+                )
         if report["file_size_mb"] > 40:
             if "compress_aggressive" not in report["suggestions"]:
-                report["suggestions"]["compress_aggressive"] = _option_title("compress_aggressive")
+                _add_precheck_suggestion(
+                    report["suggestions"],
+                    "compress_aggressive",
+                    f"文件大小 {report['file_size_mb']:.1f} MB 显著超出限制"
+                )
 
         return report
     except Exception as e:
