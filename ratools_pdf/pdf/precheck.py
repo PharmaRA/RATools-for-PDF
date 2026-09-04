@@ -80,8 +80,8 @@ PRECHECK_DETECTABLE_OPTIONS = {
     "fast_web_view",
     "compress_standard",
     "compress_aggressive",
-    "compress_images",
 }
+# compress_images 需要用户手动判断（预检无法可靠检测是否需要图像压缩）
 
 PRECHECK_OPTION_ALIASES = {
     "cleanup_remove_external_uri": {"cleanup_remove_external_uri_and_text_black"},
