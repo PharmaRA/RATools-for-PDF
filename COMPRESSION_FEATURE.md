@@ -21,10 +21,11 @@
 - **实现位置**: `processor.py:_finalize_output()`
 
 #### 3. 预检增强
-- 显示文件大小（MB）
 - 文件 > 20MB 时自动建议"标准压缩"
 - 文件 > 40MB 时自动建议"深度压缩"
 - **实现位置**: `precheck.py:build_precheck_report()`
+- **注意**: 压缩选项不在预检可检测集合内，smart 模式下用户已勾选即执行，
+  建议仅供未勾选的用户参考
 
 ### Phase 2：图像重采样压缩
 
@@ -53,9 +54,8 @@
    - `_PIPELINE_STEPS`: 添加图像压缩到管线
 
 3. **ratools_pdf/pdf/precheck.py**
-   - 添加文件大小检测（`file_size_mb`, `size_warning`）
    - 根据文件大小自动建议压缩选项
-   - 更新 `PRECHECK_DETECTABLE_OPTIONS`
+   - 压缩选项不列入 `PRECHECK_DETECTABLE_OPTIONS`（smart 模式下已勾选即执行）
 
 ### UI 组件
 4. **ratools_pdf/ui/dialogs/dpi_selection_dialog.py**
@@ -88,23 +88,31 @@
 ### 图像压缩逻辑
 
 ```python
-# 压缩条件（满足任一即执行）：
-1. 图像大于 500KB
-2. 宽度超过 target_dpi * 8.5 英寸
-3. 高度超过 target_dpi * 11.7 英寸
+# 压缩条件：尺寸超过目标 DPI 下的 A4 尺寸（宽 target_dpi * 8.5 英寸、
+# 高 target_dpi * 11.7 英寸），只缩小不放大
 
 # 压缩流程：
 1. 使用 PIL 打开图像
-2. 计算缩放比例（只缩小不放大）
-3. LANCZOS 重采样
-4. 处理透明通道（RGBA → RGB，白色背景）
-5. 保存为 JPEG（quality=85, optimize=True）
-6. 仅当新图像更小时才更新
+2. LANCZOS 重采样
+3. 处理透明通道（RGBA/LA/P → RGB，白色背景；其余模式转 RGB，保留灰度 L）
+4. 保存为 JPEG（quality=85, optimize=True）
+5. 与 PDF 中实际存储的流长度比较（不是 extract_image 的 PNG 重编码长度），
+   只有更小才回写
+6. 原位替换：update_stream 写入 JPEG 字节 + 逐键同步图像字典
+   （/Width /Height /Filter /ColorSpace /BitsPerComponent，清掉
+   /SMask /Mask /Decode /DecodeParms）——字典与流不一致会导致图像花屏；
+   不使用 Page.replace_image，它会在页面资源中残留重复图像条目
+7. 同一 xref 被多页引用时只处理一次
 ```
 
-### DPI 设置存储
+### 压缩参数传递
 
-压缩 DPI 配置存储在：
+图像压缩参数（dpi/quality）由 UI 层收集（settings.ini `[Compression] ImageDPI`），
+经 `MainWindow.get_compression_settings()` → controller → `ProcessWorker` →
+`process_document(compression_settings=...)` 传入；pdf 层不读取任何 UI 配置。
+默认值与取值范围唯一定义于 `ratools_pdf/config/compression.py`，非法输入
+由 `normalize_compression_settings()` 归一化后回落默认。
+
 ```
 <AppDir>/settings.ini
 [Compression]
@@ -134,12 +142,16 @@ ImageDPI=300
 
 ## 测试
 
-运行测试脚本：
-```bash
-python test_compression.py
-```
+回归测试位于 `tests/test_image_compression.py`，覆盖：
+- P0：压缩替换后图像字典与实际流一致、渲染结果与源文件像素差在阈值内
+- FlateDecode 大流图像按实际流长度比较触发压缩
+- smart 模式下勾选的标准/深度压缩必须执行
+- 无图像/全部跳过时的结果反馈、参数归一化
 
-需要提供 `test_sample.pdf` 作为测试文件。
+运行：
+```bash
+python -m pytest tests/test_image_compression.py -v
+```
 
 ## 注意事项
 

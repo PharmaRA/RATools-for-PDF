@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ratools_pdf.config.compression import MAX_IMAGE_DPI, MIN_IMAGE_DPI
+
 
 class DpiSelectionDialog(QDialog):
     """图像压缩 DPI 选择对话框"""
@@ -57,7 +59,7 @@ class DpiSelectionDialog(QDialog):
         custom_layout = QHBoxLayout()
         custom_layout.addWidget(self.rb_custom)
         self.spin_custom = QSpinBox()
-        self.spin_custom.setRange(72, 600)
+        self.spin_custom.setRange(MIN_IMAGE_DPI, MAX_IMAGE_DPI)
         self.spin_custom.setValue(150)
         self.spin_custom.setSuffix(" DPI")
         self.spin_custom.setEnabled(False)

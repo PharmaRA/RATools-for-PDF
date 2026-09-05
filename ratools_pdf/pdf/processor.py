@@ -6,6 +6,7 @@ from pathlib import Path
 
 import fitz
 
+from ratools_pdf.config.compression import normalize_compression_settings
 from ratools_pdf.pdf import bookmarks_links, hyperlink_styles, page_layout, precheck, qpdf
 
 
@@ -97,14 +98,17 @@ def _format_change_summary(change_counts, ordered_labels):
 class _PipelineContext:
     """process_document 各 step 之间共享的可变状态。"""
 
-    def __init__(self, doc, options, input_path, prof):
+    def __init__(self, doc, options, input_path, prof, compression_settings=None):
         self.doc = doc
         self.options = options
         self.input_path = input_path
         self.prof = prof
+        self.compression_settings = compression_settings
         self.changed = False
         self.applied_changes = []
         self.change_counts = {}
+        # 不计入 applied_changes 的补充说明（如"跳过 N 张"），仅追加到结果消息
+        self.notes = []
         self.catalog_xref = doc.pdf_catalog()
 
         link_file_kind = getattr(fitz, "LINK_FILE", None)
@@ -773,119 +777,146 @@ def _step_cleanup(ctx):
 
 
 def _step_image_compression(ctx):
-    """图像压缩：重采样到目标 DPI"""
+    """图像压缩：超过目标 DPI 尺寸的图像重采样后以 JPEG 回写。
+
+    压缩参数（dpi/quality）由调用方经 compression_settings 传入，
+    本步骤不读取任何 UI 配置。
+    """
     if "compress_images" not in ctx.options:
         return
-
-    # 从配置文件读取 DPI（由 UI 层在勾选时设置）
-    try:
-        from ratools_pdf.config.paths import get_app_dir
-        from PySide6.QtCore import QSettings
-        import os
-        settings = QSettings(os.path.join(get_app_dir(), "settings.ini"), QSettings.Format.IniFormat)
-        target_dpi = int(settings.value("Compression/ImageDPI", 300))
-    except Exception:
-        target_dpi = 300  # 默认 300 DPI
-
-    doc = ctx.doc
-    compressed_count = 0
-    skipped_count = 0
 
     # 尝试导入 Pillow
     try:
         from PIL import Image
         from io import BytesIO
     except ImportError:
-        ctx.mark("图像压缩需要安装 Pillow 库")
+        ctx.notes.append("图像压缩需要安装 Pillow 库，本次未压缩图像")
         return
 
+    settings = normalize_compression_settings(ctx.compression_settings)
+    target_dpi = settings["dpi"]
+    quality = settings["quality"]
+
+    max_width_at_target = int(target_dpi * 8.5)  # A4 宽度约 8.27 英寸，放宽到 8.5
+    max_height_at_target = int(target_dpi * 11.7)  # A4 高度约 11.69 英寸
+
+    doc = ctx.doc
+    compressed_count = 0
+    skipped_count = 0
+    seen_xrefs = set()
+
     with ctx.prof.phase(f"图像压缩(目标{target_dpi}DPI)"):
-        for page_num, page in enumerate(doc):
-            img_list = page.get_images(full=True)
-
-            for img_index, img in enumerate(img_list):
+        for page in doc:
+            for img in page.get_images(full=True):
+                xref = img[0]
+                # 同一 xref 可能被多页引用，只处理一次（避免重复解码/重编码）
+                if xref in seen_xrefs:
+                    continue
+                seen_xrefs.add(xref)
                 try:
-                    xref = img[0]
-
-                    # 获取图像基本信息
-                    base_image = doc.extract_image(xref)
-                    if not base_image:
-                        continue
-
-                    image_bytes = base_image["image"]
-                    img_size_kb = len(image_bytes) / 1024
-
-                    # 使用 PIL 打开图像
-                    try:
-                        img_pil = Image.open(BytesIO(image_bytes))
-                    except Exception:
-                        # 无法解析的图像格式，跳过
+                    if _compress_single_image(
+                        doc, xref,
+                        max_width_at_target, max_height_at_target, quality,
+                    ):
+                        compressed_count += 1
+                    else:
                         skipped_count += 1
-                        continue
-
-                    width_px, height_px = img_pil.size
-
-                    # 判断是否需要压缩：
-                    # 1. 图像大于 500KB
-                    # 2. 或者尺寸明显超过目标 DPI 下的 A4 尺寸（宽约 8.27 英寸，高约 11.69 英寸）
-                    max_width_at_target = int(target_dpi * 8.5)  # A4 宽度约 8.27 英寸，取整为 8.5
-                    max_height_at_target = int(target_dpi * 11.7)  # A4 高度约 11.69 英寸
-
-                    needs_compression = (
-                        img_size_kb > 500 or
-                        width_px > max_width_at_target or
-                        height_px > max_height_at_target
-                    )
-
-                    if not needs_compression:
-                        continue
-
-                    # 计算缩放比例
-                    scale_x = max_width_at_target / width_px if width_px > max_width_at_target else 1.0
-                    scale_y = max_height_at_target / height_px if height_px > max_height_at_target else 1.0
-                    scale = min(scale_x, scale_y, 1.0)  # 只缩小不放大
-
-                    if scale < 1.0:
-                        new_width = int(width_px * scale)
-                        new_height = int(height_px * scale)
-
-                        # 重采样（使用 LANCZOS 高质量算法）
-                        img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-                        # 转换为 JPEG（质量 85）
-                        output = BytesIO()
-
-                        # 处理透明通道
-                        if img_pil.mode in ('RGBA', 'LA', 'P'):
-                            # 转换为 RGB（白色背景）
-                            if img_pil.mode == 'P':
-                                img_resized = img_resized.convert('RGBA')
-                            rgb_img = Image.new('RGB', img_resized.size, (255, 255, 255))
-                            if img_resized.mode == 'RGBA':
-                                rgb_img.paste(img_resized, mask=img_resized.split()[3])
-                            else:
-                                rgb_img.paste(img_resized)
-                            img_resized = rgb_img
-                        elif img_pil.mode not in ('RGB', 'L'):
-                            # 其他模式转为 RGB
-                            img_resized = img_resized.convert('RGB')
-
-                        # 保存为 JPEG
-                        img_resized.save(output, format='JPEG', quality=85, optimize=True)
-                        new_image_bytes = output.getvalue()
-
-                        # 只有压缩后更小才更新
-                        if len(new_image_bytes) < len(image_bytes):
-                            doc.update_stream(xref, new_image_bytes)
-                            compressed_count += 1
-
-                except Exception as e:
+                except Exception:
                     # 单个图像失败不影响整体处理
                     skipped_count += 1
-                    continue
 
     if compressed_count > 0:
         ctx.mark("图像压缩", count=compressed_count)
+    if seen_xrefs and skipped_count > 0:
+        reason = "未超目标尺寸、压缩后无法变小或格式不支持"
+        if compressed_count > 0:
+            ctx.notes.append(f"图像压缩：另有 {skipped_count} 张跳过（{reason}）")
+        else:
+            ctx.notes.append(f"图像压缩：{skipped_count} 张图像全部跳过（{reason}）")
+    elif not seen_xrefs:
+        ctx.notes.append("图像压缩：文档中没有内嵌图像")
+
+
+def _compress_single_image(doc, xref, max_width, max_height, quality):
+    """压缩单个图像并回写；成功替换返回 True，未命中条件或未变小返回 False。
+
+    替换采用原位改写（update_stream + 逐键更新字典）：新流是本函数的受控
+    产物（JPEG、DeviceRGB/DeviceGray、8bpc），键集完全已知。不使用
+    Page.replace_image（insert-then-copy 方案），它会在页面资源中残留一个
+    指向重复图像的条目，garbage 级别不足以去重时新流会在文件里存两份。
+
+    无论何种替换方式，字典与流必须同步更新，否则图像整体花屏。
+    """
+    from io import BytesIO
+    from PIL import Image
+
+    # "压缩后更小才替换"的比较基准必须是 PDF 中实际存储的流长度：
+    # extract_image() 对 FlateDecode 图像会重编码为 PNG，长度失真，
+    # 拿它当基准会误判"压不小"而漏压大流。
+    try:
+        orig_stream_len = len(doc.xref_stream_raw(xref))
+    except Exception:
+        return False
+
+    # 掩膜类对象（/ImageMask）不是普通显示图像，不做重采样
+    if doc.xref_get_key(xref, "ImageMask")[1] == "true":
+        return False
+
+    base_image = doc.extract_image(xref)
+    if not base_image:
+        return False
+
+    try:
+        img_pil = Image.open(BytesIO(base_image["image"]))
+    except Exception:
+        # 无法解析的图像格式，跳过
+        return False
+
+    width_px, height_px = img_pil.size
+
+    # 缩放比例：超过目标 DPI 下的 A4 尺寸才缩，只缩小不放大
+    scale_x = max_width / width_px if width_px > max_width else 1.0
+    scale_y = max_height / height_px if height_px > max_height else 1.0
+    scale = min(scale_x, scale_y, 1.0)
+    if scale >= 1.0:
+        return False
+
+    # 重采样（使用 LANCZOS 高质量算法）
+    img_resized = img_pil.resize((int(width_px * scale), int(height_px * scale)), Image.Resampling.LANCZOS)
+
+    # JPEG 无透明通道：带 alpha 的模式铺白底后转 RGB，其余模式转 RGB（保留灰度 L）
+    if img_resized.mode in ("RGBA", "LA", "P"):
+        if img_resized.mode != "RGBA":
+            img_resized = img_resized.convert("RGBA")
+        rgb_img = Image.new("RGB", img_resized.size, (255, 255, 255))
+        rgb_img.paste(img_resized, mask=img_resized.split()[3])
+        img_resized = rgb_img
+    elif img_resized.mode not in ("RGB", "L"):
+        img_resized = img_resized.convert("RGB")
+
+    output = BytesIO()
+    img_resized.save(output, format="JPEG", quality=quality, optimize=True)
+    new_image_bytes = output.getvalue()
+
+    if len(new_image_bytes) >= orig_stream_len:
+        return False
+
+    # 原样写入 JPEG 字节（关闭 PyMuPDF 的自动 flate 压缩——否则存储的是
+    # deflate 包裹的 JPEG，与下面声明的 /DCTDecode 不符）。
+    # 不同版本的"关闭压缩"参数名不同，逐一兼容。
+    try:
+        doc.update_stream(xref, new_image_bytes, compress=0)  # PyMuPDF >= 1.28
+    except TypeError:
+        doc.update_stream(xref, new_image_bytes, deflate=False)  # 旧版
+    doc.xref_set_key(xref, "Width", str(img_resized.size[0]))
+    doc.xref_set_key(xref, "Height", str(img_resized.size[1]))
+    doc.xref_set_key(xref, "Filter", "/DCTDecode")
+    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if img_resized.mode == "L" else "/DeviceRGB")
+    doc.xref_set_key(xref, "BitsPerComponent", "8")
+    # 旧流遗留的键对新 JPEG 不再合法，必须一并清掉
+    for stale_key in ("SMask", "Mask", "Decode", "DecodeParms"):
+        doc.xref_set_key(xref, stale_key, "null")
+    return True
 
 
 # 处理管线：按序执行。步骤内部自行判断选项是否命中。
@@ -978,15 +1009,15 @@ def _finalize_output(ctx, input_path, output_path):
                 decrypt_restrictions=remove_pdf_restrictions,
             )
             _mark_qpdf_changes()
-            _mark_compression_changes()
         else:
             shutil.copy2(input_path, output_path)
-            _mark_compression_changes()
 
 
-def process_document(input_path, output_path, options, processing_mode="smart"):
+def process_document(input_path, output_path, options, processing_mode="smart", compression_settings=None):
     """处理单个 PDF：解析选项 → 依序执行规则步骤 → 保存输出。
 
+    compression_settings 为图像压缩参数（{"dpi": int, "quality": int}），
+    由 UI 层收集后经控制器/worker 传入；为 None 时按默认参数处理。
     返回 (success: bool, message: str)。message 为用户可见的处理结果文本。
     """
     prof = _PhaseProfiler()
@@ -1001,18 +1032,27 @@ def process_document(input_path, output_path, options, processing_mode="smart"):
         prof.set_page_count(doc.page_count)
 
         if doc.needs_pass:
+            doc.close()
             return False, "❌ 文件已加密"
 
-        ctx = _PipelineContext(doc, options, input_path, prof)
-        for step in _PIPELINE_STEPS:
-            step(ctx)
+        # _finalize_output 各分支都会关闭 doc；步骤抛异常时也必须关闭，
+        # 否则句柄泄漏会一直锁住输入文件（Windows 下尤为致命）
+        try:
+            ctx = _PipelineContext(doc, options, input_path, prof, compression_settings=compression_settings)
+            for step in _PIPELINE_STEPS:
+                step(ctx)
 
-        _finalize_output(ctx, input_path, output_path)
+            _finalize_output(ctx, input_path, output_path)
+        except Exception:
+            doc.close()
+            raise
 
         if ctx.applied_changes:
             result_msg = f"✅ 处理成功；修改项：{_format_change_summary(ctx.change_counts, ctx.applied_changes)}"
         else:
             result_msg = "✅ 处理成功；无实际修改"
+        if ctx.notes:
+            result_msg = f"{result_msg}；{'；'.join(ctx.notes)}"
         if mode_log:
             result_msg = f"{result_msg}；{mode_log}"
         prof_summary = prof.summary()

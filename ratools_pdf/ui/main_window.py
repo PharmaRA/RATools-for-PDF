@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from ratools_pdf.config import rules_catalog
+from ratools_pdf.config.compression import DEFAULT_IMAGE_DPI, DEFAULT_JPEG_QUALITY
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.config.paths import get_app_dir, get_resource_path
 from ratools_pdf.ui.dialogs import (
@@ -787,6 +788,18 @@ class MainWindow(QMainWindow):
             if cb.isChecked():
                 selected.append(opt_id)
         return selected
+
+    def get_compression_settings(self):
+        """图像压缩参数（dpi/quality）。
+
+        pdf 层不读取 UI 配置：由控制器在启动处理时取走本方法的返回值，
+        经 worker 传给 process_document。非法值由 config.compression 的
+        normalize 归一化，这里原样透出即可。
+        """
+        return {
+            "dpi": self.app_settings.value("Compression/ImageDPI", DEFAULT_IMAGE_DPI),
+            "quality": DEFAULT_JPEG_QUALITY,
+        }
 
     def clear_tree_ui(self):
         self.tree.clear()

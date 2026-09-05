@@ -21,9 +21,13 @@ else:
     update_checker = None
 
 
-def _process_document_task_pipe(file_path, out_path, options, processing_mode, conn):
+def _process_document_task_pipe(file_path, out_path, options, processing_mode, compression_settings, conn):
     try:
-        conn.send(PDFProcessor.process_document(file_path, out_path, options, processing_mode=processing_mode))
+        conn.send(PDFProcessor.process_document(
+            file_path, out_path, options,
+            processing_mode=processing_mode,
+            compression_settings=compression_settings,
+        ))
     except Exception as e:
         conn.send((False, f"处理进程异常: {str(e)}"))
     finally:
@@ -39,11 +43,12 @@ class ProcessWorker(QThread):
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
-    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart"):
+    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart", compression_settings=None):
         super().__init__()
         self.files = files
         self.options = options
         self.processing_mode = str(processing_mode or "smart").lower()
+        self.compression_settings = compression_settings
         self.output_dir = output_dir
         self.common_base = common_base
         self.overwrite_original = overwrite_original
@@ -108,7 +113,10 @@ class ProcessWorker(QThread):
             f"\n[{now}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
         parent_conn, child_conn = mp.Pipe(duplex=False)
-        proc = mp.Process(target=_process_document_task_pipe, args=(file_path, out_path, self.options, self.processing_mode, child_conn))
+        proc = mp.Process(
+            target=_process_document_task_pipe,
+            args=(file_path, out_path, self.options, self.processing_mode, self.compression_settings, child_conn),
+        )
         proc.start()
         child_conn.close()
         return {

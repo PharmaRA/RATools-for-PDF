@@ -78,10 +78,10 @@ PRECHECK_DETECTABLE_OPTIONS = {
     "convert_pdf_version",
     "remove_pdf_restrictions",
     "fast_web_view",
-    "compress_standard",
-    "compress_aggressive",
 }
-# compress_images 需要用户手动判断（预检无法可靠检测是否需要图像压缩）
+# 压缩类选项（compress_standard / compress_aggressive / compress_images）由用户主动
+# 勾选决定，预检无法可靠检测"是否需要压缩"，故不在可检测集合内（smart 模式下
+# 已勾选即执行）；预检报告仅按文件大小给出建议供参考。
 
 PRECHECK_OPTION_ALIASES = {
     "cleanup_remove_external_uri": {"cleanup_remove_external_uri_and_text_black"},
@@ -1110,8 +1110,6 @@ def build_precheck_report(input_path, selected_options=None):
         "broken_reference_summary": "",
         "broken_reference_details": "",
         "error": "",
-        "file_size_mb": 0.0,
-        "size_warning": False,
     }
 
     if not os.path.exists(input_path):
@@ -1121,12 +1119,10 @@ def build_precheck_report(input_path, selected_options=None):
         report["error"] = "不是PDF文件"
         return report
 
-    # 获取文件大小
+    # 文件大小仅用于压缩建议文案，不作为报告结构化字段暴露
+    file_size_mb = 0.0
     try:
-        file_size_bytes = os.path.getsize(input_path)
-        file_size_mb = file_size_bytes / (1024 * 1024)
-        report["file_size_mb"] = round(file_size_mb, 2)
-        report["size_warning"] = file_size_mb > 20
+        file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
     except Exception:
         pass
 
@@ -1142,20 +1138,20 @@ def build_precheck_report(input_path, selected_options=None):
         for check_group in _PRECHECK_GROUPS:
             check_group(ctx)
 
-        # 根据文件大小添加压缩建议
-        if report["file_size_mb"] > 20:
+        # 根据文件大小添加压缩建议（仅供参考，是否勾选由用户决定）
+        if file_size_mb > 20:
             if "compress_standard" not in report["suggestions"]:
                 _add_precheck_suggestion(
                     report["suggestions"],
                     "compress_standard",
-                    f"文件大小 {report['file_size_mb']:.1f} MB 超过建议阈值"
+                    f"文件大小 {file_size_mb:.1f} MB 超过建议阈值"
                 )
-        if report["file_size_mb"] > 40:
+        if file_size_mb > 40:
             if "compress_aggressive" not in report["suggestions"]:
                 _add_precheck_suggestion(
                     report["suggestions"],
                     "compress_aggressive",
-                    f"文件大小 {report['file_size_mb']:.1f} MB 显著超出限制"
+                    f"文件大小 {file_size_mb:.1f} MB 显著超出限制"
                 )
 
         return report

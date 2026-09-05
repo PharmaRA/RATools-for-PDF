@@ -549,6 +549,7 @@ class MainController(QObject):
             overwrite_original,
             max_workers=max_workers,
             processing_mode=processing_mode,
+            compression_settings=self.view.get_compression_settings(),
         )
         self.worker.progress.connect(self.update_progress)
         self.worker.structured_progress.connect(self.record_process_log_event)
