@@ -240,6 +240,41 @@ class PrecheckBookmarkTests(unittest.TestCase):
 
             self.assertNotIn("bookmark_inherit_zoom", _suggested_ids(report))
 
+    def test_fixed_zoom_gotor_bookmark_triggers_inherit_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_pdf(tmp, [
+                [1, "ExtZoom", 1, {
+                    "kind": fitz.LINK_GOTOR,
+                    "file": "other.pdf",
+                    "page": 0,
+                    "zoom": 2.0,
+                }],
+            ])
+
+            report = _report(path)
+
+            self.assertIn("bookmark_inherit_zoom", _suggested_ids(report))
+
+    def test_existing_new_window_gotor_bookmark_no_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._make_pdf(tmp, [
+                [1, "ExtNW", 1, {
+                    "kind": fitz.LINK_GOTOR,
+                    "file": "other.pdf",
+                    "page": 0,
+                    "zoom": 0.0,
+                }],
+            ])
+            doc = fitz.open(path)
+            xref = doc.get_toc(simple=False)[0][3]["xref"]
+            doc.xref_set_key(xref, "A/NewWindow", "true")
+            doc.saveIncr()
+            doc.close()
+
+            report = _report(path)
+
+            self.assertNotIn("bookmark_open_new_window", _suggested_ids(report))
+
 
 class PrecheckLinkTests(unittest.TestCase):
     def test_absolute_file_link_triggers_abs_to_rel(self):
@@ -307,6 +342,104 @@ class PrecheckLinkTests(unittest.TestCase):
             report = _report(path)
 
             self.assertIn("link_inherit_zoom", _suggested_ids(report))
+
+    def test_fixed_zoom_gotor_link_triggers_inherit_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 0,
+                "zoom": 1.5,
+            })
+            doc.save(path)
+            doc.close()
+
+            report = _report(path)
+
+            self.assertIn("link_inherit_zoom", _suggested_ids(report))
+
+    def test_inherit_zoom_gotor_link_no_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 0,
+                "zoom": 0.0,
+            })
+            doc.save(path)
+            doc.close()
+
+            report = _report(path)
+
+            self.assertNotIn("link_inherit_zoom", _suggested_ids(report))
+
+    def test_missing_new_window_gotor_link_triggers_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 0,
+            })
+            doc.save(path)
+            doc.close()
+
+            report = _report(path)
+
+            self.assertIn("link_open_new_window", _suggested_ids(report))
+
+    def test_existing_new_window_gotor_link_no_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 0,
+            })
+            doc.save(path)
+            doc.close()
+
+            # 写入 /NewWindow true
+            doc = fitz.open(path)
+            doc.xref_set_key(doc[0].get_links()[0]["xref"], "A/NewWindow", "true")
+            doc.saveIncr()
+            doc.close()
+
+            report = _report(path)
+
+            # 已配置新窗口，不得误报建议（消除历史假阳性）
+            self.assertNotIn("link_open_new_window", _suggested_ids(report))
+
+    def test_existing_new_window_indirect_gotor_link_no_suggestion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "s.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            act_xref = doc.get_new_xref()
+            doc.update_object(act_xref, "<</S/GoToR/F(other.pdf)/D[0/XYZ null null 0]/NewWindow true>>")
+            link_xref = doc.get_new_xref()
+            doc.update_object(link_xref, f"<</Type/Annot/Subtype/Link/Rect[50 50 150 70]/A {act_xref} 0 R>>")
+            doc.xref_set_key(page.xref, "Annots", f"[{link_xref} 0 R]")
+            doc.save(path)
+            doc.close()
+
+            report = _report(path)
+
+            self.assertNotIn("link_open_new_window", _suggested_ids(report))
 
 
 class PrecheckCleanupTests(unittest.TestCase):

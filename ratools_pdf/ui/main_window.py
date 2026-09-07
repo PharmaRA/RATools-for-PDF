@@ -9,11 +9,13 @@ from PySide6.QtWidgets import (
 )
 
 from ratools_pdf.config import rules_catalog
+from ratools_pdf.config.compression import DEFAULT_IMAGE_DPI, DEFAULT_JPEG_QUALITY
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.config.paths import get_app_dir, get_resource_path
 from ratools_pdf.ui.dialogs import (
     AboutDialog,
     CustomMessageBox,
+    DpiSelectionDialog,
     ManualFontEmbeddingDialog,
     SettingsDialog,
 )
@@ -369,7 +371,13 @@ class MainWindow(QMainWindow):
             page_layout.setSpacing(14)
 
             for opt in mod["options"]:
-                page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
+                checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
+                page_layout.addWidget(checkbox_widget)
+
+                # 为"压缩内嵌图像"添加特殊处理：勾选时弹出 DPI 选择对话框
+                # 注意：初始化完成后才连接信号，避免启动时恢复勾选状态触发对话框
+                if opt["id"] == "compress_images":
+                    self.compress_images_checkbox_created = True
 
             if mod["title"] == "页面与字体标准化":
                 page_layout.addSpacing(12)
@@ -576,6 +584,10 @@ class MainWindow(QMainWindow):
         self.active_preset_key = None
         self._set_preset_button_state(None)
 
+        # 初始化完成后再连接"压缩内嵌图像"的特殊处理
+        if hasattr(self, "compress_images_checkbox_created") and "compress_images" in self.all_checkboxes:
+            self.all_checkboxes["compress_images"].toggled.connect(self._on_compress_images_toggled)
+
     def closeEvent(self, event):
         self.persist_all_settings()
         super().closeEvent(event)
@@ -777,6 +789,18 @@ class MainWindow(QMainWindow):
                 selected.append(opt_id)
         return selected
 
+    def get_compression_settings(self):
+        """图像压缩参数（dpi/quality）。
+
+        pdf 层不读取 UI 配置：由控制器在启动处理时取走本方法的返回值，
+        经 worker 传给 process_document。非法值由 config.compression 的
+        normalize 归一化，这里原样透出即可。
+        """
+        return {
+            "dpi": self.app_settings.value("Compression/ImageDPI", DEFAULT_IMAGE_DPI),
+            "quality": DEFAULT_JPEG_QUALITY,
+        }
+
     def clear_tree_ui(self):
         self.tree.clear()
 
@@ -942,6 +966,21 @@ class MainWindow(QMainWindow):
             layout.addWidget(desc_lbl)
 
         return container
+
+    def _on_compress_images_toggled(self, checked):
+        """处理'压缩内嵌图像'复选框切换事件，勾选时弹出 DPI 选择对话框"""
+        if checked:
+            dialog = DpiSelectionDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                dpi = dialog.get_selected_dpi()
+                self.app_settings.setValue("Compression/ImageDPI", dpi)
+            else:
+                # 用户取消，取消勾选
+                self.all_checkboxes["compress_images"].blockSignals(True)
+                self.all_checkboxes["compress_images"].setChecked(False)
+                self.all_checkboxes["compress_images"].blockSignals(False)
+                # 需要手动触发一次摘要刷新，因为信号被阻塞了
+                self.refresh_selection_summary()
 
     def apply_stylesheet(self):
         # 视觉样式全部集中在 theme.py 的应用级 QSS 中，由 ThemeManager 应用到

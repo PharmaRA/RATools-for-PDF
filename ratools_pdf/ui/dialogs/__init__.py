@@ -3,6 +3,7 @@
 
 from ratools_pdf.ui.dialogs.about_dialog import AboutDialog
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.dialogs.dpi_selection_dialog import DpiSelectionDialog
 from ratools_pdf.ui.dialogs.font_embedding import ManualFontEmbeddingDialog
 from ratools_pdf.ui.dialogs.io_wizard import IODataWizardDialog
 from ratools_pdf.ui.dialogs.log_dialog import LogDialog
@@ -12,6 +13,7 @@ from ratools_pdf.ui.dialogs.settings_dialog import SettingsDialog
 __all__ = [
     "AboutDialog",
     "CustomMessageBox",
+    "DpiSelectionDialog",
     "FramelessDraggableDialog",
     "IODataWizardDialog",
     "LogDialog",

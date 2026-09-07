@@ -523,6 +523,34 @@ class BookmarkRulesTests(unittest.TestCase):
             self.assertEqual(state["ext"]["file"], "other.pdf")
             self.assertEqual(state["ext"]["subtype"], "/GoToR")
 
+    def test_bookmark_inherit_zoom_resets_gotor_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            doc.new_page()
+            doc.set_toc([
+                [1, "ExtZoom", 1, {
+                    "kind": fitz.LINK_GOTOR,
+                    "file": "other.pdf",
+                    "page": 0,
+                    "zoom": 2.5,
+                }],
+            ])
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"bookmark_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            toc = doc.get_toc(simple=False)
+            xref = toc[0][3]["xref"]
+            dest_val = doc.xref_get_key(xref, "A/D")[1]
+            doc.close()
+            self.assertEqual(toc[0][3].get("zoom"), 0.0)
+            self.assertIn("/XYZ 72 806 0", " ".join(dest_val.split()))
+
 
 class HyperlinkRulesTests(unittest.TestCase):
     def test_link_abs_to_rel_path_strips_directory(self):
@@ -664,6 +692,152 @@ class HyperlinkRulesTests(unittest.TestCase):
             raw = doc.xref_object(xref)
             doc.close()
             self.assertIn("/NewWindow true", raw)
+
+    def test_link_inherit_zoom_resets_gotor_zoom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 2,
+                "to": fitz.Point(72, 144),
+                "zoom": 2.5,
+            })
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"link_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            xref = doc[0].get_links()[0]["xref"]
+            dest_type, dest_value = doc.xref_get_key(xref, "A/D")
+            doc.close()
+            self.assertEqual(dest_type, "array")
+            compact = " ".join(dest_value.split())
+            # zoom 变为 0，且目标页码 2 和跳转坐标 72 144 完整保留
+            self.assertIn("/XYZ 72 144 0", compact)
+            self.assertIn("2", compact.split()[0])
+
+    def test_link_inherit_zoom_preserves_new_window_on_gotor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "other.pdf",
+                "page": 0,
+                "zoom": 1.5,
+            })
+            doc.save(source)
+            doc.close()
+
+            # 预设 /NewWindow true
+            doc = fitz.open(source)
+            doc.xref_set_key(doc[0].get_links()[0]["xref"], "A/NewWindow", "true")
+            doc.saveIncr()
+            doc.close()
+
+            ok, msg = _process(source, output, {"link_inherit_zoom"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            xref = doc[0].get_links()[0]["xref"]
+            raw = doc.xref_object(xref)
+            nw_type, nw_val = doc.xref_get_key(xref, "A/NewWindow")
+            doc.close()
+            self.assertEqual(nw_type, "bool")
+            self.assertEqual(nw_val, "true")
+            self.assertIn("/XYZ 0 0 0", " ".join(raw.split()))
+
+    def test_link_open_new_window_indirect_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            act_xref = doc.get_new_xref()
+            doc.update_object(act_xref, "<</S/GoToR/F(other.pdf)/D[0/XYZ 72 144 2.0]>>")
+            link_xref = doc.get_new_xref()
+            doc.update_object(link_xref, f"<</Type/Annot/Subtype/Link/Rect[50 50 150 70]/A {act_xref} 0 R>>")
+            doc.xref_set_key(page.xref, "Annots", f"[{link_xref} 0 R]")
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"link_open_new_window"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            nw_type, nw_val = doc.xref_get_key(act_xref, "NewWindow")
+            doc.close()
+            self.assertEqual(nw_type, "bool")
+            self.assertEqual(nw_val, "true")
+
+    def test_link_open_new_window_nospace_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            link_xref = doc.get_new_xref()
+            doc.update_object(link_xref, "<</Type/Annot/Subtype/Link/Rect[50 50 150 70]/A<</S/GoToR/F(other.pdf)/D[0/XYZ null null 0]>>>>")
+            doc.xref_set_key(page.xref, "Annots", f"[{link_xref} 0 R]")
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"link_open_new_window"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            nw_type, nw_val = doc.xref_get_key(link_xref, "A/NewWindow")
+            doc.close()
+            self.assertEqual(nw_type, "bool")
+            self.assertEqual(nw_val, "true")
+
+    def test_link_abs_to_rel_preserves_gotor_coords_and_new_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_GOTOR,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "file": "C:/docs/sub/other.pdf",
+                "page": 3,
+                "to": fitz.Point(72, 144),
+                "zoom": 0.0,
+            })
+            doc.save(source)
+            doc.close()
+
+            doc = fitz.open(source)
+            xref = doc[0].get_links()[0]["xref"]
+            doc.xref_set_key(xref, "A/NewWindow", "true")
+            doc.saveIncr()
+            doc.close()
+
+            ok, msg = _process(source, output, {"link_abs_to_rel_path"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            xref = doc[0].get_links()[0]["xref"]
+            nw_type, nw_val = doc.xref_get_key(xref, "A/NewWindow")
+            d_type, d_val = doc.xref_get_key(xref, "A/D")
+            link = doc[0].get_links()[0]
+            doc.close()
+            self.assertEqual(link.get("file"), "other.pdf")
+            self.assertEqual(nw_type, "bool")
+            self.assertEqual(nw_val, "true")
+            compact = " ".join(d_val.split())
+            self.assertIn("/XYZ 72 144", compact)
 
     def test_link_remove_border_zeroes_border_width(self):
         with tempfile.TemporaryDirectory() as tmp:
