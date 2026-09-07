@@ -186,6 +186,7 @@ def bookmark_dest_zoom(dest, named_zooms=None):
 
 
 _XYZ_ZOOM_RE = re.compile(r"/XYZ\s+(\S+)\s+(\S+)\s+(\S+)")
+_XYZ_ZOOM_RESET_RE = re.compile(r"(/XYZ\s+\S+\s+\S+\s+)\S+?(\s*\])")
 
 
 def _parse_xyz_zoom(dest_array_text):
@@ -207,12 +208,96 @@ def _parse_xyz_zoom(dest_array_text):
         return 0.0
 
 
+def reset_xyz_dest_zoom(dest_array_text):
+    """将 /XYZ 目的地数组中的 zoom 参数重置为 0 (承前缩放)，同时保留原页码与 left/top 坐标。
+
+    若输入不是 /XYZ 视图或无法匹配，返回原字符串。
+    """
+    if not dest_array_text:
+        return dest_array_text
+    return _XYZ_ZOOM_RESET_RE.sub(r"\g<1>0\2", dest_array_text)
+
+
+def resolve_link_action_target(doc, link_xref):
+    """解析链接或书签注释的动作目标字典位置。
+
+    返回 (target_xref, key_prefix)，用于配合 doc.xref_get_key / doc.xref_set_key：
+    - 若 /A 为间接对象 (如 '15 0 R')，返回 (15, "")。通过对象 15 读写 'S', 'D', 'NewWindow'。
+    - 若 /A 为内联字典 (如 '<</S/GoToR...>>')，返回 (link_xref, "A/")。通过注释对象读写 'A/S', 'A/D', 'A/NewWindow'。
+    - 若无有效 /A 动作字典，返回 (0, "")。
+    """
+    if not link_xref:
+        return 0, ""
+    try:
+        link_xref = int(link_xref)
+    except (TypeError, ValueError):
+        return 0, ""
+    if link_xref <= 0:
+        return 0, ""
+
+    try:
+        a_type, a_val = doc.xref_get_key(link_xref, "A")
+    except Exception:
+        return 0, ""
+
+    if a_type == "xref":
+        try:
+            act_xref = int(str(a_val).split()[0])
+            if act_xref > 0:
+                return act_xref, ""
+        except (TypeError, ValueError, IndexError):
+            pass
+    elif a_type == "dict":
+        return link_xref, "A/"
+    return 0, ""
+
+
+def get_link_action_key(doc, link_xref, key):
+    """读取链接动作字典的指定键。
+
+    统一兼容 /A 为间接对象引用与内联字典两种情形。
+    返回 (key_type, value)，读不到时返回 ('null', 'null')。
+    """
+    target_xref, prefix = resolve_link_action_target(doc, link_xref)
+    if not target_xref:
+        return "null", "null"
+    try:
+        return doc.xref_get_key(target_xref, f"{prefix}{key}")
+    except Exception:
+        return "null", "null"
+
+
+def set_link_action_key(doc, link_xref, key, value):
+    """设置链接动作字典的指定键。
+
+    统一兼容 /A 为间接对象引用与内联字典两种情形。
+    返回 True 表示设置成功，False 表示失败。
+    """
+    target_xref, prefix = resolve_link_action_target(doc, link_xref)
+    if not target_xref:
+        return False
+    try:
+        doc.xref_set_key(target_xref, f"{prefix}{key}", str(value))
+        return True
+    except Exception:
+        return False
+
+
+def link_has_new_window(doc, link_xref):
+    """检查链接动作是否已配置为新窗口打开 (/NewWindow true)。"""
+    if not link_xref:
+        return False
+    key_type, value = get_link_action_key(doc, link_xref, "NewWindow")
+    return key_type == "bool" and str(value).lower() == "true"
+
+
 def link_dest_zoom(doc, link, named_zooms=None):
     """页面链接的真实缩放值。
 
     ``get_links`` 对内部跳转一律回报 ``zoom: 0.0``，即使 ``/XYZ`` 里写着固定缩放
-    （与 ``get_toc`` 恰好相反：后者丢的是命名目标的缩放）。因此内部跳转必须回到原始
-    对象上读 ``/A/D`` 或 ``/Dest``；命名目标链接 ``get_links`` 报的缩放是准的。
+    （与 ``get_toc`` 恰好相反：后者丢的是命名目标的缩放）；对跨文本外部跳转 (LINK_GOTOR)
+    同样丢失缩放。因此内部跳转与外部跳转都必须回到原始对象上读动作 ``/D`` 或 ``/Dest``；
+    命名目标链接 ``get_links`` 报的缩放是准的。
     """
     if not isinstance(link, dict):
         return 0.0
@@ -220,7 +305,7 @@ def link_dest_zoom(doc, link, named_zooms=None):
     kind = link.get("kind", fitz.LINK_NONE)
     if kind == fitz.LINK_NAMED:
         return bookmark_dest_zoom(link, named_zooms)
-    if kind != fitz.LINK_GOTO:
+    if kind not in (fitz.LINK_GOTO, fitz.LINK_GOTOR):
         return 0.0
 
     xref = link.get("xref") or 0
@@ -231,17 +316,29 @@ def link_dest_zoom(doc, link, named_zooms=None):
     if xref <= 0:
         return 0.0
 
-    for key in ("A/D", "Dest"):
-        try:
-            key_type, value = doc.xref_get_key(xref, key)
-        except Exception:
-            continue
-        if key_type == "array":
-            return _parse_xyz_zoom(value)
-        if key_type in ("string", "name") and named_zooms:
-            name = str(value).lstrip("/")
-            if name in named_zooms:
-                return named_zooms[name]
+    # 优先从动作字典读取 /D
+    key_type, value = get_link_action_key(doc, xref, "D")
+    if key_type == "array":
+        return _parse_xyz_zoom(value)
+    if key_type in ("string", "name") and named_zooms:
+        name = str(value).lstrip("/")
+        if name in named_zooms:
+            return named_zooms[name]
+
+    # 内部链接兜底：直接在注释字典读取 /Dest
+    if kind == fitz.LINK_GOTO:
+        for key in ("A/D", "Dest"):
+            try:
+                key_type, value = doc.xref_get_key(xref, key)
+            except Exception:
+                continue
+            if key_type == "array":
+                return _parse_xyz_zoom(value)
+            if key_type in ("string", "name") and named_zooms:
+                name = str(value).lstrip("/")
+                if name in named_zooms:
+                    return named_zooms[name]
+
     return 0.0
 
 
@@ -373,7 +470,7 @@ def export_links(pdf_path, json_path, scope="all"):
                 'target_page': link.get('page', 0),
                 'zoom': link.get('zoom', 0.0),
                 'to': [getattr(target_point, 'x', 0.0), getattr(target_point, 'y', 0.0)] if target_point else None,
-                'new_window': bool(link.get('newWindow', False)),
+                'new_window': link_has_new_window(doc, link.get('xref', 0)),
                 # 跨行链接由多个四边形 (QuadPoints) 组成，link['from'] 只是它们的合并包围盒。
                 # 保存原始 QuadPoints，导入时精确还原每行的可点区域，避免把行间内容一并圈入。
                 'quad_points': _read_link_quad_points(doc, link.get('xref', 0)),

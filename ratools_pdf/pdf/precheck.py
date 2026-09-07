@@ -861,11 +861,15 @@ def _check_bookmarks(ctx):
         kind = dest.get("kind", fitz.LINK_NONE)
         if (
             ctx.wants("bookmark_inherit_zoom")
-            and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED)
+            and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED, fitz.LINK_GOTOR)
             and bookmarks_links.bookmark_dest_zoom(dest, named_zooms) != 0.0
         ):
-            ctx.add_suggestion("bookmark_inherit_zoom", "部分内部书签使用了固定缩放比例")
-        if ctx.wants("bookmark_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not dest.get("newWindow"):
+            ctx.add_suggestion("bookmark_inherit_zoom", "部分书签使用了固定缩放比例")
+        if (
+            ctx.wants("bookmark_open_new_window")
+            and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]
+            and not bookmarks_links.link_has_new_window(doc, dest.get("xref", 0))
+        ):
             ctx.add_suggestion("bookmark_open_new_window", "部分外部文件书签未设置为新窗口打开")
         if ctx.full_scan:
             _add_link_target_integrity_findings(
@@ -929,11 +933,15 @@ def _check_page_links(ctx):
                     ctx.add_suggestion("link_abs_to_rel_path", "外部文件链接中包含绝对路径")
             if (
                 ctx.wants("link_inherit_zoom")
-                and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED)
+                and kind in (fitz.LINK_GOTO, fitz.LINK_NAMED, fitz.LINK_GOTOR)
                 and bookmarks_links.link_dest_zoom(doc, link, link_named_zooms) != 0.0
             ):
-                ctx.add_suggestion("link_inherit_zoom", "部分内部超链接使用了固定缩放比例")
-            if ctx.wants("link_open_new_window") and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and not link.get("newWindow"):
+                ctx.add_suggestion("link_inherit_zoom", "部分超链接使用了固定缩放比例")
+            if (
+                ctx.wants("link_open_new_window")
+                and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]
+                and not bookmarks_links.link_has_new_window(doc, link.get("xref", 0))
+            ):
                 ctx.add_suggestion("link_open_new_window", "部分外部文件链接未设置为新窗口打开")
             if ctx.full_scan:
                 _add_link_target_integrity_findings(

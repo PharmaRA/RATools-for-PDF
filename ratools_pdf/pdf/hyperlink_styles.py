@@ -122,14 +122,19 @@ def _force_link_new_window(doc, xref):
     if not xref:
         return
 
+    # 1. 优先使用统一动作助手直接设置 /NewWindow true (兼容间接对象与内联字典)
+    if bookmarks_links.set_link_action_key(doc, xref, "NewWindow", "true"):
+        return
+
+    # 2. 文本替换兜底（针对没有标准 /A 字典但包含内联动作的非常规对象）
     try:
         link_obj = doc.xref_object(xref)
         if "/NewWindow" in link_obj:
             link_obj = re.sub(r"/NewWindow\s+(true|false)", "/NewWindow true", link_obj)
-        elif "/S /GoToR" in link_obj:
-            link_obj = link_obj.replace("/S /GoToR", "/S /GoToR\n    /NewWindow true", 1)
-        elif "/S /Launch" in link_obj:
-            link_obj = link_obj.replace("/S /Launch", "/S /Launch\n    /NewWindow true", 1)
+        elif re.search(r"/S\s*/GoToR", link_obj):
+            link_obj = re.sub(r"(/S\s*/GoToR)", r"\1\n    /NewWindow true", link_obj, count=1)
+        elif re.search(r"/S\s*/Launch", link_obj):
+            link_obj = re.sub(r"(/S\s*/Launch)", r"\1\n    /NewWindow true", link_obj, count=1)
         doc.update_object(xref, link_obj)
     except Exception:
         pass
@@ -327,6 +332,10 @@ def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_link
         link_modified = False
         force_new_window = False
         kind = link.get("kind", fitz.LINK_NONE)
+        xref = link.get("xref", 0)
+
+        # 检查该外部链接是否已显式配置为新窗口打开
+        has_new_window = bookmarks_links.link_has_new_window(doc, xref) if xref else False
 
         if "link_abs_to_rel_path" in options and kind in file_like_link_kinds:
             file_path = link.get("file", "")
@@ -351,19 +360,49 @@ def _apply_hyperlink_actions(doc, page, options, file_like_link_kinds, page_link
                     link["to"] = _flip_link_target(doc, link)
                 link_modified = True
 
+        # 跨文本超链接 (LINK_GOTOR) 承前缩放：
+        # 坚决不使用 update_link 写回（其会将 to 坐标重置为 0 0 并丢弃 NewWindow），
+        # 直接在动作字典 /D 数组中将 /XYZ 缩放置 0，保留目标页码与跳转坐标。
+        if "link_inherit_zoom" in options and kind == fitz.LINK_GOTOR and xref:
+            if bookmarks_links.link_dest_zoom(doc, link) != 0.0:
+                d_type, d_val = bookmarks_links.get_link_action_key(doc, xref, "D")
+                if d_type == "array":
+                    new_d_val = bookmarks_links.reset_xyz_dest_zoom(d_val)
+                    if new_d_val != d_val:
+                        if bookmarks_links.set_link_action_key(doc, xref, "D", new_d_val):
+                            changed = True
+
         if "link_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
-            if not link.get("newWindow"):
+            if not has_new_window:
                 force_new_window = True
 
         if link_modified:
+            # 记录原有的 D 目标数组，防止 update_link 破坏 GoToR 的跳转坐标
+            original_d = None
+            if kind == fitz.LINK_GOTOR and xref:
+                d_type, d_val = bookmarks_links.get_link_action_key(doc, xref, "D")
+                if d_type == "array":
+                    original_d = d_val
+
             page.update_link(link)
             changed = True
+
+            # update_link 重构链接注释时会丢弃 NewWindow 并抹除 GoToR 坐标，这里补回
+            if kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH] and xref:
+                if has_new_window or force_new_window:
+                    _force_link_new_window(doc, xref)
+                    has_new_window = True
+                    force_new_window = False
+                if original_d is not None:
+                    if "link_inherit_zoom" in options:
+                        original_d = bookmarks_links.reset_xyz_dest_zoom(original_d)
+                    bookmarks_links.set_link_action_key(doc, xref, "D", original_d)
 
         if force_new_window:
             # Do not call update_link() just to set NewWindow. On some Windows/PyMuPDF
             # combinations, rebuilding external-file links can normalize relative /F paths
             # into absolute paths. Patch the raw action object instead so /F and /UF stay intact.
-            _force_link_new_window(doc, link.get("xref", 0))
+            _force_link_new_window(doc, xref)
             changed = True
 
     return changed

@@ -401,12 +401,13 @@ def _step_bookmark_rules(ctx):
             toc_modified = True
             continue
 
-        if "bookmark_inherit_zoom" in options and kind == fitz.LINK_GOTO:
+        if "bookmark_inherit_zoom" in options and kind in (fitz.LINK_GOTO, fitz.LINK_GOTOR):
             if dest.get("zoom") != 0.0:
                 dest["zoom"] = 0.0
                 toc_modified = True
         if "bookmark_open_new_window" in options and kind in [fitz.LINK_GOTOR, fitz.LINK_LAUNCH]:
-            if not dest.get("newWindow"):
+            outline_xref = raw_dest.get("xref", 0)
+            if not (outline_xref and bookmarks_links.link_has_new_window(doc, outline_xref)):
                 dest["newWindow"] = True
                 toc_modified = True
 
@@ -519,10 +520,7 @@ def _apply_bookmark_action_fixups(doc, fixups):
                     pass
                 continue
         if need_new_window:
-            try:
-                doc.xref_set_key(xref, "A/NewWindow", "true")
-            except Exception:
-                pass
+            bookmarks_links.set_link_action_key(doc, xref, "NewWindow", "true")
 
 
 _HYPERLINK_RULE_OPTIONS = (
