@@ -78,6 +78,8 @@ PRECHECK_DETECTABLE_OPTIONS = {
     "convert_pdf_version",
     "remove_pdf_restrictions",
     "fast_web_view",
+    "flatten_rotation",
+    "flatten_annotations",
 }
 # 压缩类选项（compress_standard / compress_aggressive / compress_images）由用户主动
 # 勾选决定，预检无法可靠检测"是否需要压缩"，故不在可检测集合内（smart 模式下
@@ -904,6 +906,8 @@ def _check_page_links(ctx):
         "cleanup_remove_unknown_action_links",
         "cleanup_remove_all_links_bookmarks",
         "cleanup_remove_annotations",
+        "flatten_rotation",
+        "flatten_annotations",
     )
     if not link_wanted:
         return
@@ -917,6 +921,8 @@ def _check_page_links(ctx):
     link_named_zooms = bookmarks_links.named_dest_zoom_map(doc) if ctx.wants("link_inherit_zoom") else {}
 
     for page in doc:
+        if ctx.wants("flatten_rotation") and page.rotation != 0:
+            ctx.add_suggestion("flatten_rotation", "页面中包含非0度物理旋转角度")
         links = page.get_links()
         if not ctx.full_scan and ctx.wants("cleanup_remove_all_links_bookmarks") and links:
             ctx.add_suggestion("cleanup_remove_all_links_bookmarks", "页面中包含可清理的链接")
@@ -978,6 +984,9 @@ def _check_cleanup_targets(ctx):
     doc = ctx.doc
     if ctx.wants("cleanup_remove_annotations") and ctx.has_non_link_annotation:
         ctx.add_suggestion("cleanup_remove_annotations", "文档包含高亮、文本框或其它批注")
+
+    if ctx.wants("flatten_annotations") and ctx.has_non_link_annotation:
+        ctx.add_suggestion("flatten_annotations", "文档包含未展平的交互式注释或批注")
 
     if ctx.wants("cleanup_remove_attachments") and doc.embfile_count() > 0:
         ctx.add_suggestion("cleanup_remove_attachments", f"文档包含 {doc.embfile_count()} 个内嵌附件")

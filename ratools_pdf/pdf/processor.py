@@ -933,7 +933,7 @@ _PIPELINE_STEPS = (
 
 
 def _finalize_output(ctx, input_path, output_path):
-    """保存阶段：按需经 qpdf 重写（线性化/版本转换/解限制），否则直接保存或复制。"""
+    """保存阶段：按需经 qpdf 重写（线性化/版本转换/解限制/旋转展平/注释展平/对象流/流重压缩），否则直接保存或复制。"""
     options = ctx.options
     doc = ctx.doc
     prof = ctx.prof
@@ -952,7 +952,20 @@ def _finalize_output(ctx, input_path, output_path):
     is_linear = "fast_web_view" in options
     force_pdf_version = "1.7" if "convert_pdf_version" in options else None
     remove_pdf_restrictions = "remove_pdf_restrictions" in options
-    needs_qpdf_rewrite = bool(is_linear or force_pdf_version or remove_pdf_restrictions)
+    flatten_rot = "flatten_rotation" in options
+    flatten_annots = "flatten_annotations" in options
+    gen_obj_stms = "generate_object_streams" in options
+    realloc_fl = "realloc_flate" in options
+
+    needs_qpdf_rewrite = bool(
+        is_linear
+        or force_pdf_version
+        or remove_pdf_restrictions
+        or flatten_rot
+        or flatten_annots
+        or gen_obj_stms
+        or realloc_fl
+    )
 
     def _mark_qpdf_changes():
         if remove_pdf_restrictions:
@@ -961,6 +974,14 @@ def _finalize_output(ctx, input_path, output_path):
             _mark_change(ctx.applied_changes, "已转换PDF版本")
         if is_linear:
             _mark_change(ctx.applied_changes, "已启用快速网页浏览")
+        if flatten_rot:
+            _mark_change(ctx.applied_changes, "已展平页面物理旋转角")
+        if flatten_annots:
+            _mark_change(ctx.applied_changes, "已展平所有注释与批注")
+        if gen_obj_stms:
+            _mark_change(ctx.applied_changes, "已生成对象流压缩")
+        if realloc_fl:
+            _mark_change(ctx.applied_changes, "已优化重压缩内容流")
 
     def _mark_compression_changes():
         if "compress_standard" in options:
@@ -985,6 +1006,10 @@ def _finalize_output(ctx, input_path, output_path):
                         force_version=force_pdf_version,
                         linearize=is_linear,
                         decrypt_restrictions=remove_pdf_restrictions,
+                        flatten_rotation=flatten_rot,
+                        flatten_annotations="all" if flatten_annots else None,
+                        object_streams="generate" if gen_obj_stms else None,
+                        recompress_flate=realloc_fl,
                     )
                 _mark_qpdf_changes()
                 _mark_compression_changes()
@@ -999,13 +1024,18 @@ def _finalize_output(ctx, input_path, output_path):
     else:
         doc.close()
         if needs_qpdf_rewrite:
-            qpdf._rewrite_with_qpdf(
-                input_path,
-                output_path,
-                force_version=force_pdf_version,
-                linearize=is_linear,
-                decrypt_restrictions=remove_pdf_restrictions,
-            )
+            with prof.phase("qpdf重写"):
+                qpdf._rewrite_with_qpdf(
+                    input_path,
+                    output_path,
+                    force_version=force_pdf_version,
+                    linearize=is_linear,
+                    decrypt_restrictions=remove_pdf_restrictions,
+                    flatten_rotation=flatten_rot,
+                    flatten_annotations="all" if flatten_annots else None,
+                    object_streams="generate" if gen_obj_stms else None,
+                    recompress_flate=realloc_fl,
+                )
             _mark_qpdf_changes()
         else:
             shutil.copy2(input_path, output_path)
@@ -1061,7 +1091,7 @@ def process_document(input_path, output_path, options, processing_mode="smart", 
     except FileNotFoundError as e:
         return False, f"⚠️ 缺少引擎组件: {str(e)}"
     except Exception as e:
-        if "remove_pdf_restrictions" in options:
+        if str(e).startswith("qpdf 执行失败") or "remove_pdf_restrictions" in options:
             return False, f"❌ 处理失败: {qpdf._format_qpdf_error(e)}"
         return False, f"❌ 处理失败: {str(e)}"
 

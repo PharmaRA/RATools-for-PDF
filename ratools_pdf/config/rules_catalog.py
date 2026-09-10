@@ -29,6 +29,8 @@ MODULES = [
         "options": [
             {"id": "page_size_a4", "title": "适配到A4尺寸", "desc": "无法通过预检精确判断是否需要处理；智能模式下若勾选仍会执行"},
             {"id": "page_size_letter", "title": "适配到Letter尺寸", "desc": "按原页面方向等比缩放并居中留白，适配到Letter (信纸) 尺寸，尽量保留全部内容"},
+            {"id": "flatten_rotation", "title": "展平页面物理旋转角", "desc": "将页面旋转角物理归一化为0°，避免打印、盖章与超链接坐标漂移"},
+            {"id": "flatten_annotations", "title": "展平所有注释与批注", "desc": "将高亮、批注、文字印章等物理固化到底层背景中，防止被修改或隐藏"},
         ],
     },
     {
@@ -80,6 +82,8 @@ MODULES = [
             {"id": "convert_pdf_version", "title": "PDF版本转换", "desc": "将PDF版本修改为1.7版本"},
             {"id": "remove_pdf_restrictions", "title": "PDF解除权限限制", "desc": "尝试移除禁止复制、打印、编辑等权限限制，不处理需要打开密码的加密文档"},
             {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
+            {"id": "generate_object_streams", "title": "生成对象流 (Object Streams)", "desc": "将零散字典打包为压缩对象流 (PDF 1.5+)，显著减少结构开销并缩小体积"},
+            {"id": "realloc_flate", "title": "无损重压缩内容流", "desc": "使用最优算法重新压缩所有 Flate/Deflate 数据流，实现完全无损瘦身"},
             {"id": "compress_standard", "title": "标准文件压缩", "desc": "使用更激进的垃圾回收和对象清理，安全减小文件体积（无质量损失）"},
             {"id": "compress_aggressive", "title": "深度文件压缩", "desc": "最大化压缩：garbage=4 + clean模式，适用于接近大小限制的文件"},
             {"id": "compress_images", "title": "压缩内嵌图像 ⚠️", "desc": "将图像降采样至指定DPI，显著减小扫描类PDF体积，但可能影响图像清晰度"},
