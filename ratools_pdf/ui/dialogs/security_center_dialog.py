@@ -114,17 +114,27 @@ class SecurityCenterDialog(FramelessDraggableDialog):
 
         grid.addWidget(QLabel("源 PDF 文件："), 0, 0)
         self.txt_input = QLineEdit()
+        self.txt_input.setObjectName("settingsPathEdit")
+        self.txt_input.setFixedHeight(34)
         self.txt_input.setPlaceholderText("选择需要加密保护的 PDF 文件...")
         self.txt_input.textChanged.connect(self._auto_fill_output)
         self.btn_browse_input = QPushButton("浏览...")
+        self.btn_browse_input.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_input.setFixedHeight(34)
+        self.btn_browse_input.setCursor(Qt.PointingHandCursor)
         self.btn_browse_input.clicked.connect(self._on_browse_input_clicked)
         grid.addWidget(self.txt_input, 0, 1)
         grid.addWidget(self.btn_browse_input, 0, 2)
 
         grid.addWidget(QLabel("输出另存为："), 1, 0)
         self.txt_output = QLineEdit()
+        self.txt_output.setObjectName("settingsPathEdit")
+        self.txt_output.setFixedHeight(34)
         self.txt_output.setPlaceholderText("加密后的 PDF 另存路径...")
         self.btn_browse_output = QPushButton("浏览...")
+        self.btn_browse_output.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_output.setFixedHeight(34)
+        self.btn_browse_output.setCursor(Qt.PointingHandCursor)
         self.btn_browse_output.clicked.connect(self._on_browse_output_clicked)
         grid.addWidget(self.txt_output, 1, 1)
         grid.addWidget(self.btn_browse_output, 1, 2)
@@ -157,6 +167,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
 
         self.cb_user_pass = QCheckBox("设置打开密码 (User Password)：")
         self.txt_user_pass = QLineEdit()
+        self.txt_user_pass.setObjectName("settingsPathEdit")
+        self.txt_user_pass.setFixedHeight(32)
         self.txt_user_pass.setEchoMode(QLineEdit.Password)
         self.txt_user_pass.setPlaceholderText("留空表示任何人均可直接打开阅读")
         grid_pass.addWidget(self.cb_user_pass, 0, 0)
@@ -165,6 +177,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.cb_owner_pass = QCheckBox("设置权限密码 (Owner Password)：")
         self.cb_owner_pass.setChecked(True)
         self.txt_owner_pass = QLineEdit()
+        self.txt_owner_pass.setObjectName("settingsPathEdit")
+        self.txt_owner_pass.setFixedHeight(32)
         self.txt_owner_pass.setEchoMode(QLineEdit.Password)
         self.txt_owner_pass.setPlaceholderText("用于限制或修改打印/编辑等权限")
         grid_pass.addWidget(self.cb_owner_pass, 1, 0)
@@ -258,21 +272,24 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         layout.addStretch()
 
         self.btn_open_target = QPushButton("打开目标")
+        self.btn_open_target.setObjectName("dialogSecondaryBtn")
+        self.btn_open_target.setFixedHeight(34)
+        self.btn_open_target.setCursor(Qt.PointingHandCursor)
         self.btn_open_target.setVisible(False)
         self.btn_open_target.clicked.connect(self._on_open_target_clicked)
         layout.addWidget(self.btn_open_target)
 
         self.btn_cancel = QPushButton("关闭")
+        self.btn_cancel.setObjectName("dialogSecondaryBtn")
+        self.btn_cancel.setFixedHeight(34)
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
         layout.addWidget(self.btn_cancel)
 
         self.btn_execute = QPushButton("应用安全配置")
-        self.btn_execute.setObjectName("choiceToggleBtn")
-        self.btn_execute.setStyleSheet(
-            "QPushButton { background-color: #2563EB; color: white; font-weight: bold; border-radius: 8px; padding: 8px 18px; }"
-            "QPushButton:hover { background-color: #1D4ED8; }"
-            "QPushButton:disabled { background-color: #93C5FD; }"
-        )
+        self.btn_execute.setObjectName("dialogPrimaryBtn")
+        self.btn_execute.setFixedHeight(34)
+        self.btn_execute.setCursor(Qt.PointingHandCursor)
         self.btn_execute.clicked.connect(self._on_execute_clicked)
         layout.addWidget(self.btn_execute)
 

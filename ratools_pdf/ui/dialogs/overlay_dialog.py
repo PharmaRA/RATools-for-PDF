@@ -139,17 +139,27 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
 
         grid.addWidget(QLabel("目标主文档："), 0, 0)
         self.txt_target = QLineEdit()
+        self.txt_target.setObjectName("settingsPathEdit")
+        self.txt_target.setFixedHeight(34)
         self.txt_target.setPlaceholderText("选择需要被盖章或加水印的 PDF 主文档...")
         self.txt_target.textChanged.connect(self._auto_fill_output)
         self.btn_browse_target = QPushButton("浏览...")
+        self.btn_browse_target.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_target.setFixedHeight(34)
+        self.btn_browse_target.setCursor(Qt.PointingHandCursor)
         self.btn_browse_target.clicked.connect(self._on_browse_target_clicked)
         grid.addWidget(self.txt_target, 0, 1)
         grid.addWidget(self.btn_browse_target, 0, 2)
 
         grid.addWidget(QLabel("印章/图层源："), 1, 0)
         self.txt_layer = QLineEdit()
+        self.txt_layer.setObjectName("settingsPathEdit")
+        self.txt_layer.setFixedHeight(34)
         self.txt_layer.setPlaceholderText("选择包含印章、水印或信头纸模板的 PDF 文件...")
         self.btn_browse_layer = QPushButton("浏览...")
+        self.btn_browse_layer.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_layer.setFixedHeight(34)
+        self.btn_browse_layer.setCursor(Qt.PointingHandCursor)
         self.btn_browse_layer.clicked.connect(self._on_browse_layer_clicked)
         grid.addWidget(self.txt_layer, 1, 1)
         grid.addWidget(self.btn_browse_layer, 1, 2)
@@ -181,6 +191,8 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
         self.repeat_group.addButton(self.rb_repeat_custom, 1)
 
         self.txt_to_range = QLineEdit()
+        self.txt_to_range.setObjectName("settingsPathEdit")
+        self.txt_to_range.setFixedHeight(30)
         self.txt_to_range.setPlaceholderText("例如: 1-5, 8, z")
         self.txt_to_range.setEnabled(False)
         self.rb_repeat_custom.toggled.connect(self.txt_to_range.setEnabled)
@@ -203,8 +215,13 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
 
         grid.addWidget(QLabel("合成输出另存为："), 0, 0)
         self.txt_output = QLineEdit()
+        self.txt_output.setObjectName("settingsPathEdit")
+        self.txt_output.setFixedHeight(34)
         self.txt_output.setPlaceholderText("输出的 PDF 文件完整路径...")
         self.btn_browse_output = QPushButton("浏览...")
+        self.btn_browse_output.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_output.setFixedHeight(34)
+        self.btn_browse_output.setCursor(Qt.PointingHandCursor)
         self.btn_browse_output.clicked.connect(self._on_browse_output_clicked)
         grid.addWidget(self.txt_output, 0, 1)
         grid.addWidget(self.btn_browse_output, 0, 2)
@@ -234,21 +251,24 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
         layout.addStretch()
 
         self.btn_open_target = QPushButton("打开目标")
+        self.btn_open_target.setObjectName("dialogSecondaryBtn")
+        self.btn_open_target.setFixedHeight(34)
+        self.btn_open_target.setCursor(Qt.PointingHandCursor)
         self.btn_open_target.setVisible(False)
         self.btn_open_target.clicked.connect(self._on_open_target_clicked)
         layout.addWidget(self.btn_open_target)
 
         self.btn_cancel = QPushButton("关闭")
+        self.btn_cancel.setObjectName("dialogSecondaryBtn")
+        self.btn_cancel.setFixedHeight(34)
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
         layout.addWidget(self.btn_cancel)
 
         self.btn_execute = QPushButton("开始套印合成")
-        self.btn_execute.setObjectName("choiceToggleBtn")
-        self.btn_execute.setStyleSheet(
-            "QPushButton { background-color: #2563EB; color: white; font-weight: bold; border-radius: 8px; padding: 8px 18px; }"
-            "QPushButton:hover { background-color: #1D4ED8; }"
-            "QPushButton:disabled { background-color: #93C5FD; }"
-        )
+        self.btn_execute.setObjectName("dialogPrimaryBtn")
+        self.btn_execute.setFixedHeight(34)
+        self.btn_execute.setCursor(Qt.PointingHandCursor)
         self.btn_execute.clicked.connect(self._on_execute_clicked)
         layout.addWidget(self.btn_execute)
 

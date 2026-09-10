@@ -87,10 +87,18 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         lbl = QLabel("目标文件：")
         lbl.setStyleSheet("font-weight: 700;")
         self.txt_path = QLineEdit()
+        self.txt_path.setObjectName("settingsPathEdit")
+        self.txt_path.setFixedHeight(34)
         self.txt_path.setPlaceholderText("选择需要进行深度诊断的 PDF 文件...")
         self.btn_browse = QPushButton("浏览...")
+        self.btn_browse.setObjectName("dialogSecondaryBtn")
+        self.btn_browse.setFixedHeight(34)
+        self.btn_browse.setCursor(Qt.PointingHandCursor)
         self.btn_browse.clicked.connect(self._on_browse_clicked)
         self.btn_diagnose = QPushButton("开始诊断")
+        self.btn_diagnose.setObjectName("dialogPrimaryBtn")
+        self.btn_diagnose.setFixedHeight(34)
+        self.btn_diagnose.setCursor(Qt.PointingHandCursor)
         self.btn_diagnose.clicked.connect(lambda: self.run_diagnosis(self.txt_path.text().strip()))
 
         layout.addWidget(lbl)
@@ -170,6 +178,9 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self.lbl_json_info = QLabel("JSON AST 语法树：")
         self.lbl_json_info.setStyleSheet("font-weight: 700;")
         self.btn_export_json = QPushButton("导出 JSON 文件...")
+        self.btn_export_json.setObjectName("dialogSecondaryBtn")
+        self.btn_export_json.setFixedHeight(30)
+        self.btn_export_json.setCursor(Qt.PointingHandCursor)
         self.btn_export_json.setEnabled(False)
         self.btn_export_json.clicked.connect(self._on_export_json_clicked)
         h_json_tools.addWidget(self.lbl_json_info)
@@ -207,10 +218,9 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         lbl_rep_desc.setStyleSheet("color: #4B5563; line-height: 140%;")
 
         self.btn_do_repair = QPushButton("尝试强制修复并另存为...")
-        self.btn_do_repair.setStyleSheet(
-            "QPushButton { background-color: #2563EB; color: white; font-weight: bold; padding: 10px 20px; border-radius: 8px; font-size: 13px; }"
-            "QPushButton:hover { background-color: #1D4ED8; }"
-        )
+        self.btn_do_repair.setObjectName("dialogPrimaryBtn")
+        self.btn_do_repair.setFixedHeight(34)
+        self.btn_do_repair.setCursor(Qt.PointingHandCursor)
         self.btn_do_repair.clicked.connect(self._on_repair_clicked)
 
         v_rep.addWidget(lbl_rep_title)
@@ -234,6 +244,9 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         layout.addStretch()
 
         self.btn_close = QPushButton("关闭")
+        self.btn_close.setObjectName("dialogSecondaryBtn")
+        self.btn_close.setFixedHeight(34)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
         self.btn_close.clicked.connect(self.reject)
         layout.addWidget(self.btn_close)
 

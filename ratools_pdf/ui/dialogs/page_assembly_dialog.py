@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -201,7 +202,10 @@ class PageAssemblyDialog(FramelessDraggableDialog):
             self.btn_move_down,
             self.btn_clear,
         ):
+            btn.setObjectName("dialogSecondaryBtn")
             btn.setFixedWidth(100)
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.PointingHandCursor)
             btn_bar.addWidget(btn)
 
         btn_bar.addStretch()
@@ -235,7 +239,9 @@ class PageAssemblyDialog(FramelessDraggableDialog):
             self.btn_range_odd,
             self.btn_range_even,
         ):
+            btn.setObjectName("dialogSecondaryBtn")
             btn.setFixedHeight(26)
+            btn.setCursor(Qt.PointingHandCursor)
             layout.addWidget(btn)
 
         layout.addStretch()
@@ -287,7 +293,12 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         self.lbl_output = QLabel("目标文件：")
         self.lbl_output.setFixedWidth(70)
         self.txt_output = QLineEdit()
+        self.txt_output.setObjectName("settingsPathEdit")
+        self.txt_output.setFixedHeight(34)
         self.btn_browse_output = QPushButton("浏览...")
+        self.btn_browse_output.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_output.setFixedHeight(34)
+        self.btn_browse_output.setCursor(Qt.PointingHandCursor)
         self.btn_browse_output.clicked.connect(self._on_browse_output_clicked)
 
         h_layout.addWidget(self.lbl_output)
@@ -295,21 +306,16 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         h_layout.addWidget(self.btn_browse_output)
         v_layout.addLayout(h_layout)
 
-        # 优化选项
+        # 优化选项（使用规范的 QCheckBox 与全局指示器）
         opts_layout = QHBoxLayout()
-        opts_layout.setSpacing(16)
-        self.cb_linearize = QPushButton("Web 快速视图 (线性化)")
-        self.cb_linearize.setCheckable(True)
+        opts_layout.setSpacing(20)
+        self.cb_linearize = QCheckBox("启用 Web 快速视图 (线性化)")
         self.cb_linearize.setChecked(True)
-        self.cb_object_streams = QPushButton("压缩对象流 (PDF 1.5+)")
-        self.cb_object_streams.setCheckable(True)
+        self.cb_object_streams = QCheckBox("压缩生成对象流 (PDF 1.5+)")
         self.cb_object_streams.setChecked(True)
 
-        for btn in (self.cb_linearize, self.cb_object_streams):
-            btn.setObjectName("choiceToggleBtn")
-            btn.setFixedHeight(28)
-            opts_layout.addWidget(btn)
-
+        opts_layout.addWidget(self.cb_linearize)
+        opts_layout.addWidget(self.cb_object_streams)
         opts_layout.addStretch()
         v_layout.addLayout(opts_layout)
 
@@ -328,21 +334,24 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         layout.addStretch()
 
         self.btn_open_target = QPushButton("打开目标")
+        self.btn_open_target.setObjectName("dialogSecondaryBtn")
+        self.btn_open_target.setFixedHeight(34)
+        self.btn_open_target.setCursor(Qt.PointingHandCursor)
         self.btn_open_target.setVisible(False)
         self.btn_open_target.clicked.connect(self._on_open_target_clicked)
         layout.addWidget(self.btn_open_target)
 
         self.btn_cancel = QPushButton("关闭")
+        self.btn_cancel.setObjectName("dialogSecondaryBtn")
+        self.btn_cancel.setFixedHeight(34)
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
         layout.addWidget(self.btn_cancel)
 
         self.btn_execute = QPushButton("开始处理")
-        self.btn_execute.setObjectName("choiceToggleBtn")
-        self.btn_execute.setStyleSheet(
-            "QPushButton { background-color: #2563EB; color: white; font-weight: bold; border-radius: 8px; padding: 8px 18px; }"
-            "QPushButton:hover { background-color: #1D4ED8; }"
-            "QPushButton:disabled { background-color: #93C5FD; }"
-        )
+        self.btn_execute.setObjectName("dialogPrimaryBtn")
+        self.btn_execute.setFixedHeight(34)
+        self.btn_execute.setCursor(Qt.PointingHandCursor)
         self.btn_execute.clicked.connect(self._on_execute_clicked)
         layout.addWidget(self.btn_execute)
 

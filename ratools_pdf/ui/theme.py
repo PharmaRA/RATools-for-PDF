@@ -452,11 +452,43 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; ima
 #dialogDangerBtn { background-color: $danger; color: $text_on_primary; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: none; }
 #dialogDangerBtn:hover { background-color: $danger_hover; }
 #dialogDangerBtn:pressed { background-color: $danger_pressed; }
-#dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 8px; padding: 8px 16px; font-weight: 700; border: 1px solid $border_strong; }
+#dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 8px; padding: 6px 14px; font-weight: 600; border: 1px solid $border_strong; }
 #dialogSecondaryBtn:hover { background-color: $surface_hover; border-color: $primary_soft_border; color: $text; }
 #dialogSecondaryBtn:pressed { background-color: $surface_alt; }
 #dialogSecondaryBtn:checked { background-color: $primary_soft; border-color: $primary_soft_border; color: $primary_text; }
 #dialogSectionTitle { color: $text_faint; font-size: 12px; font-weight: 700; border: none; }
+
+/* ---- 下拉选择框 ---- */
+QComboBox {
+    background-color: $surface;
+    border: 1px solid $border_strong;
+    border-radius: 8px;
+    padding: 5px 10px;
+    color: $text_body;
+}
+QComboBox:hover {
+    border-color: $primary_soft_border;
+    background-color: $surface_hover;
+}
+QComboBox:focus {
+    border-color: $primary;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 22px;
+    border-left: none;
+}
+QComboBox QAbstractItemView {
+    background-color: $surface;
+    border: 1px solid $border;
+    border-radius: 8px;
+    color: $text_body;
+    selection-background-color: $primary_soft;
+    selection-color: $primary_text;
+    padding: 4px;
+    outline: none;
+}
 
 /* ---- 对话框内文本 ---- */
 #dialogHeading { color: $text; font-size: 17px; font-weight: 700; border: none; }
