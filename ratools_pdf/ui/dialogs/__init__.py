@@ -8,7 +8,9 @@ from ratools_pdf.ui.dialogs.font_embedding import ManualFontEmbeddingDialog
 from ratools_pdf.ui.dialogs.io_wizard import IODataWizardDialog
 from ratools_pdf.ui.dialogs.log_dialog import LogDialog
 from ratools_pdf.ui.dialogs.message_box import CustomMessageBox
+from ratools_pdf.ui.dialogs.overlay_dialog import OverlayUnderlayDialog
 from ratools_pdf.ui.dialogs.page_assembly_dialog import PageAssemblyDialog
+from ratools_pdf.ui.dialogs.security_center_dialog import SecurityCenterDialog
 from ratools_pdf.ui.dialogs.settings_dialog import SettingsDialog
 
 __all__ = [
@@ -19,6 +21,8 @@ __all__ = [
     "IODataWizardDialog",
     "LogDialog",
     "ManualFontEmbeddingDialog",
+    "OverlayUnderlayDialog",
     "PageAssemblyDialog",
+    "SecurityCenterDialog",
     "SettingsDialog",
 ]

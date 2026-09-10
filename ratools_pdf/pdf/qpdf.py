@@ -489,6 +489,145 @@ def split_pages(
     return res
 
 
+def encrypt_pdf(
+    input_pdf: str,
+    output_pdf: str,
+    user_password: Optional[str] = None,
+    owner_password: Optional[str] = None,
+    bits: int = 256,
+    print_perm: str = "full",
+    modify_perm: str = "none",
+    extract: bool = False,
+    accessibility: bool = True,
+    cleartext_metadata: bool = True,
+    use_aes: bool = True,
+    linearize: bool = False,
+    timeout: Optional[int] = 180,
+) -> QpdfResult:
+    """对 PDF 文档进行工业级加密并配置精细权限矩阵。
+
+    支持 256-bit AES 或 128-bit AES，提供打印控制、修改控制、文本提取和明文元数据保留。
+    """
+    cmd_args = [input_pdf, "--encrypt"]
+    if user_password:
+        cmd_args.append(f"--user-password={user_password}")
+    if owner_password:
+        cmd_args.append(f"--owner-password={owner_password}")
+    cmd_args.append(f"--bits={bits}")
+
+    if bits in (128, 256):
+        cmd_args.append(f"--print={print_perm}")
+        cmd_args.append(f"--modify={modify_perm}")
+        cmd_args.append(f"--extract={'y' if extract else 'n'}")
+        cmd_args.append(f"--accessibility={'y' if accessibility else 'n'}")
+        if cleartext_metadata:
+            cmd_args.append("--cleartext-metadata")
+        if bits == 128 and use_aes:
+            cmd_args.append("--use-aes=y")
+
+    cmd_args.append("--")
+    if linearize:
+        cmd_args.append("--linearize")
+    cmd_args.append(output_pdf)
+
+    res = run_qpdf_command(cmd_args, timeout=timeout)
+    if res.returncode == 3 and os.path.exists(output_pdf):
+        return res
+    if res.returncode != 0:
+        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+        raise RuntimeError(f"PDF 加密失败: {detail}")
+    return res
+
+
+def apply_overlay_underlay(
+    input_pdf: str,
+    output_pdf: str,
+    overlay_file: Optional[str] = None,
+    underlay_file: Optional[str] = None,
+    to_range: Optional[str] = None,
+    from_range: Optional[str] = None,
+    repeat: Optional[str] = "1-z",
+    linearize: bool = False,
+    object_streams: Optional[str] = "generate",
+    timeout: Optional[int] = 180,
+) -> QpdfResult:
+    """在 PDF 前景叠加印章水印 (Overlay) 或在背景套打模板信头 (Underlay)。"""
+    if not overlay_file and not underlay_file:
+        raise ValueError("必须指定 overlay_file 或 underlay_file 之一")
+
+    cmd_args = [input_pdf]
+
+    if underlay_file:
+        cmd_args.extend(["--underlay", underlay_file])
+        if to_range:
+            cmd_args.append(f"--to={to_range}")
+        if from_range:
+            cmd_args.append(f"--from={from_range}")
+        if repeat:
+            cmd_args.append(f"--repeat={repeat}")
+        cmd_args.append("--")
+
+    if overlay_file:
+        cmd_args.extend(["--overlay", overlay_file])
+        if to_range:
+            cmd_args.append(f"--to={to_range}")
+        if from_range:
+            cmd_args.append(f"--from={from_range}")
+        if repeat:
+            cmd_args.append(f"--repeat={repeat}")
+        cmd_args.append("--")
+
+    if object_streams:
+        cmd_args.append(f"--object-streams={object_streams}")
+    if linearize:
+        cmd_args.append("--linearize")
+    cmd_args.append(output_pdf)
+
+    res = run_qpdf_command(cmd_args, timeout=timeout)
+    if res.returncode == 3 and os.path.exists(output_pdf):
+        return res
+    if res.returncode != 0:
+        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+        raise RuntimeError(f"图层套印失败: {detail}")
+    return res
+
+
+def set_page_labels(
+    input_pdf: str,
+    output_pdf: str,
+    label_specs: List[str],
+    timeout: Optional[int] = 180,
+) -> QpdfResult:
+    """编排整篇文档的逻辑页码（如前言 '1:r'、正文 '5:D'、附录 '20:A/1/App-'）。"""
+    if not label_specs:
+        raise ValueError("页面标签规则不能为空")
+
+    cmd_args = [input_pdf, "--set-page-labels"] + label_specs + ["--", output_pdf]
+    res = run_qpdf_command(cmd_args, timeout=timeout)
+    if res.returncode == 3 and os.path.exists(output_pdf):
+        return res
+    if res.returncode != 0:
+        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+        raise RuntimeError(f"设置页面标签失败: {detail}")
+    return res
+
+
+def remove_page_labels(
+    input_pdf: str,
+    output_pdf: str,
+    timeout: Optional[int] = 180,
+) -> QpdfResult:
+    """清除文档所有的显示逻辑页码。"""
+    cmd_args = [input_pdf, "--remove-page-labels", output_pdf]
+    res = run_qpdf_command(cmd_args, timeout=timeout)
+    if res.returncode == 3 and os.path.exists(output_pdf):
+        return res
+    if res.returncode != 0:
+        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+        raise RuntimeError(f"移除页面标签失败: {detail}")
+    return res
+
+
 # ================= 兼容性别名（保留原下划线函数引用） =================
 _get_qpdf_path = get_qpdf_path
 _rewrite_with_qpdf = rewrite_with_qpdf

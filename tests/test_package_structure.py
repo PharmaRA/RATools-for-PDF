@@ -57,12 +57,20 @@ class PackageStructureTests(unittest.TestCase):
         self.assertEqual(MainController.__name__, "MainController")
 
     def test_ui_classes_are_available_from_package(self):
-        from ratools_pdf.ui.dialogs import IODataWizardDialog, LogDialog, PageAssemblyDialog
+        from ratools_pdf.ui.dialogs import (
+            IODataWizardDialog,
+            LogDialog,
+            OverlayUnderlayDialog,
+            PageAssemblyDialog,
+            SecurityCenterDialog,
+        )
         from ratools_pdf.ui.main_window import MainWindow
 
         self.assertEqual(IODataWizardDialog.__name__, "IODataWizardDialog")
         self.assertEqual(LogDialog.__name__, "LogDialog")
         self.assertEqual(PageAssemblyDialog.__name__, "PageAssemblyDialog")
+        self.assertEqual(OverlayUnderlayDialog.__name__, "OverlayUnderlayDialog")
+        self.assertEqual(SecurityCenterDialog.__name__, "SecurityCenterDialog")
         self.assertEqual(MainWindow.__name__, "MainWindow")
 
     def test_root_compatibility_shim_files_are_removed(self):

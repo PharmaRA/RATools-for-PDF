@@ -37,6 +37,10 @@ class TreeActionsController(QObject):
 
         menu.addSeparator()
         action_assembly = menu.addAction("📑 页面装配与拆分...")
+        action_security = menu.addAction("🔒 安全与权限加密...")
+        action_security.setEnabled(is_single_selection)
+        action_overlay = menu.addAction("🎨 图层套印与印章...")
+        action_overlay.setEnabled(is_single_selection)
 
         # 映射坐标并在当前鼠标位置弹出
         action = menu.exec(view.tree.viewport().mapToGlobal(pos))
@@ -54,6 +58,10 @@ class TreeActionsController(QObject):
                 if it.text(1).lower().endswith(".pdf") and os.path.exists(it.text(1))
             ]
             self.view.show_page_assembly_dialog(pdf_paths)
+        elif action == action_security:
+            self.view.show_security_center_dialog(target_path)
+        elif action == action_overlay:
+            self.view.show_overlay_dialog(target_path)
 
     def on_item_double_clicked(self, item, column):
         """双击列表项直接使用系统默认软件打开 PDF 文件"""

@@ -17,7 +17,9 @@ from ratools_pdf.ui.dialogs import (
     CustomMessageBox,
     DpiSelectionDialog,
     ManualFontEmbeddingDialog,
+    OverlayUnderlayDialog,
     PageAssemblyDialog,
+    SecurityCenterDialog,
     SettingsDialog,
 )
 from ratools_pdf.ui.dialogs.prompts import MajorUpdatePromptDialog, SignedFilesPromptDialog
@@ -169,8 +171,28 @@ class MainWindow(QMainWindow):
         dlg = PageAssemblyDialog(initial_files=initial_files, parent=self)
         dlg.exec()
 
+    def show_security_center_dialog(self, initial_file=None):
+        """弹出 PDF 安全与加密中心对话框。"""
+        if initial_file is None:
+            if hasattr(self, "tree") and self.tree:
+                selected = self.tree.selectedItems()
+                if selected and selected[0].text(1).lower().endswith(".pdf"):
+                    initial_file = selected[0].text(1)
+        dlg = SecurityCenterDialog(initial_file=initial_file, parent=self)
+        dlg.exec()
+
+    def show_overlay_dialog(self, initial_file=None):
+        """弹出图层套印与印章管理器对话框。"""
+        if initial_file is None:
+            if hasattr(self, "tree") and self.tree:
+                selected = self.tree.selectedItems()
+                if selected and selected[0].text(1).lower().endswith(".pdf"):
+                    initial_file = selected[0].text(1)
+        dlg = OverlayUnderlayDialog(initial_file=initial_file, parent=self)
+        dlg.exec()
+
     def _build_header(self, main_layout):
-        """顶部 Header：全局设置 / 页面工作台 / 关于按钮。"""
+        """顶部 Header：全局设置 / 页面工作台 / 安全中心 / 图层套印 / 关于按钮。"""
         # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
@@ -186,12 +208,22 @@ class MainWindow(QMainWindow):
         self.btn_top_assembly.setObjectName("topBtn")
         self.btn_top_assembly.clicked.connect(lambda: self.show_page_assembly_dialog())
 
+        self.btn_top_security = QPushButton("🔒 安全中心")
+        self.btn_top_security.setObjectName("topBtn")
+        self.btn_top_security.clicked.connect(lambda: self.show_security_center_dialog())
+
+        self.btn_top_overlay = QPushButton("🎨 图层套印")
+        self.btn_top_overlay.setObjectName("topBtn")
+        self.btn_top_overlay.clicked.connect(lambda: self.show_overlay_dialog())
+
         self.btn_top_about = QPushButton("ℹ️ 关于")
         self.btn_top_about.setObjectName("topBtn")
         self.btn_top_about.clicked.connect(self.show_about_dialog)
 
         header_layout.addWidget(self.btn_top_settings)
         header_layout.addWidget(self.btn_top_assembly)
+        header_layout.addWidget(self.btn_top_security)
+        header_layout.addWidget(self.btn_top_overlay)
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
