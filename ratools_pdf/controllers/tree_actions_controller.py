@@ -35,6 +35,9 @@ class TreeActionsController(QObject):
         action_details = menu.addAction("📄 查看文件详情...")
         action_details.setEnabled(is_single_selection)
 
+        menu.addSeparator()
+        action_assembly = menu.addAction("📑 页面装配与拆分...")
+
         # 映射坐标并在当前鼠标位置弹出
         action = menu.exec(view.tree.viewport().mapToGlobal(pos))
 
@@ -44,6 +47,13 @@ class TreeActionsController(QObject):
             self.locate_file(target_path)
         elif action == action_details:
             self.show_file_details(target_path)
+        elif action == action_assembly:
+            pdf_paths = [
+                it.text(1)
+                for it in selected_items
+                if it.text(1).lower().endswith(".pdf") and os.path.exists(it.text(1))
+            ]
+            self.view.show_page_assembly_dialog(pdf_paths)
 
     def on_item_double_clicked(self, item, column):
         """双击列表项直接使用系统默认软件打开 PDF 文件"""

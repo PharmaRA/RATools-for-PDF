@@ -17,6 +17,7 @@ from ratools_pdf.ui.dialogs import (
     CustomMessageBox,
     DpiSelectionDialog,
     ManualFontEmbeddingDialog,
+    PageAssemblyDialog,
     SettingsDialog,
 )
 from ratools_pdf.ui.dialogs.prompts import MajorUpdatePromptDialog, SignedFilesPromptDialog
@@ -154,8 +155,22 @@ class MainWindow(QMainWindow):
         dlg.exec()
         return dlg.chosen_action
 
+    def show_page_assembly_dialog(self, initial_files=None):
+        """弹出页面装配与拆分工作台对话框。"""
+        if initial_files is None:
+            initial_files = []
+            if hasattr(self, "tree") and self.tree:
+                root = self.tree.invisibleRootItem()
+                for i in range(root.childCount()):
+                    item = root.child(i)
+                    path = item.text(1)
+                    if path.lower().endswith(".pdf") and os.path.exists(path):
+                        initial_files.append(path)
+        dlg = PageAssemblyDialog(initial_files=initial_files, parent=self)
+        dlg.exec()
+
     def _build_header(self, main_layout):
-        """顶部 Header：全局设置 / 关于按钮。"""
+        """顶部 Header：全局设置 / 页面工作台 / 关于按钮。"""
         # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
@@ -167,11 +182,16 @@ class MainWindow(QMainWindow):
         self.btn_top_settings.setObjectName("topBtn")
         self.btn_top_settings.clicked.connect(self.settings_dialog.show)
 
+        self.btn_top_assembly = QPushButton("📑 页面工作台")
+        self.btn_top_assembly.setObjectName("topBtn")
+        self.btn_top_assembly.clicked.connect(lambda: self.show_page_assembly_dialog())
+
         self.btn_top_about = QPushButton("ℹ️ 关于")
         self.btn_top_about.setObjectName("topBtn")
         self.btn_top_about.clicked.connect(self.show_about_dialog)
 
         header_layout.addWidget(self.btn_top_settings)
+        header_layout.addWidget(self.btn_top_assembly)
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
