@@ -41,6 +41,8 @@ class TreeActionsController(QObject):
         action_security.setEnabled(is_single_selection)
         action_overlay = menu.addAction("🎨 图层套印与印章...")
         action_overlay.setEnabled(is_single_selection)
+        action_inspector = menu.addAction("🔍 深度诊断与受损修复...")
+        action_inspector.setEnabled(is_single_selection)
 
         # 映射坐标并在当前鼠标位置弹出
         action = menu.exec(view.tree.viewport().mapToGlobal(pos))
@@ -62,6 +64,8 @@ class TreeActionsController(QObject):
             self.view.show_security_center_dialog(target_path)
         elif action == action_overlay:
             self.view.show_overlay_dialog(target_path)
+        elif action == action_inspector:
+            self.view.show_pdf_inspector_dialog(target_path)
 
     def on_item_double_clicked(self, item, column):
         """双击列表项直接使用系统默认软件打开 PDF 文件"""

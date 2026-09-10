@@ -10,6 +10,7 @@ from ratools_pdf.ui.dialogs.log_dialog import LogDialog
 from ratools_pdf.ui.dialogs.message_box import CustomMessageBox
 from ratools_pdf.ui.dialogs.overlay_dialog import OverlayUnderlayDialog
 from ratools_pdf.ui.dialogs.page_assembly_dialog import PageAssemblyDialog
+from ratools_pdf.ui.dialogs.pdf_inspector_dialog import PdfInspectorDialog
 from ratools_pdf.ui.dialogs.security_center_dialog import SecurityCenterDialog
 from ratools_pdf.ui.dialogs.settings_dialog import SettingsDialog
 
@@ -23,6 +24,7 @@ __all__ = [
     "ManualFontEmbeddingDialog",
     "OverlayUnderlayDialog",
     "PageAssemblyDialog",
+    "PdfInspectorDialog",
     "SecurityCenterDialog",
     "SettingsDialog",
 ]

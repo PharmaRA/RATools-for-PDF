@@ -62,6 +62,7 @@ class PackageStructureTests(unittest.TestCase):
             LogDialog,
             OverlayUnderlayDialog,
             PageAssemblyDialog,
+            PdfInspectorDialog,
             SecurityCenterDialog,
         )
         from ratools_pdf.ui.main_window import MainWindow
@@ -70,6 +71,7 @@ class PackageStructureTests(unittest.TestCase):
         self.assertEqual(LogDialog.__name__, "LogDialog")
         self.assertEqual(PageAssemblyDialog.__name__, "PageAssemblyDialog")
         self.assertEqual(OverlayUnderlayDialog.__name__, "OverlayUnderlayDialog")
+        self.assertEqual(PdfInspectorDialog.__name__, "PdfInspectorDialog")
         self.assertEqual(SecurityCenterDialog.__name__, "SecurityCenterDialog")
         self.assertEqual(MainWindow.__name__, "MainWindow")
 

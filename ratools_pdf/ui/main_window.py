@@ -19,6 +19,7 @@ from ratools_pdf.ui.dialogs import (
     ManualFontEmbeddingDialog,
     OverlayUnderlayDialog,
     PageAssemblyDialog,
+    PdfInspectorDialog,
     SecurityCenterDialog,
     SettingsDialog,
 )
@@ -191,8 +192,25 @@ class MainWindow(QMainWindow):
         dlg = OverlayUnderlayDialog(initial_file=initial_file, parent=self)
         dlg.exec()
 
+    def show_pdf_inspector_dialog(self, initial_file=None):
+        """弹出 PDF 深度诊断与受损修复面板。"""
+        if initial_file is None:
+            if hasattr(self, "tree") and self.tree:
+                selected = self.tree.selectedItems()
+                if selected and selected[0].text(1).lower().endswith(".pdf"):
+                    initial_file = selected[0].text(1)
+                else:
+                    root = self.tree.invisibleRootItem()
+                    for i in range(root.childCount()):
+                        p = root.child(i).text(1)
+                        if p.lower().endswith(".pdf") and os.path.exists(p):
+                            initial_file = p
+                            break
+        dlg = PdfInspectorDialog(initial_file=initial_file, parent=self)
+        dlg.exec()
+
     def _build_header(self, main_layout):
-        """顶部 Header：全局设置 / 页面工作台 / 安全中心 / 图层套印 / 关于按钮。"""
+        """顶部 Header：全局设置 / 页面工作台 / 安全中心 / 图层套印 / 深度诊断 / 关于按钮。"""
         # ================= 顶部 Header =================
         header = QFrame()
         header.setObjectName("header")
@@ -216,6 +234,10 @@ class MainWindow(QMainWindow):
         self.btn_top_overlay.setObjectName("topBtn")
         self.btn_top_overlay.clicked.connect(lambda: self.show_overlay_dialog())
 
+        self.btn_top_inspector = QPushButton("🔍 深度诊断")
+        self.btn_top_inspector.setObjectName("topBtn")
+        self.btn_top_inspector.clicked.connect(lambda: self.show_pdf_inspector_dialog())
+
         self.btn_top_about = QPushButton("ℹ️ 关于")
         self.btn_top_about.setObjectName("topBtn")
         self.btn_top_about.clicked.connect(self.show_about_dialog)
@@ -224,6 +246,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.btn_top_assembly)
         header_layout.addWidget(self.btn_top_security)
         header_layout.addWidget(self.btn_top_overlay)
+        header_layout.addWidget(self.btn_top_inspector)
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
@@ -412,6 +435,12 @@ class MainWindow(QMainWindow):
         self.btn_detect_broken_refs.setCursor(Qt.PointingHandCursor)
         self.btn_detect_broken_refs.setToolTip("扫描队列中所有 PDF，检测 Word 转 PDF 后残留的“错误！未找到引用源”等失效占位文本，仅检测不修改文件。")
 
+        self.btn_open_inspector_studio = QPushButton("🔍 打开 PDF 深度诊断与受损修复工作台...")
+        self.btn_open_inspector_studio.setObjectName("secondaryBtn")
+        self.btn_open_inspector_studio.setCursor(Qt.PointingHandCursor)
+        self.btn_open_inspector_studio.setToolTip("使用 qpdf 对 PDF 执行语法合规体检(--check)、查看加密透视、分析线性化报告及强制重建受损 XRef。")
+        self.btn_open_inspector_studio.clicked.connect(lambda: self.show_pdf_inspector_dialog())
+
         for btn in [self.btn_bookmark_io_wizard, self.btn_link_io_wizard]:
             btn.setObjectName("secondaryBtn")
             btn.setCursor(Qt.PointingHandCursor)
@@ -465,6 +494,8 @@ class MainWindow(QMainWindow):
                 page_layout.addSpacing(8)
                 page_layout.addWidget(self.btn_detect_annotations)
                 page_layout.addWidget(self.btn_detect_broken_refs)
+                page_layout.addSpacing(8)
+                page_layout.addWidget(self.btn_open_inspector_studio)
 
             page_layout.addStretch()
 

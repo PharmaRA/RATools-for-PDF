@@ -324,6 +324,24 @@ def inspect_pdf_json(input_path: str, timeout: int = 60) -> Optional[Dict[str, A
     return None
 
 
+def get_linearization_report(input_path: str, timeout: int = 15) -> str:
+    """获取 PDF 线性化分析报告（通过 qpdf --show-linearization）。"""
+    try:
+        res = run_qpdf_command(["--show-linearization", input_path], timeout=timeout)
+        return f"{res.stdout}\n{res.stderr}".strip()
+    except Exception as e:
+        return f"无法获取线性化信息: {str(e)}"
+
+
+def repair_pdf(input_pdf: str, output_pdf: str, timeout: Optional[int] = 180) -> QpdfResult:
+    """尝试通过 qpdf 扫描内部对象流并强制重建交叉引用表 (XRef) 和 Trailer 以抢救受损文档。"""
+    res = run_qpdf_command([input_pdf, output_pdf], timeout=timeout)
+    if res.returncode in (0, 3) and os.path.exists(output_pdf):
+        return res
+    detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+    raise RuntimeError(f"PDF 修复失败: {detail or '文件可能已彻底损毁'}")
+
+
 @dataclass
 class PageSpec:
     """页面装配单元定义。"""
