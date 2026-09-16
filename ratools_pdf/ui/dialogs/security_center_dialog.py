@@ -447,28 +447,31 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         row_pw.addWidget(self.txt_dec_pass, stretch=1)
         v_pass.addLayout(row_pw)
 
+        hint_lbl = QLabel(
+            "💡 提示：仅受权限限制（禁止打印/编辑/复制）但未设打开密码的 PDF，无需输入密码即可直接免密脱壳；若设有打开密码，请勾选并输入密码解锁。"
+        )
+        hint_lbl.setStyleSheet("color: #6B7280; font-size: 11px;")
+        hint_lbl.setWordWrap(True)
+        v_pass.addWidget(hint_lbl)
+
         row_sig_opts = QHBoxLayout()
-        row_sig_opts.setSpacing(16)
-        self.cb_dec_remove_restrictions = QCheckBox(
-            "解除数字签名编辑限制 (--remove-restrictions，保留签名外观并解锁后续编辑)"
+        row_sig_opts.setSpacing(20)
+        self.cb_dec_remove_restrictions = QCheckBox("解除数字签名限制 (保留签名外观，解锁编辑)")
+        self.cb_dec_remove_restrictions.setToolTip(
+            "移除数字签名带来的编辑限制 (--remove-restrictions)，使签名失效但完好保留签名和印章的视觉外观"
         )
         self.cb_dec_remove_restrictions.setChecked(True)
-        self.cb_dec_remove_acroform = QCheckBox(
-            "移除交互式表单字典 (--remove-acroform，清除表单字段/签名状态)"
+
+        self.cb_dec_remove_acroform = QCheckBox("移除表单字典 (清除 AcroForm 交互状态)")
+        self.cb_dec_remove_acroform.setToolTip(
+            "从文档 Catalog 中移除交互式表单字典 (--remove-acroform)，清除表单字段与签名锁定状态"
         )
         self.cb_dec_remove_acroform.setChecked(False)
+
         row_sig_opts.addWidget(self.cb_dec_remove_restrictions)
         row_sig_opts.addWidget(self.cb_dec_remove_acroform)
         row_sig_opts.addStretch()
         v_pass.addLayout(row_sig_opts)
-
-        hint_lbl = QLabel(
-            "💡 说明：对于仅受权限限制（禁止打印/编辑/复制）但无打开密码的 PDF，无需输入密码即可直接免密脱壳；\n"
-            "若文档受打开密码保护，必须勾选并输入密码方可成功解锁解密。"
-        )
-        hint_lbl.setStyleSheet("color: #6B7280; font-size: 11px; line-height: 140%;")
-        hint_lbl.setWordWrap(True)
-        v_pass.addWidget(hint_lbl)
         layout.addWidget(pass_card)
 
         # 3. 输出与优化设置卡片
