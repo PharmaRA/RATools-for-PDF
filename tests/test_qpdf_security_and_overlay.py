@@ -186,8 +186,10 @@ class SecurityAndOverlayEngineTests(unittest.TestCase):
             self.assertEqual(p3["status"], "password_required")
             self.assertTrue(p3["needs_password"])
 
-            # 密码解锁脱壳
-            res_dec2 = qpdf.decrypt_pdf(locked, dec_locked, password="pass123")
+            # 密码解锁脱壳（同时启用签名与表单限制移除）
+            res_dec2 = qpdf.decrypt_pdf(
+                locked, dec_locked, password="pass123", remove_restrictions=True, remove_acroform=True
+            )
             self.assertTrue(res_dec2.is_success, res_dec2.stderr)
             doc_chk = fitz.open(dec_locked)
             self.assertEqual(doc_chk.needs_pass, 0)
@@ -207,6 +209,10 @@ class SecurityAndOverlayDialogUiTests(unittest.TestCase):
             self.assertEqual(dlg.tabs.count(), 2)
             self.assertIn("解密", dlg.tabs.tabText(0))
             self.assertIn("加密", dlg.tabs.tabText(1))
+
+            # 验证签名与表单限制移除复选框
+            self.assertTrue(dlg.cb_dec_remove_restrictions.isChecked())
+            self.assertFalse(dlg.cb_dec_remove_acroform.isChecked())
 
             # 添加文件到解密表格
             dlg.add_decrypt_files([pdf_path])

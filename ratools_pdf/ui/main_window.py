@@ -222,31 +222,32 @@ class MainWindow(QMainWindow):
         self.btn_top_settings.setObjectName("topBtn")
         self.btn_top_settings.clicked.connect(self.settings_dialog.show)
 
-        self.btn_top_assembly = QPushButton("📑 页面工作台")
-        self.btn_top_assembly.setObjectName("topBtn")
-        self.btn_top_assembly.clicked.connect(lambda: self.show_page_assembly_dialog())
-
         self.btn_top_security = QPushButton("🔒 安全中心")
         self.btn_top_security.setObjectName("topBtn")
         self.btn_top_security.clicked.connect(lambda: self.show_security_center_dialog())
 
+        # 暂时隐藏的入口按钮（代码保留供后续按需开放）
+        self.btn_top_assembly = QPushButton("📑 页面工作台")
+        self.btn_top_assembly.setObjectName("topBtn")
+        self.btn_top_assembly.clicked.connect(lambda: self.show_page_assembly_dialog())
+        self.btn_top_assembly.setVisible(False)
+
         self.btn_top_overlay = QPushButton("🎨 图层套印")
         self.btn_top_overlay.setObjectName("topBtn")
         self.btn_top_overlay.clicked.connect(lambda: self.show_overlay_dialog())
+        self.btn_top_overlay.setVisible(False)
 
         self.btn_top_inspector = QPushButton("🔍 深度诊断")
         self.btn_top_inspector.setObjectName("topBtn")
         self.btn_top_inspector.clicked.connect(lambda: self.show_pdf_inspector_dialog())
+        self.btn_top_inspector.setVisible(False)
 
         self.btn_top_about = QPushButton("ℹ️ 关于")
         self.btn_top_about.setObjectName("topBtn")
         self.btn_top_about.clicked.connect(self.show_about_dialog)
 
         header_layout.addWidget(self.btn_top_settings)
-        header_layout.addWidget(self.btn_top_assembly)
         header_layout.addWidget(self.btn_top_security)
-        header_layout.addWidget(self.btn_top_overlay)
-        header_layout.addWidget(self.btn_top_inspector)
         header_layout.addWidget(self.btn_top_about)
         header_layout.addStretch()
         main_layout.addWidget(header)
@@ -494,8 +495,6 @@ class MainWindow(QMainWindow):
                 page_layout.addSpacing(8)
                 page_layout.addWidget(self.btn_detect_annotations)
                 page_layout.addWidget(self.btn_detect_broken_refs)
-                page_layout.addSpacing(8)
-                page_layout.addWidget(self.btn_open_inspector_studio)
 
             page_layout.addStretch()
 

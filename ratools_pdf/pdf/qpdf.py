@@ -101,6 +101,8 @@ class QpdfCommandBuilder:
         self.force_version: Optional[str] = None
         self.min_version: Optional[str] = None
         self.decrypt_restrictions = False
+        self.remove_restrictions = False
+        self.remove_acroform = False
         self.flatten_rotation = False
         self.flatten_annotations: Optional[str] = None
         self.object_streams: Optional[str] = None
@@ -123,6 +125,16 @@ class QpdfCommandBuilder:
 
     def set_decrypt_restrictions(self, enabled: bool = True) -> "QpdfCommandBuilder":
         self.decrypt_restrictions = enabled
+        return self
+
+    def set_remove_restrictions(self, enabled: bool = True) -> "QpdfCommandBuilder":
+        """解除数字签名带来的编辑限制 (--remove-restrictions)，保留外观。"""
+        self.remove_restrictions = enabled
+        return self
+
+    def set_remove_acroform(self, enabled: bool = True) -> "QpdfCommandBuilder":
+        """从文档 Catalog 中移除交互式表单字典 (--remove-acroform)。"""
+        self.remove_acroform = enabled
         return self
 
     def set_flatten_rotation(self, enabled: bool = True) -> "QpdfCommandBuilder":
@@ -159,6 +171,12 @@ class QpdfCommandBuilder:
 
         if self.decrypt_restrictions:
             args.append("--decrypt")
+
+        if self.remove_restrictions:
+            args.append("--remove-restrictions")
+
+        if self.remove_acroform:
+            args.append("--remove-acroform")
 
         if self.flatten_rotation:
             args.append("--flatten-rotation")
@@ -202,6 +220,8 @@ def rewrite_with_qpdf(
     force_version: Optional[str] = None,
     linearize: bool = False,
     decrypt_restrictions: bool = False,
+    remove_restrictions: bool = False,
+    remove_acroform: bool = False,
     flatten_rotation: bool = False,
     flatten_annotations: Optional[str] = None,
     object_streams: Optional[str] = None,
@@ -224,6 +244,10 @@ def rewrite_with_qpdf(
         builder.set_linearize(True)
     if decrypt_restrictions:
         builder.set_decrypt_restrictions(True)
+    if remove_restrictions:
+        builder.set_remove_restrictions(True)
+    if remove_acroform:
+        builder.set_remove_acroform(True)
     if flatten_rotation:
         builder.set_flatten_rotation(True)
     if flatten_annotations:
@@ -611,15 +635,25 @@ def decrypt_pdf(
     input_pdf: str,
     output_pdf: str,
     password: Optional[str] = None,
+    remove_restrictions: bool = True,
+    remove_acroform: bool = False,
     linearize: bool = False,
     object_streams: Optional[str] = "generate",
     timeout: Optional[int] = 180,
 ) -> QpdfResult:
-    """对 PDF 执行解密或权限脱壳，输出为无密码限制的明文 PDF。"""
+    """对 PDF 执行解密或权限脱壳，输出为无密码限制的明文 PDF。
+
+    - remove_restrictions: 移除数字签名带来的编辑限制 (--remove-restrictions)，保留签名外观
+    - remove_acroform: 移除交互式表单字典 (--remove-acroform)
+    """
     cmd_args = []
     if password:
         cmd_args.append(f"--password={password}")
     cmd_args.append("--decrypt")
+    if remove_restrictions:
+        cmd_args.append("--remove-restrictions")
+    if remove_acroform:
+        cmd_args.append("--remove-acroform")
     cmd_args.append(input_pdf)
     if object_streams:
         cmd_args.append(f"--object-streams={object_streams}")

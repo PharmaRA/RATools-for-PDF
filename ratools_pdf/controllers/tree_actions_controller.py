@@ -36,13 +36,13 @@ class TreeActionsController(QObject):
         action_details.setEnabled(is_single_selection)
 
         menu.addSeparator()
-        action_assembly = menu.addAction("📑 页面装配与拆分...")
-        action_security = menu.addAction("🔒 安全与权限加密...")
+        action_security = menu.addAction("🔒 安全中心 (加解密)...")
         action_security.setEnabled(is_single_selection)
-        action_overlay = menu.addAction("🎨 图层套印与印章...")
-        action_overlay.setEnabled(is_single_selection)
-        action_inspector = menu.addAction("🔍 深度诊断与受损修复...")
-        action_inspector.setEnabled(is_single_selection)
+
+        # 暂时隐藏的入口项（保留引用与分支供后续启用）
+        action_assembly = None
+        action_overlay = None
+        action_inspector = None
 
         # 映射坐标并在当前鼠标位置弹出
         action = menu.exec(view.tree.viewport().mapToGlobal(pos))
@@ -53,18 +53,18 @@ class TreeActionsController(QObject):
             self.locate_file(target_path)
         elif action == action_details:
             self.show_file_details(target_path)
-        elif action == action_assembly:
+        elif action == action_security:
+            self.view.show_security_center_dialog(target_path)
+        elif action_assembly and action == action_assembly:
             pdf_paths = [
                 it.text(1)
                 for it in selected_items
                 if it.text(1).lower().endswith(".pdf") and os.path.exists(it.text(1))
             ]
             self.view.show_page_assembly_dialog(pdf_paths)
-        elif action == action_security:
-            self.view.show_security_center_dialog(target_path)
-        elif action == action_overlay:
+        elif action_overlay and action == action_overlay:
             self.view.show_overlay_dialog(target_path)
-        elif action == action_inspector:
+        elif action_inspector and action == action_inspector:
             self.view.show_pdf_inspector_dialog(target_path)
 
     def on_item_double_clicked(self, item, column):

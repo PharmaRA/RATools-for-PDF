@@ -108,6 +108,8 @@ class DecryptWorker(QThread):
         output_dir: str,
         password: Optional[str] = None,
         suffix: str = "_decrypted",
+        remove_restrictions: bool = True,
+        remove_acroform: bool = False,
         linearize: bool = True,
         object_streams: bool = True,
         parent=None,
@@ -117,6 +119,8 @@ class DecryptWorker(QThread):
         self.output_dir = output_dir
         self.password = password
         self.suffix = suffix
+        self.remove_restrictions = remove_restrictions
+        self.remove_acroform = remove_acroform
         self.linearize = linearize
         self.object_streams = object_streams
 
@@ -142,6 +146,8 @@ class DecryptWorker(QThread):
                     input_pdf=in_path,
                     output_pdf=target_out,
                     password=self.password,
+                    remove_restrictions=self.remove_restrictions,
+                    remove_acroform=self.remove_acroform,
                     linearize=self.linearize,
                     object_streams="generate" if self.object_streams else None,
                 )
@@ -440,6 +446,21 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         row_pw.addWidget(self.cb_dec_use_pass)
         row_pw.addWidget(self.txt_dec_pass, stretch=1)
         v_pass.addLayout(row_pw)
+
+        row_sig_opts = QHBoxLayout()
+        row_sig_opts.setSpacing(16)
+        self.cb_dec_remove_restrictions = QCheckBox(
+            "解除数字签名编辑限制 (--remove-restrictions，保留签名外观并解锁后续编辑)"
+        )
+        self.cb_dec_remove_restrictions.setChecked(True)
+        self.cb_dec_remove_acroform = QCheckBox(
+            "移除交互式表单字典 (--remove-acroform，清除表单字段/签名状态)"
+        )
+        self.cb_dec_remove_acroform.setChecked(False)
+        row_sig_opts.addWidget(self.cb_dec_remove_restrictions)
+        row_sig_opts.addWidget(self.cb_dec_remove_acroform)
+        row_sig_opts.addStretch()
+        v_pass.addLayout(row_sig_opts)
 
         hint_lbl = QLabel(
             "💡 说明：对于仅受权限限制（禁止打印/编辑/复制）但无打开密码的 PDF，无需输入密码即可直接免密脱壳；\n"
@@ -787,9 +808,6 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             files.sort()
             self.add_decrypt_files(files)
             event.acceptProposedAction()
-        if files:
-            self.add_decrypt_files(files)
-            event.acceptProposedAction()
 
     def _execute_decryption(self):
         if self.decrypt_table.rowCount() == 0:
@@ -818,6 +836,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             output_dir=out_dir,
             password=password,
             suffix=suffix,
+            remove_restrictions=self.cb_dec_remove_restrictions.isChecked(),
+            remove_acroform=self.cb_dec_remove_acroform.isChecked(),
             linearize=self.cb_dec_linearize.isChecked(),
             object_streams=self.cb_dec_objstms.isChecked(),
             parent=self,
