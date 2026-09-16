@@ -459,34 +459,40 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; ima
 #dialogSectionTitle { color: $text_faint; font-size: 12px; font-weight: 700; border: none; }
 
 /* ---- 选项卡 (QTabWidget / QTabBar) ---- */
+QTabWidget {
+    background: transparent;
+    border: none;
+}
 QTabWidget::pane {
-    border: 1px solid $border;
-    border-radius: 10px;
-    background-color: $surface;
-    top: -1px;
+    border: none;
+    background: transparent;
+    margin-top: 6px;
+}
+QTabBar {
+    background: transparent;
+    border: none;
+    qproperty-drawBase: 0;
 }
 QTabBar::tab {
     background-color: $surface_alt;
     color: $text_muted;
     border: 1px solid $border;
-    border-bottom: none;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    padding: 8px 18px;
-    margin-right: 4px;
+    border-radius: 8px;
+    padding: 7px 18px;
+    margin-right: 8px;
     font-weight: 600;
     font-size: 13px;
 }
 QTabBar::tab:hover {
     background-color: $surface_hover;
     color: $text;
+    border-color: $border_strong;
 }
 QTabBar::tab:selected {
-    background-color: $surface;
+    background-color: $primary_soft;
     color: $primary_text;
+    border: 1px solid $primary_soft_border;
     font-weight: 700;
-    border-color: $border;
-    border-top: 2px solid $primary;
 }
 
 /* ---- 下拉选择框 ---- */
