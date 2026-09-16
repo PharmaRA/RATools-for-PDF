@@ -205,11 +205,10 @@ class SecurityAndOverlayDialogUiTests(unittest.TestCase):
             self.assertEqual(dlg.txt_input.text(), pdf_path)
             self.assertIn("_encrypted.pdf", dlg.txt_output.text())
             self.assertEqual(dlg.tabs.count(), 2)
-            self.assertIn("加密", dlg.tabs.tabText(0))
-            self.assertIn("解密", dlg.tabs.tabText(1))
+            self.assertIn("解密", dlg.tabs.tabText(0))
+            self.assertIn("加密", dlg.tabs.tabText(1))
 
-            # 切换到解密选项卡并添加文件
-            dlg.tabs.setCurrentIndex(1)
+            # 添加文件到解密表格
             dlg.add_decrypt_files([pdf_path])
             self.assertEqual(dlg.decrypt_table.rowCount(), 2)  # initial_file (1) + added (1)
             dlg.close()

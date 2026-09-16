@@ -182,8 +182,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.content_layout.setSpacing(10)
 
         self.tabs = QTabWidget()
-        self._build_encrypt_tab(initial_file)
         self._build_decrypt_tab()
+        self._build_encrypt_tab(initial_file)
         self.content_layout.addWidget(self.tabs, stretch=1)
 
         self._build_footer()
@@ -245,6 +245,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         row_algo = QHBoxLayout()
         row_algo.addWidget(QLabel("加密算法："))
         self.combo_algo = QComboBox()
+        self.combo_algo.setFixedHeight(34)
         self.combo_algo.addItem("256-bit AES (推荐：最高安全等级，Acrobat X 及更高版本)", 256)
         self.combo_algo.addItem("128-bit AES (兼容旧版阅读器)", 128)
         row_algo.addWidget(self.combo_algo, stretch=1)
@@ -304,6 +305,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         h_mod = QHBoxLayout()
         h_mod.addWidget(QLabel("修改权限："))
         self.combo_modify = QComboBox()
+        self.combo_modify.setFixedHeight(34)
         self.combo_modify.addItem("完全禁止修改 (推荐定稿归档)", "none")
         self.combo_modify.addItem("仅允许页面装配 (插入、删除、旋转页面)", "assembly")
         self.combo_modify.addItem("仅允许填写表单字段与电子签名", "form")
@@ -530,12 +532,12 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     def _on_tab_changed(self, idx: int):
         self.btn_open_target.setVisible(False)
         if idx == 0:
-            self.btn_execute.setText("应用安全加密")
-            self.lbl_status.setText("就绪 (加密配置模式)")
-        else:
             self.btn_execute.setText("开始批量解密")
             cnt = self.decrypt_table.rowCount()
             self.lbl_status.setText(f"已选 {cnt} 个待解密文件" if cnt > 0 else "请添加待解密 PDF 文件")
+        else:
+            self.btn_execute.setText("应用安全加密")
+            self.lbl_status.setText("就绪 (加密配置模式)")
 
     # =========================================================================
     # 加密业务逻辑
@@ -809,9 +811,9 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     # =========================================================================
     def _on_execute_clicked(self):
         if self.tabs.currentIndex() == 0:
-            self._execute_encryption()
-        else:
             self._execute_decryption()
+        else:
+            self._execute_encryption()
 
     def _on_open_target_clicked(self):
         target = self.last_decrypt_dir or (

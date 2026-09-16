@@ -458,12 +458,44 @@ QCheckBox::indicator:checked { background: $primary; border-color: $primary; ima
 #dialogSecondaryBtn:checked { background-color: $primary_soft; border-color: $primary_soft_border; color: $primary_text; }
 #dialogSectionTitle { color: $text_faint; font-size: 12px; font-weight: 700; border: none; }
 
+/* ---- 选项卡 (QTabWidget / QTabBar) ---- */
+QTabWidget::pane {
+    border: 1px solid $border;
+    border-radius: 10px;
+    background-color: $surface;
+    top: -1px;
+}
+QTabBar::tab {
+    background-color: $surface_alt;
+    color: $text_muted;
+    border: 1px solid $border;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 8px 18px;
+    margin-right: 4px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QTabBar::tab:hover {
+    background-color: $surface_hover;
+    color: $text;
+}
+QTabBar::tab:selected {
+    background-color: $surface;
+    color: $primary_text;
+    font-weight: 700;
+    border-color: $border;
+    border-top: 2px solid $primary;
+}
+
 /* ---- 下拉选择框 ---- */
 QComboBox {
     background-color: $surface;
     border: 1px solid $border_strong;
     border-radius: 8px;
-    padding: 5px 10px;
+    padding: 2px 10px 2px 10px;
+    min-height: 28px;
     color: $text_body;
 }
 QComboBox:hover {
@@ -475,8 +507,8 @@ QComboBox:focus {
 }
 QComboBox::drop-down {
     subcontrol-origin: padding;
-    subcontrol-position: top right;
-    width: 22px;
+    subcontrol-position: center right;
+    width: 24px;
     border-left: none;
 }
 QComboBox QAbstractItemView {
