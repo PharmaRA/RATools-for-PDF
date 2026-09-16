@@ -186,6 +186,8 @@ class PageAssemblyDialog(FramelessDraggableDialog):
 
         self.btn_add = QPushButton("+ 添加文件")
         self.btn_add.clicked.connect(self._on_add_files_clicked)
+        self.btn_add_folder = QPushButton("+ 添加文件夹")
+        self.btn_add_folder.clicked.connect(self._on_add_folder_clicked)
         self.btn_remove = QPushButton("- 移除选中")
         self.btn_remove.clicked.connect(self._on_remove_file_clicked)
         self.btn_move_up = QPushButton("↑ 上移")
@@ -197,13 +199,14 @@ class PageAssemblyDialog(FramelessDraggableDialog):
 
         for btn in (
             self.btn_add,
+            self.btn_add_folder,
             self.btn_remove,
             self.btn_move_up,
             self.btn_move_down,
             self.btn_clear,
         ):
             btn.setObjectName("dialogSecondaryBtn")
-            btn.setFixedWidth(100)
+            btn.setFixedWidth(108)
             btn.setFixedHeight(30)
             btn.setCursor(Qt.PointingHandCursor)
             btn_bar.addWidget(btn)
@@ -491,6 +494,21 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         if files:
             self.add_files(files)
 
+    def _on_add_folder_clicked(self):
+        folder = QFileDialog.getExistingDirectory(self, "选择包含 PDF 文件的文件夹")
+        if not folder:
+            return
+        matched = []
+        for root, _, fnames in os.walk(folder):
+            for f in fnames:
+                if f.lower().endswith(".pdf"):
+                    matched.append(os.path.join(root, f))
+        if matched:
+            matched.sort()
+            self.add_files(matched)
+        else:
+            QMessageBox.information(self, "提示", "所选文件夹中未找到任何 PDF 文件！")
+
     def _on_remove_file_clicked(self):
         row = self.table.currentRow()
         if row >= 0:
@@ -555,8 +573,18 @@ class PageAssemblyDialog(FramelessDraggableDialog):
 
     def _drop_event(self, event):
         urls = event.mimeData().urls()
-        files = [u.toLocalFile() for u in urls if u.toLocalFile().lower().endswith(".pdf")]
+        files = []
+        for u in urls:
+            local = u.toLocalFile()
+            if os.path.isfile(local) and local.lower().endswith(".pdf"):
+                files.append(local)
+            elif os.path.isdir(local):
+                for root, _, fnames in os.walk(local):
+                    for f in fnames:
+                        if f.lower().endswith(".pdf"):
+                            files.append(os.path.join(root, f))
         if files:
+            files.sort()
             self.add_files(files)
             event.acceptProposedAction()
 

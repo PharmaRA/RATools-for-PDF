@@ -387,26 +387,34 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         v_btn_bar.setSpacing(8)
         self.btn_dec_add = QPushButton("+ 添加文件")
         self.btn_dec_add.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_add.setFixedWidth(100)
+        self.btn_dec_add.setFixedWidth(108)
         self.btn_dec_add.setFixedHeight(30)
         self.btn_dec_add.setCursor(Qt.PointingHandCursor)
         self.btn_dec_add.clicked.connect(self._on_dec_add_clicked)
 
+        self.btn_dec_add_folder = QPushButton("+ 添加文件夹")
+        self.btn_dec_add_folder.setObjectName("dialogSecondaryBtn")
+        self.btn_dec_add_folder.setFixedWidth(108)
+        self.btn_dec_add_folder.setFixedHeight(30)
+        self.btn_dec_add_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_add_folder.clicked.connect(self._on_dec_add_folder_clicked)
+
         self.btn_dec_remove = QPushButton("- 移除选中")
         self.btn_dec_remove.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_remove.setFixedWidth(100)
+        self.btn_dec_remove.setFixedWidth(108)
         self.btn_dec_remove.setFixedHeight(30)
         self.btn_dec_remove.setCursor(Qt.PointingHandCursor)
         self.btn_dec_remove.clicked.connect(self._on_dec_remove_clicked)
 
         self.btn_dec_clear = QPushButton("清空")
         self.btn_dec_clear.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_clear.setFixedWidth(100)
+        self.btn_dec_clear.setFixedWidth(108)
         self.btn_dec_clear.setFixedHeight(30)
         self.btn_dec_clear.setCursor(Qt.PointingHandCursor)
         self.btn_dec_clear.clicked.connect(self._on_dec_clear_clicked)
 
         v_btn_bar.addWidget(self.btn_dec_add)
+        v_btn_bar.addWidget(self.btn_dec_add_folder)
         v_btn_bar.addWidget(self.btn_dec_remove)
         v_btn_bar.addWidget(self.btn_dec_clear)
         v_btn_bar.addStretch()
@@ -708,6 +716,21 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         if files:
             self.add_decrypt_files(files)
 
+    def _on_dec_add_folder_clicked(self):
+        folder = QFileDialog.getExistingDirectory(self, "选择包含 PDF 文件的文件夹")
+        if not folder:
+            return
+        matched = []
+        for root, _, fnames in os.walk(folder):
+            for f in fnames:
+                if f.lower().endswith(".pdf"):
+                    matched.append(os.path.join(root, f))
+        if matched:
+            matched.sort()
+            self.add_decrypt_files(matched)
+        else:
+            QMessageBox.information(self, "提示", "所选文件夹中未找到任何 PDF 文件！")
+
     def _on_dec_remove_clicked(self):
         row = self.decrypt_table.currentRow()
         if row >= 0:
@@ -738,7 +761,20 @@ class SecurityCenterDialog(FramelessDraggableDialog):
 
     def _decrypt_drop(self, event):
         urls = event.mimeData().urls()
-        files = [u.toLocalFile() for u in urls if u.toLocalFile().lower().endswith(".pdf")]
+        files = []
+        for u in urls:
+            local = u.toLocalFile()
+            if os.path.isfile(local) and local.lower().endswith(".pdf"):
+                files.append(local)
+            elif os.path.isdir(local):
+                for root, _, fnames in os.walk(local):
+                    for f in fnames:
+                        if f.lower().endswith(".pdf"):
+                            files.append(os.path.join(root, f))
+        if files:
+            files.sort()
+            self.add_decrypt_files(files)
+            event.acceptProposedAction()
         if files:
             self.add_decrypt_files(files)
             event.acceptProposedAction()
