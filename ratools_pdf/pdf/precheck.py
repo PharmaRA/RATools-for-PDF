@@ -76,7 +76,6 @@ PRECHECK_DETECTABLE_OPTIONS = {
     "cleanup_remove_metadata",
     "cleanup_remove_all_links_bookmarks",
     "convert_pdf_version",
-    "remove_pdf_restrictions",
     "fast_web_view",
     "flatten_rotation",
     "flatten_annotations",
@@ -1029,9 +1028,6 @@ def _check_file_level(ctx):
 
     if ctx.wants("fast_web_view") and not qpdf._is_pdf_linearized(input_path):
         ctx.add_suggestion("fast_web_view", "文档未启用线性化快速网页浏览")
-
-    if ctx.wants("remove_pdf_restrictions") and qpdf._qpdf_reports_restrictions(input_path):
-        ctx.add_suggestion("remove_pdf_restrictions", "文档存在打印、复制或编辑权限限制")
 
 
 def _check_report_only_reviews(ctx):

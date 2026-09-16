@@ -80,7 +80,6 @@ MODULES = [
         "title": "文件级优化与输出",
         "options": [
             {"id": "convert_pdf_version", "title": "PDF版本转换", "desc": "将PDF版本修改为1.7版本"},
-            {"id": "remove_pdf_restrictions", "title": "PDF解除权限限制", "desc": "尝试移除禁止复制、打印、编辑等权限限制，不处理需要打开密码的加密文档"},
             {"id": "fast_web_view", "title": "启用线性化 (快速网页浏览)", "desc": "优化文档结构以支持Web环境下的流式加载和边下边看"},
             {"id": "generate_object_streams", "title": "生成对象流 (Object Streams)", "desc": "将零散字典打包为压缩对象流 (PDF 1.5+)，显著减少结构开销并缩小体积"},
             {"id": "realloc_flate", "title": "无损重压缩内容流", "desc": "使用最优算法重新压缩所有 Flate/Deflate 数据流，实现完全无损瘦身"},

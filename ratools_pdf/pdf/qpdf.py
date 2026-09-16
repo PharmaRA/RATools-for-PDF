@@ -557,6 +557,86 @@ def encrypt_pdf(
     return res
 
 
+def probe_pdf_encryption_status(input_path: str) -> Dict[str, Any]:
+    """探测 PDF 文档的安全与加密状态。
+
+    返回字典结构：
+    - status: 'unencrypted' | 'restricted_no_password' | 'password_required' | 'error'
+    - title: 状态简短标题
+    - description: 状态详细说明
+    - needs_password: 是否必须输入密码才能解密
+    """
+    if not os.path.exists(input_path):
+        return {
+            "status": "error",
+            "title": "文件不存在",
+            "description": "无法读取指定的文件路径",
+            "needs_password": False,
+        }
+
+    try:
+        import fitz
+        doc = fitz.open(input_path)
+        needs_pass = bool(doc.needs_pass)
+        doc.close()
+    except Exception:
+        needs_pass = False
+
+    info = qpdf_encryption_info(input_path).lower()
+    if not info or "file is not encrypted" in info:
+        return {
+            "status": "unencrypted",
+            "title": "未加密",
+            "description": "文档未设置密码或权限限制，无需解密",
+            "needs_password": False,
+        }
+
+    if needs_pass:
+        return {
+            "status": "password_required",
+            "title": "受密码保护",
+            "description": "文档受打开密码保护，需要输入密码解锁解密",
+            "needs_password": True,
+        }
+
+    return {
+        "status": "restricted_no_password",
+        "title": "仅受权限限制",
+        "description": "文档受打印/编辑/复制等权限限制，但未设打开密码，可直接免密脱壳",
+        "needs_password": False,
+    }
+
+
+def decrypt_pdf(
+    input_pdf: str,
+    output_pdf: str,
+    password: Optional[str] = None,
+    linearize: bool = False,
+    object_streams: Optional[str] = "generate",
+    timeout: Optional[int] = 180,
+) -> QpdfResult:
+    """对 PDF 执行解密或权限脱壳，输出为无密码限制的明文 PDF。"""
+    cmd_args = []
+    if password:
+        cmd_args.append(f"--password={password}")
+    cmd_args.append("--decrypt")
+    cmd_args.append(input_pdf)
+    if object_streams:
+        cmd_args.append(f"--object-streams={object_streams}")
+    if linearize:
+        cmd_args.append("--linearize")
+    cmd_args.append(output_pdf)
+
+    res = run_qpdf_command(cmd_args, timeout=timeout)
+    if res.returncode == 3 and os.path.exists(output_pdf):
+        return res
+    if res.returncode != 0:
+        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+        formatted = format_qpdf_error(detail or "未知错误")
+        raise RuntimeError(f"解密失败: {formatted}")
+    return res
+
+
 def apply_overlay_underlay(
     input_pdf: str,
     output_pdf: str,

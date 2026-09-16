@@ -154,9 +154,49 @@ class SecurityAndOverlayEngineTests(unittest.TestCase):
             # 移除后恢复默认无自定义标签（返回空字符串）
             self.assertEqual(labels_removed[:4], ["", "", "", ""])
 
+    def test_probe_and_decrypt_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            unenc = os.path.join(tmp, "unenc.pdf")
+            restr = os.path.join(tmp, "restr.pdf")
+            locked = os.path.join(tmp, "locked.pdf")
+            dec_restr = os.path.join(tmp, "dec_restr.pdf")
+            dec_locked = os.path.join(tmp, "dec_locked.pdf")
+
+            _create_sample_pdf(unenc, 2, "Public")
+
+            # 1. 探针未加密
+            p1 = qpdf.probe_pdf_encryption_status(unenc)
+            self.assertEqual(p1["status"], "unencrypted")
+            self.assertFalse(p1["needs_password"])
+
+            # 2. 仅限制权限（无打开密码）
+            qpdf.encrypt_pdf(unenc, restr, owner_password="owner", print_perm="none")
+            p2 = qpdf.probe_pdf_encryption_status(restr)
+            self.assertEqual(p2["status"], "restricted_no_password")
+            self.assertFalse(p2["needs_password"])
+
+            # 免密脱壳
+            res_dec1 = qpdf.decrypt_pdf(restr, dec_restr)
+            self.assertTrue(res_dec1.is_success, res_dec1.stderr)
+            self.assertFalse(qpdf.qpdf_reports_restrictions(dec_restr))
+
+            # 3. 设置打开密码
+            qpdf.encrypt_pdf(unenc, locked, user_password="pass123", owner_password="owner")
+            p3 = qpdf.probe_pdf_encryption_status(locked)
+            self.assertEqual(p3["status"], "password_required")
+            self.assertTrue(p3["needs_password"])
+
+            # 密码解锁脱壳
+            res_dec2 = qpdf.decrypt_pdf(locked, dec_locked, password="pass123")
+            self.assertTrue(res_dec2.is_success, res_dec2.stderr)
+            doc_chk = fitz.open(dec_locked)
+            self.assertEqual(doc_chk.needs_pass, 0)
+            self.assertFalse(doc_chk.is_encrypted)
+            doc_chk.close()
+
 
 class SecurityAndOverlayDialogUiTests(unittest.TestCase):
-    def test_security_dialog_init(self):
+    def test_security_dialog_init_and_tabs(self):
         with tempfile.TemporaryDirectory() as tmp:
             pdf_path = os.path.join(tmp, "test.pdf")
             _create_sample_pdf(pdf_path, 1)
@@ -164,6 +204,14 @@ class SecurityAndOverlayDialogUiTests(unittest.TestCase):
             dlg = SecurityCenterDialog(initial_file=pdf_path)
             self.assertEqual(dlg.txt_input.text(), pdf_path)
             self.assertIn("_encrypted.pdf", dlg.txt_output.text())
+            self.assertEqual(dlg.tabs.count(), 2)
+            self.assertIn("加密", dlg.tabs.tabText(0))
+            self.assertIn("解密", dlg.tabs.tabText(1))
+
+            # 切换到解密选项卡并添加文件
+            dlg.tabs.setCurrentIndex(1)
+            dlg.add_decrypt_files([pdf_path])
+            self.assertEqual(dlg.decrypt_table.rowCount(), 2)  # initial_file (1) + added (1)
             dlg.close()
 
     def test_overlay_dialog_init(self):

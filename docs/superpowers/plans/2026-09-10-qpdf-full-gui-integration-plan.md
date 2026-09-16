@@ -80,8 +80,9 @@ RATools for PDF 当前基于 **Python + PySide6 + PyMuPDF** 构建，在页面�
   ☑ 启用 Web 快速视图 (线性化 / Fast Web View)
   ☑ 生成对象流压缩 (Object Streams，将散装字典打包压缩)
   ☑ 重新分配并极致压缩内容流 (Realloc Flate)
-  ☑ 解密并移除常规权限限制 (Decrypt Restrictions)
 ```
+
+> **架构调整说明**：原“PDF解除权限限制”已从主界面批量规则中下线，收归至专用的 **[安全与加密控制中心]**，支持智能状态探测（免密脱壳 vs 已知密码解锁）与批量多文件解密。
 
 ### 4.2 独立工作台 1：页面装配与拆分工作台 (Page Assembly Studio)
 ```
