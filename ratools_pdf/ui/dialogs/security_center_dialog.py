@@ -213,6 +213,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.txt_input.setFixedHeight(34)
         self.txt_input.setPlaceholderText("选择需要加密保护的 PDF 文件...")
         self.txt_input.textChanged.connect(self._auto_fill_output)
+        self.txt_input.textChanged.connect(self._update_encrypt_status)
         self.btn_browse_input = QPushButton("浏览...")
         self.btn_browse_input.setObjectName("dialogSecondaryBtn")
         self.btn_browse_input.setFixedHeight(34)
@@ -545,7 +546,18 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             self.lbl_status.setText(f"已选 {cnt} 个待解密文件" if cnt > 0 else "请添加待解密 PDF 文件")
         else:
             self.btn_execute.setText("应用安全加密")
-            self.lbl_status.setText("就绪 (加密配置模式)")
+            self._update_encrypt_status()
+
+    def _update_encrypt_status(self):
+        if not hasattr(self, "lbl_status") or self.tabs.currentIndex() != 1:
+            return
+        in_path = self.txt_input.text().strip()
+        if not in_path:
+            self.lbl_status.setText("请选择需要加密保护的源 PDF 文件")
+        elif not os.path.exists(in_path):
+            self.lbl_status.setText("所选源文件不存在")
+        else:
+            self.lbl_status.setText(f"已选择待加密文件：{os.path.basename(in_path)}")
 
     # =========================================================================
     # 加密业务逻辑
