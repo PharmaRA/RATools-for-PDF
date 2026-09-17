@@ -565,6 +565,12 @@ QComboBox QAbstractItemView {
 /* ---- 数据向导目录卡片 / 预览表 ---- */
 #wizardCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #wizardCard QLabel { border: none; background: transparent; }
+#compressionCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 10px; }
+#compressionCard QLabel { border: none; background: transparent; }
+#compressionCardTitle { font-weight: 700; font-size: 13px; color: $primary_text; border: none; background: transparent; }
+#compressionCardSection { font-weight: 600; font-size: 12px; color: $text; border: none; background: transparent; }
+#compressionCardHint { color: $text_muted; font-size: 11px; border: none; background: transparent; }
+#compressionCardSep { color: $border; background-color: $border; height: 1px; border: none; }
 #previewTable { background-color: $surface; border: 1px solid $border; border-radius: 8px; gridline-color: $border; color: $text_body; selection-background-color: $primary_soft; selection-color: $primary_text; }
 #previewTable QHeaderView::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; padding: 7px; color: $text_muted; font-weight: 700; }
 #previewTable QTableCornerButton::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; }

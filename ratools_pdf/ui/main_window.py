@@ -3,13 +3,18 @@ import os
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
-    QHeaderView, QLabel, QMainWindow, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QTreeWidget,
+    QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QLabel, QMainWindow, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QSpinBox, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ratools_pdf.config import rules_catalog
-from ratools_pdf.config.compression import DEFAULT_IMAGE_DPI, DEFAULT_JPEG_QUALITY
+from ratools_pdf.config.compression import (
+    DEFAULT_IMAGE_DPI,
+    DEFAULT_JPEG_QUALITY,
+    MAX_IMAGE_DPI,
+    MIN_IMAGE_DPI,
+)
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.config.paths import get_app_dir, get_resource_path
 from ratools_pdf.ui.dialogs import (
@@ -452,14 +457,23 @@ class MainWindow(QMainWindow):
             page_layout.setContentsMargins(20, 18, 20, 20)
             page_layout.setSpacing(14)
 
-            for opt in mod["options"]:
-                checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
-                page_layout.addWidget(checkbox_widget)
+            if mod["title"] == "文件级优化与输出":
+                for opt in mod["options"]:
+                    if opt["id"] in ("convert_pdf_version", "fast_web_view"):
+                        checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
+                        page_layout.addWidget(checkbox_widget)
 
-                # 为"压缩内嵌图像"添加特殊处理：勾选时弹出 DPI 选择对话框
-                # 注意：初始化完成后才连接信号，避免启动时恢复勾选状态触发对话框
-                if opt["id"] == "compress_images":
-                    self.compress_images_checkbox_created = True
+                comp_card = self._build_compression_card()
+                page_layout.addWidget(comp_card)
+
+                for opt in mod["options"]:
+                    if opt["id"] == "filename_ectd_format":
+                        checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
+                        page_layout.addWidget(checkbox_widget)
+            else:
+                for opt in mod["options"]:
+                    checkbox_widget = self._create_checkbox(opt["id"], opt["title"], opt["desc"], False)
+                    page_layout.addWidget(checkbox_widget)
 
             if mod["title"] == "页面与字体标准化":
                 page_layout.addSpacing(12)
@@ -666,9 +680,36 @@ class MainWindow(QMainWindow):
         self.active_preset_key = None
         self._set_preset_button_state(None)
 
-        # 初始化完成后再连接"压缩内嵌图像"的特殊处理
-        if hasattr(self, "compress_images_checkbox_created") and "compress_images" in self.all_checkboxes:
-            self.all_checkboxes["compress_images"].toggled.connect(self._on_compress_images_toggled)
+        # 同步压缩卡片单选态与 DPI 设置
+        if hasattr(self, "rb_compress_aggressive"):
+            if self.cb_compress_aggressive.isChecked():
+                self.rb_compress_aggressive.setChecked(True)
+                self.lbl_compress_hint.setText("💡 最大化清理对象与结构碎片 (garbage=4 + clean)，适用于超限文件。")
+            elif self.cb_compress_standard.isChecked() or self.cb_generate_object_streams.isChecked():
+                self.rb_compress_standard.setChecked(True)
+                self.lbl_compress_hint.setText("💡 融合对象流打包、Flate 最优重压缩与垃圾回收，100% 保真。")
+            else:
+                self.rb_compress_none.setChecked(True)
+                self.lbl_compress_hint.setText("保持原始文档字节流与对象组织不变。")
+
+        if hasattr(self, "combo_image_dpi"):
+            try:
+                saved_dpi = int(self.app_settings.value("Compression/ImageDPI", DEFAULT_IMAGE_DPI))
+            except Exception:
+                saved_dpi = DEFAULT_IMAGE_DPI
+            if saved_dpi in (150, 200, 300):
+                idx = self.combo_image_dpi.findData(saved_dpi)
+                if idx >= 0:
+                    self.combo_image_dpi.setCurrentIndex(idx)
+                if hasattr(self, "row_custom_widget"):
+                    self.row_custom_widget.setVisible(False)
+            else:
+                idx = self.combo_image_dpi.findData(-1)
+                if idx >= 0:
+                    self.combo_image_dpi.setCurrentIndex(idx)
+                self.spin_image_dpi.setValue(saved_dpi)
+                if hasattr(self, "row_custom_widget"):
+                    self.row_custom_widget.setVisible(True)
 
     def closeEvent(self, event):
         self.persist_all_settings()
@@ -783,6 +824,21 @@ class MainWindow(QMainWindow):
             for group in self._rule_checkbox_groups().values():
                 should_check = any(key in target_options for key in group["keys"])
                 group["checkbox"].setChecked(should_check)
+
+            # 同步更新压缩卡片单选态
+            if hasattr(self, "rb_compress_aggressive"):
+                if "compress_aggressive" in target_options:
+                    self.rb_compress_aggressive.setChecked(True)
+                    self.lbl_compress_hint.setText("💡 最大化清理对象与结构碎片 (garbage=4 + clean)，适用于超限文件。")
+                elif "compress_standard" in target_options or "generate_object_streams" in target_options:
+                    self.rb_compress_standard.setChecked(True)
+                    self.lbl_compress_hint.setText("💡 融合对象流打包、Flate 最优重压缩与垃圾回收，100% 保真。")
+                else:
+                    self.rb_compress_none.setChecked(True)
+                    self.lbl_compress_hint.setText("保持原始文档字节流与对象组织不变。")
+
+            if hasattr(self, "cb_compress_images"):
+                self.cb_compress_images.setChecked("compress_images" in target_options)
         finally:
             self.is_applying_preset = False
 
@@ -878,8 +934,18 @@ class MainWindow(QMainWindow):
         经 worker 传给 process_document。非法值由 config.compression 的
         normalize 归一化，这里原样透出即可。
         """
+        dpi = DEFAULT_IMAGE_DPI
+        if hasattr(self, "combo_image_dpi"):
+            data = self.combo_image_dpi.currentData()
+            if data == -1 and hasattr(self, "spin_image_dpi"):
+                dpi = self.spin_image_dpi.value()
+            elif data and data > 0:
+                dpi = data
+        elif hasattr(self, "app_settings"):
+            dpi = self.app_settings.value("Compression/ImageDPI", DEFAULT_IMAGE_DPI)
+
         return {
-            "dpi": self.app_settings.value("Compression/ImageDPI", DEFAULT_IMAGE_DPI),
+            "dpi": dpi,
             "quality": DEFAULT_JPEG_QUALITY,
         }
 
@@ -1049,20 +1115,170 @@ class MainWindow(QMainWindow):
 
         return container
 
+    def _build_compression_card(self):
+        """构建'文件体积瘦身与压缩'专属卡片（无损分级单选 + 图像内联参数）。"""
+        card = QFrame()
+        card.setObjectName("compressionCard")
+        v_card = QVBoxLayout(card)
+        v_card.setContentsMargins(12, 10, 12, 10)
+        v_card.setSpacing(8)
+
+        title_lbl = QLabel("📦 文件体积瘦身与压缩")
+        title_lbl.setObjectName("compressionCardTitle")
+        v_card.addWidget(title_lbl)
+
+        lbl_lossless = QLabel("无损压缩级别：")
+        lbl_lossless.setObjectName("compressionCardSection")
+        v_card.addWidget(lbl_lossless)
+
+        self.compress_level_group = QButtonGroup(self)
+        self.rb_compress_none = QRadioButton("不压缩 (保持原样)")
+        self.rb_compress_standard = QRadioButton("智能无损瘦身 (推荐)")
+        self.rb_compress_aggressive = QRadioButton("极限无损瘦身")
+        self.rb_compress_none.setChecked(True)
+
+        self.compress_level_group.addButton(self.rb_compress_none, 0)
+        self.compress_level_group.addButton(self.rb_compress_standard, 1)
+        self.compress_level_group.addButton(self.rb_compress_aggressive, 2)
+
+        v_card.addWidget(self.rb_compress_none)
+        v_card.addWidget(self.rb_compress_standard)
+        v_card.addWidget(self.rb_compress_aggressive)
+
+        self.lbl_compress_hint = QLabel("保持原始文档字节流与对象组织不变。")
+        self.lbl_compress_hint.setObjectName("compressionCardHint")
+        self.lbl_compress_hint.setWordWrap(True)
+        v_card.addWidget(self.lbl_compress_hint)
+
+        # 内部虚拟复选框（注册进 self.all_checkboxes，与底层处理管线和预检逻辑无缝映射）
+        self.cb_compress_standard = QCheckBox()
+        self.cb_compress_aggressive = QCheckBox()
+        self.cb_generate_object_streams = QCheckBox()
+        self.cb_realloc_flate = QCheckBox()
+
+        self.all_checkboxes["compress_standard"] = self.cb_compress_standard
+        self.all_checkboxes["compress_aggressive"] = self.cb_compress_aggressive
+        self.all_checkboxes["generate_object_streams"] = self.cb_generate_object_streams
+        self.all_checkboxes["realloc_flate"] = self.cb_realloc_flate
+
+        for cb in [self.cb_compress_standard, self.cb_compress_aggressive,
+                   self.cb_generate_object_streams, self.cb_realloc_flate]:
+            cb.toggled.connect(self.on_checkbox_toggled)
+
+        self.compress_level_group.idToggled.connect(self._on_compress_level_changed)
+
+        # 分割线
+        sep = QFrame()
+        sep.setObjectName("compressionCardSep")
+        sep.setFixedHeight(1)
+        v_card.addWidget(sep)
+
+        # 图像压缩部分
+        self.cb_compress_images = QCheckBox("压缩内嵌图像 ⚠️ (扫描件降采样)")
+        self.cb_compress_images.setStyleSheet("font-weight: 600;")
+        self.all_checkboxes["compress_images"] = self.cb_compress_images
+        self.cb_compress_images.toggled.connect(self.on_checkbox_toggled)
+        self.cb_compress_images.toggled.connect(lambda _c: self.refresh_selection_summary())
+        v_card.addWidget(self.cb_compress_images)
+
+        lbl_img_desc = QLabel("将图像降采样至目标 DPI，显著减小扫描类 PDF 体积（有损）")
+        lbl_img_desc.setObjectName("compressionCardHint")
+        lbl_img_desc.setWordWrap(True)
+        v_card.addWidget(lbl_img_desc)
+
+        self.dpi_container = QWidget()
+        v_dpi = QVBoxLayout(self.dpi_container)
+        v_dpi.setContentsMargins(0, 0, 0, 0)
+        v_dpi.setSpacing(6)
+
+        row_dpi = QHBoxLayout()
+        row_dpi.setSpacing(6)
+        lbl_target_dpi = QLabel("目标清晰度：")
+        lbl_target_dpi.setObjectName("compressionCardSection")
+        row_dpi.addWidget(lbl_target_dpi)
+
+        self.combo_image_dpi = QComboBox()
+        self.combo_image_dpi.setFixedHeight(28)
+        self.combo_image_dpi.addItem("150 DPI (普通扫描件/黑白)", 150)
+        self.combo_image_dpi.addItem("200 DPI (图文平衡)", 200)
+        self.combo_image_dpi.addItem("300 DPI (推荐：高清图表)", 300)
+        self.combo_image_dpi.addItem("自定义 DPI...", -1)
+        row_dpi.addWidget(self.combo_image_dpi, stretch=1)
+        v_dpi.addLayout(row_dpi)
+
+        row_custom = QHBoxLayout()
+        row_custom.setSpacing(6)
+        lbl_custom = QLabel("自定义数值：")
+        lbl_custom.setObjectName("compressionCardHint")
+        self.spin_image_dpi = QSpinBox()
+        self.spin_image_dpi.setFixedHeight(28)
+        self.spin_image_dpi.setRange(MIN_IMAGE_DPI, MAX_IMAGE_DPI)
+        self.spin_image_dpi.setValue(DEFAULT_IMAGE_DPI)
+        self.spin_image_dpi.setSuffix(" DPI")
+        row_custom.addWidget(lbl_custom)
+        row_custom.addWidget(self.spin_image_dpi, stretch=1)
+        self.row_custom_widget = QWidget()
+        self.row_custom_widget.setLayout(row_custom)
+        self.row_custom_widget.setVisible(False)
+        v_dpi.addWidget(self.row_custom_widget)
+
+        self.dpi_container.setVisible(False)
+        v_card.addWidget(self.dpi_container)
+
+        self.cb_compress_images.toggled.connect(self.dpi_container.setVisible)
+        self.combo_image_dpi.currentIndexChanged.connect(self._on_image_dpi_combo_changed)
+        self.spin_image_dpi.valueChanged.connect(self._on_image_dpi_spin_changed)
+
+        return card
+
+    def _on_compress_level_changed(self, button_id, checked):
+        if not checked:
+            return
+        if button_id == 0:  # 不压缩
+            self.lbl_compress_hint.setText("保持原始文档字节流与对象组织不变。")
+            self.cb_compress_standard.setChecked(False)
+            self.cb_compress_aggressive.setChecked(False)
+            self.cb_generate_object_streams.setChecked(False)
+            self.cb_realloc_flate.setChecked(False)
+        elif button_id == 1:  # 智能无损瘦身
+            self.lbl_compress_hint.setText("💡 融合对象流打包、Flate 最优重压缩与垃圾回收，100% 保真。")
+            self.cb_compress_standard.setChecked(True)
+            self.cb_compress_aggressive.setChecked(False)
+            self.cb_generate_object_streams.setChecked(True)
+            self.cb_realloc_flate.setChecked(True)
+        elif button_id == 2:  # 极限无损瘦身
+            self.lbl_compress_hint.setText("💡 最大化清理对象与结构碎片 (garbage=4 + clean)，适用于超限文件。")
+            self.cb_compress_standard.setChecked(False)
+            self.cb_compress_aggressive.setChecked(True)
+            self.cb_generate_object_streams.setChecked(True)
+            self.cb_realloc_flate.setChecked(True)
+
+        if not self.is_applying_preset:
+            self.active_preset_key = None
+            self._set_preset_button_state(None)
+            self.persist_all_settings()
+            self.refresh_selection_summary()
+
+    def _on_image_dpi_combo_changed(self, _index):
+        val = self.combo_image_dpi.currentData()
+        if val == -1:
+            if hasattr(self, "row_custom_widget"):
+                self.row_custom_widget.setVisible(True)
+            dpi = self.spin_image_dpi.value()
+        else:
+            if hasattr(self, "row_custom_widget"):
+                self.row_custom_widget.setVisible(False)
+            dpi = val
+        if hasattr(self, "app_settings"):
+            self.app_settings.setValue("Compression/ImageDPI", dpi)
+
+    def _on_image_dpi_spin_changed(self, value):
+        if self.combo_image_dpi.currentData() == -1:
+            if hasattr(self, "app_settings"):
+                self.app_settings.setValue("Compression/ImageDPI", value)
+
     def _on_compress_images_toggled(self, checked):
-        """处理'压缩内嵌图像'复选框切换事件，勾选时弹出 DPI 选择对话框"""
-        if checked:
-            dialog = DpiSelectionDialog(self)
-            if dialog.exec() == QDialog.Accepted:
-                dpi = dialog.get_selected_dpi()
-                self.app_settings.setValue("Compression/ImageDPI", dpi)
-            else:
-                # 用户取消，取消勾选
-                self.all_checkboxes["compress_images"].blockSignals(True)
-                self.all_checkboxes["compress_images"].setChecked(False)
-                self.all_checkboxes["compress_images"].blockSignals(False)
-                # 需要手动触发一次摘要刷新，因为信号被阻塞了
-                self.refresh_selection_summary()
+        pass
 
     def apply_stylesheet(self):
         # 视觉样式全部集中在 theme.py 的应用级 QSS 中，由 ThemeManager 应用到
