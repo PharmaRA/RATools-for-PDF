@@ -117,7 +117,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         # Tab 1: 语法健康体检
         self.tab_check = QWidget()
         v1 = QVBoxLayout(self.tab_check)
-        v1.setContentsMargins(10, 10, 10, 10)
+        v1.setContentsMargins(0, 10, 0, 0)
         v1.setSpacing(8)
 
         self.lbl_check_badge = QLabel("等待诊断...")
@@ -135,7 +135,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         # Tab 2: 加密与权限透视
         self.tab_enc = QWidget()
         v2 = QVBoxLayout(self.tab_enc)
-        v2.setContentsMargins(10, 10, 10, 10)
+        v2.setContentsMargins(0, 10, 0, 0)
         v2.setSpacing(8)
 
         self.lbl_enc_badge = QLabel("等待诊断...")
@@ -153,7 +153,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         # Tab 3: 线性化分析
         self.tab_lin = QWidget()
         v3 = QVBoxLayout(self.tab_lin)
-        v3.setContentsMargins(10, 10, 10, 10)
+        v3.setContentsMargins(0, 10, 0, 0)
         v3.setSpacing(8)
 
         self.lbl_lin_badge = QLabel("等待诊断...")
@@ -171,7 +171,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         # Tab 4: 底层 JSON 语法树探针
         self.tab_json = QWidget()
         v4 = QVBoxLayout(self.tab_json)
-        v4.setContentsMargins(10, 10, 10, 10)
+        v4.setContentsMargins(0, 10, 0, 0)
         v4.setSpacing(8)
 
         h_json_tools = QHBoxLayout()
@@ -198,7 +198,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         # Tab 5: 灾难抢救与受损重建
         self.tab_repair = QWidget()
         v5 = QVBoxLayout(self.tab_repair)
-        v5.setContentsMargins(16, 16, 16, 16)
+        v5.setContentsMargins(0, 10, 0, 0)
         v5.setSpacing(14)
 
         card_repair = QFrame()

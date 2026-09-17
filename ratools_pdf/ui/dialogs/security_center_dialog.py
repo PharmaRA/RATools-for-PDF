@@ -203,7 +203,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     def _build_encrypt_tab(self, initial_file: Optional[str]):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setContentsMargins(0, 10, 0, 0)
         layout.setSpacing(12)
 
         # 1. 文件选择
@@ -357,7 +357,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     def _build_decrypt_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setContentsMargins(0, 10, 0, 0)
         layout.setSpacing(10)
 
         # 1. 待解密文件表格

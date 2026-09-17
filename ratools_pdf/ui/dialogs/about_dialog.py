@@ -31,7 +31,6 @@ class AboutDialog(FramelessDraggableDialog):
         version_badge = QLabel(get_display_version())
         version_badge.setObjectName("aboutBadge")
         version_badge.setAlignment(Qt.AlignCenter)
-        version_badge.setMaximumWidth(110)
 
         hero_layout.addWidget(brand_title)
         hero_layout.addWidget(version_badge, 0, Qt.AlignLeft)
