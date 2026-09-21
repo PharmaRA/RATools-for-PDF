@@ -458,7 +458,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         row_sig_opts.setSpacing(20)
         self.cb_dec_remove_restrictions = QCheckBox("解除数字签名限制 (保留签名外观，解锁编辑)")
         self.cb_dec_remove_restrictions.setToolTip(
-            "移除数字签名带来的编辑限制 (--remove-restrictions)，使签名失效但完好保留签名和印章的视觉外观"
+            "解除数字签名限制并解锁后续编辑；采用 300 DPI 靶向外观固化技术，绝对保留印章与签字视觉效果且不破坏任何超链接"
         )
         self.cb_dec_remove_restrictions.setChecked(True)
 

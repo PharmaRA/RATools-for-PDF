@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -229,6 +230,7 @@ def rewrite_with_qpdf(
     stream_data: Optional[str] = None,
     compression_level: int = 9,
     timeout: Optional[int] = 120,
+    bake_signatures: bool = True,
 ) -> QpdfResult:
     """调用 qpdf 重写 PDF 文件。
 
@@ -237,40 +239,66 @@ def rewrite_with_qpdf(
     - 3: 有警告但已成功生成有效输出文件
     - 2: 致命错误
     """
-    builder = QpdfCommandBuilder(input_pdf=input_pdf, output_pdf=output_pdf)
-    if force_version:
-        builder.set_force_version(force_version)
-    if linearize:
-        builder.set_linearize(True)
-    if decrypt_restrictions:
-        builder.set_decrypt_restrictions(True)
-    if remove_restrictions:
-        builder.set_remove_restrictions(True)
-    if remove_acroform:
-        builder.set_remove_acroform(True)
-    if flatten_rotation:
-        builder.set_flatten_rotation(True)
-    if flatten_annotations:
-        builder.set_flatten_annotations(flatten_annotations)
-    if object_streams:
-        builder.set_object_streams(object_streams)
-    if recompress_flate:
-        builder.set_recompress_flate(True, compression_level=compression_level)
-    if stream_data:
-        builder.set_stream_data(stream_data)
+    temp_baked = None
+    actual_input = input_pdf
+    if remove_restrictions and bake_signatures:
+        try:
+            from ratools_pdf.pdf.signature_baker import bake_digital_signatures, has_digital_signatures
 
-    cmd_args = builder.build_args()
-    res = run_qpdf_command(cmd_args, timeout=timeout)
+            if has_digital_signatures(input_pdf):
+                temp_dir = tempfile.mkdtemp(prefix="ratools_bake_")
+                temp_baked = os.path.join(temp_dir, "baked.pdf")
+                baked_cnt = bake_digital_signatures(input_pdf, temp_baked, dpi=300)
+                if baked_cnt > 0 and os.path.exists(temp_baked):
+                    actual_input = temp_baked
+        except Exception:
+            actual_input = input_pdf
 
-    # 退出码 3 且输出文件存在，视为成功
-    if res.returncode == 3 and os.path.exists(output_pdf):
+    try:
+        builder = QpdfCommandBuilder(input_pdf=actual_input, output_pdf=output_pdf)
+        if force_version:
+            builder.set_force_version(force_version)
+        if linearize:
+            builder.set_linearize(True)
+        if decrypt_restrictions:
+            builder.set_decrypt_restrictions(True)
+        if remove_restrictions:
+            builder.set_remove_restrictions(True)
+        if remove_acroform:
+            builder.set_remove_acroform(True)
+        if flatten_rotation:
+            builder.set_flatten_rotation(True)
+        if flatten_annotations:
+            builder.set_flatten_annotations(flatten_annotations)
+        if object_streams:
+            builder.set_object_streams(object_streams)
+        if recompress_flate:
+            builder.set_recompress_flate(True, compression_level=compression_level)
+        if stream_data:
+            builder.set_stream_data(stream_data)
+
+        cmd_args = builder.build_args()
+        res = run_qpdf_command(cmd_args, timeout=timeout)
+
+        # 退出码 3 且输出文件存在，视为成功
+        if res.returncode == 3 and os.path.exists(output_pdf):
+            return res
+
+        if res.returncode != 0:
+            detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+            if not detail:
+                detail = f"qpdf 返回码 {res.returncode}，未提供详细信息"
+            raise RuntimeError(f"qpdf 执行失败: {detail}")
         return res
-
-    if res.returncode != 0:
-        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
-        if not detail:
-            detail = f"qpdf 返回码 {res.returncode}，未提供详细信息"
-        raise RuntimeError(f"qpdf 执行失败: {detail}")
+    finally:
+        if temp_baked and os.path.exists(temp_baked):
+            try:
+                os.remove(temp_baked)
+                p_dir = os.path.dirname(temp_baked)
+                if os.path.exists(p_dir):
+                    os.rmdir(p_dir)
+            except Exception:
+                pass
 
     return res
 
@@ -366,169 +394,14 @@ def repair_pdf(input_pdf: str, output_pdf: str, timeout: Optional[int] = 180) ->
     raise RuntimeError(f"PDF 修复失败: {detail or '文件可能已彻底损毁'}")
 
 
-@dataclass
-class PageSpec:
-    """页面装配单元定义。"""
-    file_path: str
-    page_range: str = "1-z"
-    password: Optional[str] = None
-    rotation: Optional[int] = None  # 0, 90, 180, 270
-
-
-def parse_page_range(range_str: str, total_pages: int) -> List[int]:
-    """解析 qpdf 风格页面范围字符串并返回 1-based 页码列表。
-
-    支持单页、连续区间（1-5）、倒序（z-1）、奇偶修饰（:odd, :even）、离散列表（1,3,5-7）。
-    """
-    range_str = range_str.strip().lower()
-    if not range_str or range_str in ("all", "1-z", "*"):
-        return list(range(1, total_pages + 1))
-
-    modifier = None
-    if ":odd" in range_str:
-        modifier = "odd"
-        range_str = range_str.replace(":odd", "")
-    elif ":even" in range_str:
-        modifier = "even"
-        range_str = range_str.replace(":even", "")
-
-    def resolve_token(t: str) -> int:
-        t = t.strip()
-        if t == "z":
-            return total_pages
-        if t.startswith("r") and t[1:].isdigit():
-            offset = int(t[1:])
-            return max(1, total_pages - offset + 1)
-        return int(t)
-
-    pages: List[int] = []
-    groups = [g.strip() for g in range_str.split(",") if g.strip()]
-    for g in groups:
-        try:
-            if "-" in g:
-                parts = g.split("-", 1)
-                start = resolve_token(parts[0])
-                end = resolve_token(parts[1])
-                step = 1 if start <= end else -1
-                pages.extend(range(start, end + step, step))
-            else:
-                pages.append(resolve_token(g))
-        except Exception:
-            continue
-
-    pages = [p for p in pages if 1 <= p <= total_pages]
-    if modifier == "odd":
-        pages = pages[0::2]
-    elif modifier == "even":
-        pages = pages[1::2]
-    return pages
-
-
-def get_pdf_page_count(input_path: str) -> int:
-    """获取 PDF 总页数。优先调用 qpdf，失败时回退至 pymupdf。"""
-    try:
-        res = run_qpdf_command(["--show-npages", input_path], timeout=10)
-        if res.is_success and res.stdout.strip().isdigit():
-            return int(res.stdout.strip())
-    except Exception:
-        pass
-    try:
-        import fitz
-        doc = fitz.open(input_path)
-        cnt = doc.page_count
-        doc.close()
-        return cnt
-    except Exception:
-        return 0
-
-
-def assemble_pages(
-    specs: List[PageSpec],
-    output_pdf: str,
-    linearize: bool = False,
-    object_streams: Optional[str] = "generate",
-    timeout: Optional[int] = 180,
-) -> QpdfResult:
-    """多文件/单文件页面装配、重排与提取。
-
-    利用 qpdf --empty --pages 构建目标文档，并应用各区间指定的旋转角。
-    """
-    if not specs:
-        raise ValueError("装配规格列表不能为空")
-
-    cmd_args = ["--empty", "--pages"]
-    rotations: List[tuple[int, int, int]] = []
-    current_page = 1
-
-    for spec in specs:
-        total_p = get_pdf_page_count(spec.file_path)
-        selected_pages = parse_page_range(spec.page_range, total_p)
-        count = len(selected_pages)
-        if count == 0:
-            continue
-
-        cmd_args.append(spec.file_path)
-        if spec.password:
-            cmd_args.append(f"--password={spec.password}")
-        if spec.page_range and spec.page_range.strip() not in ("1-z", "all", "*"):
-            cmd_args.append(spec.page_range.strip())
-
-        if spec.rotation and spec.rotation % 360 != 0:
-            rotations.append((spec.rotation % 360, current_page, current_page + count - 1))
-
-        current_page += count
-
-    cmd_args.append("--")
-
-    for angle, start_p, end_p in rotations:
-        range_str = f"{start_p}" if start_p == end_p else f"{start_p}-{end_p}"
-        cmd_args.append(f"--rotate=+{angle}:{range_str}")
-
-    if object_streams:
-        cmd_args.append(f"--object-streams={object_streams}")
-    if linearize:
-        cmd_args.append("--linearize")
-
-    cmd_args.append(output_pdf)
-
-    res = run_qpdf_command(cmd_args, timeout=timeout)
-    if res.returncode == 3 and os.path.exists(output_pdf):
-        return res
-    if res.returncode != 0:
-        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
-        raise RuntimeError(f"页面装配失败: {detail}")
-    return res
-
-
-def split_pages(
-    input_pdf: str,
-    output_pattern: str,
-    pages_per_file: Optional[int] = None,
-    password: Optional[str] = None,
-    timeout: Optional[int] = 180,
-) -> QpdfResult:
-    """拆分 PDF 页面为独立文件或多卷文件。
-
-    output_pattern 支持含 '%d' 格式符（如 'out_%d.pdf'），或常规文件名（自动追加序号）。
-    """
-    cmd_args = [input_pdf]
-    if password:
-        cmd_args.append(f"--password={password}")
-
-    if pages_per_file and pages_per_file > 1:
-        cmd_args.append(f"--split-pages={pages_per_file}")
-    else:
-        cmd_args.append("--split-pages")
-
-    cmd_args.append(output_pattern)
-
-    res = run_qpdf_command(cmd_args, timeout=timeout)
-    if res.returncode == 3:
-        return res
-    if res.returncode != 0:
-        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
-        raise RuntimeError(f"页面拆分失败: {detail}")
-    return res
+# 门面重新导出：页面装配与拆分下沉至 qpdf_assembly 独立子模块，保持外部接口零破坏透明
+from ratools_pdf.pdf.qpdf_assembly import (  # noqa: E402
+    PageSpec,
+    assemble_pages,
+    get_pdf_page_count,
+    parse_page_range,
+    split_pages,
+)
 
 
 def encrypt_pdf(
@@ -640,35 +513,67 @@ def decrypt_pdf(
     linearize: bool = False,
     object_streams: Optional[str] = "generate",
     timeout: Optional[int] = 180,
+    bake_signatures: bool = True,
 ) -> QpdfResult:
     """对 PDF 执行解密或权限脱壳，输出为无密码限制的明文 PDF。
 
     - remove_restrictions: 移除数字签名带来的编辑限制 (--remove-restrictions)，保留签名外观
     - remove_acroform: 移除交互式表单字典 (--remove-acroform)
+    - bake_signatures: 移除签名限制前将可见外观靶向烘焙为正文（防止阅读器判定孤立控件而隐藏外观）
     """
-    cmd_args = []
-    if password:
-        cmd_args.append(f"--password={password}")
-    cmd_args.append("--decrypt")
-    if remove_restrictions:
-        cmd_args.append("--remove-restrictions")
-    if remove_acroform:
-        cmd_args.append("--remove-acroform")
-    cmd_args.append(input_pdf)
-    if object_streams:
-        cmd_args.append(f"--object-streams={object_streams}")
-    if linearize:
-        cmd_args.append("--linearize")
-    cmd_args.append(output_pdf)
+    temp_baked = None
+    actual_input = input_pdf
+    if remove_restrictions and bake_signatures:
+        try:
+            from ratools_pdf.pdf.signature_baker import bake_digital_signatures, has_digital_signatures
 
-    res = run_qpdf_command(cmd_args, timeout=timeout)
-    if res.returncode == 3 and os.path.exists(output_pdf):
+            if has_digital_signatures(input_pdf, password=password):
+                temp_dir = tempfile.mkdtemp(prefix="ratools_bake_")
+                temp_baked = os.path.join(temp_dir, "baked_sig.pdf")
+                baked_cnt = bake_digital_signatures(
+                    input_pdf=input_pdf,
+                    output_pdf=temp_baked,
+                    password=password,
+                    dpi=300,
+                )
+                if baked_cnt > 0 and os.path.exists(temp_baked):
+                    actual_input = temp_baked
+        except Exception:
+            actual_input = input_pdf
+
+    try:
+        cmd_args = []
+        if password:
+            cmd_args.append(f"--password={password}")
+        cmd_args.append("--decrypt")
+        if remove_restrictions:
+            cmd_args.append("--remove-restrictions")
+        if remove_acroform:
+            cmd_args.append("--remove-acroform")
+        cmd_args.append(actual_input)
+        if object_streams:
+            cmd_args.append(f"--object-streams={object_streams}")
+        if linearize:
+            cmd_args.append("--linearize")
+        cmd_args.append(output_pdf)
+
+        res = run_qpdf_command(cmd_args, timeout=timeout)
+        if res.returncode == 3 and os.path.exists(output_pdf):
+            return res
+        if res.returncode != 0:
+            detail = (res.stderr or "").strip() or (res.stdout or "").strip()
+            formatted = format_qpdf_error(detail or "未知错误")
+            raise RuntimeError(f"解密失败: {formatted}")
         return res
-    if res.returncode != 0:
-        detail = (res.stderr or "").strip() or (res.stdout or "").strip()
-        formatted = format_qpdf_error(detail or "未知错误")
-        raise RuntimeError(f"解密失败: {formatted}")
-    return res
+    finally:
+        if temp_baked and os.path.exists(temp_baked):
+            try:
+                os.remove(temp_baked)
+                parent_dir = os.path.dirname(temp_baked)
+                if os.path.exists(parent_dir):
+                    os.rmdir(parent_dir)
+            except Exception:
+                pass
 
 
 def apply_overlay_underlay(
