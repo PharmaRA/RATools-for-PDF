@@ -11,6 +11,7 @@
 """
 
 import os
+import re
 import shutil
 from typing import Optional
 
@@ -32,14 +33,48 @@ def has_digital_signatures(pdf_path: str, password: Optional[str] = None) -> boo
             else:
                 return False
 
+        # 极速路径 1：若文档不包含交互式表单字典，绝无数字签名，耗时 0ms
+        if not getattr(doc, "is_form_pdf", True):
+            return False
+
+        # 极速路径 2：AcroForm SigFlags 标志位大于 0 表示包含签名域
         try:
             if doc.get_sigflags() > 0:
                 return True
         except Exception:
             pass
 
+        # 极速路径 3：直接解析 Document Catalog 中的 AcroForm/Fields 字典数组
+        try:
+            cat = doc.pdf_catalog()
+            af = doc.xref_get_key(cat, "AcroForm")
+            if not af or af[0] not in ("dict", "xref"):
+                return False
+            af_xref = int(af[1].split()[0]) if af[0] == "xref" else None
+            fields_data = (
+                doc.xref_get_key(af_xref, "Fields")
+                if af_xref
+                else doc.xref_get_key(cat, "AcroForm/Fields")
+            )
+            if fields_data and fields_data[0] == "array":
+                fx_list = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", fields_data[1])]
+                has_sig = False
+                for fx in fx_list:
+                    ft = doc.xref_get_key(fx, "FT")
+                    if ft and ft[1] == "/Sig":
+                        has_sig = True
+                        break
+                if not has_sig:
+                    return False
+                return True
+        except Exception:
+            pass
+
+        # 兜底路径：快速跳过无控件页面，仅扫描包含控件的页面
         sig_type = getattr(fitz, "PDF_WIDGET_TYPE_SIGNATURE", None)
         for page in doc:
+            if not getattr(page, "first_widget", None):
+                continue
             for w in (page.widgets() or []):
                 try:
                     if sig_type is not None and w.field_type == sig_type:
@@ -96,10 +131,43 @@ def bake_digital_signatures(
                     shutil.copy2(input_pdf, output_pdf)
                 return 0
 
+        # 极速跳过：若非表单/签名文档，直接复制或返回 0，无需遍历任何页面
+        if not getattr(doc, "is_form_pdf", True):
+            doc.close()
+            doc = None
+            if os.path.abspath(input_pdf) != os.path.abspath(output_pdf):
+                shutil.copy2(input_pdf, output_pdf)
+            return 0
+
+        # 获取文档级签名域总数，供提前终止大文件扫描使用
+        total_sig_fields = 0
+        try:
+            cat = doc.pdf_catalog()
+            af = doc.xref_get_key(cat, "AcroForm")
+            if af and af[0] in ("dict", "xref"):
+                af_xref = int(af[1].split()[0]) if af[0] == "xref" else None
+                fields_data = (
+                    doc.xref_get_key(af_xref, "Fields")
+                    if af_xref
+                    else doc.xref_get_key(cat, "AcroForm/Fields")
+                )
+                if fields_data and fields_data[0] == "array":
+                    fx_list = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", fields_data[1])]
+                    for fx in fx_list:
+                        ft = doc.xref_get_key(fx, "FT")
+                        if ft and ft[1] == "/Sig":
+                            total_sig_fields += 1
+        except Exception:
+            total_sig_fields = 0
+
         sig_type = getattr(fitz, "PDF_WIDGET_TYPE_SIGNATURE", None)
         baked_count = 0
 
         for page in doc:
+            # 极速跳过：当前页无任何表单控件，直接跳过页面对象构建
+            if not getattr(page, "first_widget", None):
+                continue
+
             # 1. 扫描当前页所有签名控件
             sig_widgets = []
             try:
@@ -177,6 +245,10 @@ def bake_digital_signatures(
                     except Exception:
                         pass
 
+            # 提前终止优化：若文档声明的签名域已全部烘焙完毕，无需再遍历后续成百上千页
+            if total_sig_fields > 0 and baked_count >= total_sig_fields:
+                break
+
         # 3. 结果保存与清理
         if baked_count > 0:
             # 清除 AcroForm 字典中的 SigFlags 标志位
@@ -191,7 +263,8 @@ def bake_digital_signatures(
 
             is_same = os.path.abspath(input_pdf) == os.path.abspath(output_pdf)
             save_target = output_pdf if not is_same else output_pdf + ".bake_tmp.pdf"
-            doc.save(save_target, garbage=3, deflate=True)
+            # 极速中间保存：关闭二次 deflate 压缩与全表递归垃圾回收，依靠下游 QPDF 执行高效 C++ 压缩
+            doc.save(save_target, garbage=1, deflate=False)
             doc.close()
             doc = None
             if is_same:

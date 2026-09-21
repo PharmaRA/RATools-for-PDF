@@ -69,21 +69,23 @@ def parse_page_range(range_str: str, total_pages: int) -> List[int]:
 
 
 def get_pdf_page_count(input_path: str) -> int:
-    """获取 PDF 总页数。优先调用 qpdf，失败时回退至 pymupdf。"""
+    """获取 PDF 总页数。优先内存极速读取 (PyMuPDF)，失败时回退至 qpdf。"""
+    try:
+        import fitz
+
+        doc = fitz.open(input_path)
+        cnt = doc.page_count
+        doc.close()
+        return cnt
+    except Exception:
+        pass
     try:
         res = run_qpdf_command(["--show-npages", input_path], timeout=10)
         if res.is_success and res.stdout.strip().isdigit():
             return int(res.stdout.strip())
     except Exception:
         pass
-    try:
-        import fitz
-        doc = fitz.open(input_path)
-        cnt = doc.page_count
-        doc.close()
-        return cnt
-    except Exception:
-        return 0
+    return 0
 
 
 def assemble_pages(
