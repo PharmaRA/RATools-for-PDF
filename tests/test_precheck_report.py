@@ -8,10 +8,11 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import fitz
 
-from ratools_pdf.pdf.precheck import build_precheck_report
+from ratools_pdf.pdf.precheck import build_precheck_report, resolve_processing_options
 
 
 def _report(path, selected=None):
@@ -639,6 +640,45 @@ class PrecheckSelectedOptionsTests(unittest.TestCase):
             report = _report(path, selected={"cleanup_remove_external_uri_and_text_black"})
 
             self.assertIn("cleanup_remove_external_uri", _suggested_ids(report))
+
+    def test_resolve_processing_options_matches_alias_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            uri_pdf = os.path.join(tmp, "uri.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(50, 50, 150, 70),
+                "uri": "https://example.com",
+            })
+            doc.save(uri_pdf)
+            doc.close()
+
+            res = resolve_processing_options(
+                uri_pdf,
+                {"cleanup_remove_external_uri_and_text_black"},
+                processing_mode="smart",
+            )
+            self.assertIn("cleanup_remove_external_uri_and_text_black", res["options"])
+            self.assertNotIn("cleanup_remove_external_uri_and_text_black", res["skipped"])
+
+            with patch("ratools_pdf.pdf.precheck.build_precheck_report") as mock_report:
+                mock_report.return_value = {
+                    "available": True,
+                    "suggestions": {
+                        "cleanup_remove_invalid_links": {
+                            "title": "清理失效超链接",
+                            "reason": "存在失效链接",
+                        }
+                    },
+                }
+                res_invalid = resolve_processing_options(
+                    uri_pdf,
+                    {"cleanup_remove_invalid_links_and_text_black"},
+                    processing_mode="smart",
+                )
+                self.assertIn("cleanup_remove_invalid_links_and_text_black", res_invalid["options"])
+                self.assertNotIn("cleanup_remove_invalid_links_and_text_black", res_invalid["skipped"])
 
     def test_full_precheck_includes_report_only_findings_key(self):
         with tempfile.TemporaryDirectory() as tmp:

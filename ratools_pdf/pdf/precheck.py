@@ -1220,6 +1220,12 @@ def resolve_processing_options(input_path, options, processing_mode="smart"):
     }
     effective = set(selected_options & NON_PROCESSING_OPTIONS)
     effective.update(actionable_selected & suggested)
+    for opt in actionable_selected:
+        for canonical, aliases in PRECHECK_OPTION_ALIASES.items():
+            if opt in aliases and canonical in suggested:
+                effective.add(opt)
+            elif opt == canonical and (aliases & suggested):
+                effective.add(opt)
     effective.update(unsupported)
 
     skipped = sorted(

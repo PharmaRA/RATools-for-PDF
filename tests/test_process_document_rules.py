@@ -1143,6 +1143,30 @@ class CleanupRulesTests(unittest.TestCase):
             color = traces[0].get("color", (1, 1, 1))
             self.assertLess(color[2], 0.1, f"文字未变黑: {color}")
 
+    def test_cleanup_remove_external_uri_and_text_black_in_smart_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_text(fitz.Point(55, 65), "blue link", fontsize=12, color=(0, 0, 1))
+            page.insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(50, 50, 200, 72),
+                "uri": "https://example.com",
+            })
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"cleanup_remove_external_uri_and_text_black"}, mode="smart")
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            links = doc[0].get_links()
+            doc.close()
+            self.assertEqual(links, [])
+            self.assertIn("已删除外部URI链接", msg)
+
 
 class QpdfRewriteRulesTests(unittest.TestCase):
     def test_fast_web_view_linearizes_output(self):
