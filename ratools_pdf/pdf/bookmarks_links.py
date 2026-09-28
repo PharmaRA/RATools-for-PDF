@@ -445,6 +445,86 @@ def _write_link_quad_points(doc, xref, quad_points):
         pass
 
 
+def delete_page_link(page, link):
+    """删除页面上的指定链接。
+
+    兼容标准间接对象链接 (xref > 0) 与直接内联在 /Annots 数组中的字典链接 (xref == 0)。
+    返回 bool 表示是否成功删除。
+    """
+    xref = link.get("xref", 0) if isinstance(link, dict) else getattr(link, "xref", 0)
+    if xref > 0:
+        try:
+            page.delete_link(link)
+            return True
+        except Exception:
+            pass
+
+    # 处理 xref == 0（或 delete_link 无法命中的直接内联字典链接）
+    try:
+        pdf_page = fitz._as_pdf_page(page.this, required=False)
+        if not pdf_page or not pdf_page.m_internal:
+            return False
+        mupdf = fitz.mupdf
+        annots = mupdf.pdf_dict_get(pdf_page.obj(), fitz.PDF_NAME("Annots"))
+        if not annots.m_internal:
+            return False
+        len_ = mupdf.pdf_array_len(annots)
+        if len_ == 0:
+            return False
+
+        target_rect = (
+            fitz.Rect(link.get("from", (0, 0, 0, 0)))
+            if isinstance(link, dict)
+            else getattr(link, "rect", fitz.Rect(0, 0, 0, 0))
+        )
+        target_uri = link.get("uri", "") if isinstance(link, dict) else getattr(link, "uri", "")
+        matrix = page.transformation_matrix
+
+        for i in range(len_):
+            item = mupdf.pdf_array_get(annots, i)
+            if xref > 0:
+                if mupdf.pdf_to_num(item) == xref:
+                    mupdf.pdf_array_delete(annots, i)
+                    mupdf.pdf_delete_object(page.parent, xref)
+                    mupdf.pdf_dict_put(pdf_page.obj(), fitz.PDF_NAME("Annots"), annots)
+                    fitz.JM_refresh_links(pdf_page)
+                    return True
+                continue
+
+            if not mupdf.pdf_is_dict(item):
+                continue
+            subtype = mupdf.pdf_to_name(mupdf.pdf_dict_get(item, fitz.PDF_NAME("Subtype")))
+            if subtype != "Link":
+                continue
+
+            if target_uri:
+                a_obj = mupdf.pdf_dict_get(item, fitz.PDF_NAME("A"))
+                if mupdf.pdf_is_dict(a_obj):
+                    uri_obj = mupdf.pdf_dict_get(a_obj, fitz.PDF_NAME("URI"))
+                    uri_val = mupdf.pdf_to_text_string(uri_obj) if uri_obj.m_internal else ""
+                    if uri_val != target_uri:
+                        continue
+
+            rect_obj = mupdf.pdf_dict_get(item, fitz.PDF_NAME("Rect"))
+            if mupdf.pdf_is_array(rect_obj) and mupdf.pdf_array_len(rect_obj) == 4:
+                r_vals = [
+                    mupdf.pdf_to_real(mupdf.pdf_array_get(rect_obj, j))
+                    for j in range(4)
+                ]
+                r_page = fitz.Rect(r_vals) * matrix
+                if abs(r_page.x0 - target_rect.x0) > 0.5 or abs(r_page.y0 - target_rect.y0) > 0.5:
+                    if not target_uri:
+                        continue
+
+            mupdf.pdf_array_delete(annots, i)
+            mupdf.pdf_dict_put(pdf_page.obj(), fitz.PDF_NAME("Annots"), annots)
+            fitz.JM_refresh_links(pdf_page)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def export_links(pdf_path, json_path, scope="all"):
     """Export links to JSON with enough destination data for round-trip import.
 
@@ -530,7 +610,7 @@ def import_links(pdf_path, json_path, output_path, scope="all", mode="overwrite"
             for link in page.get_links():
                 if only_external and not _is_external_link_kind(link.get('kind', fitz.LINK_NONE)):
                     continue
-                page.delete_link(link)
+                delete_page_link(page, link)
 
     # 增量模式下，记录各页现存链接区域，用于跳过重复区域。
     existing_rects = {}

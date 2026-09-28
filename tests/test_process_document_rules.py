@@ -951,6 +951,48 @@ class CleanupRulesTests(unittest.TestCase):
             self.assertEqual(kinds, [fitz.LINK_GOTO])
             self.assertIn("已删除外部URI链接", msg)
 
+    def test_cleanup_remove_external_uri_deletes_direct_inline_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            doc.new_page()
+            doc.new_page()
+            doc[0].insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": fitz.Rect(50, 100, 150, 120),
+                "page": 1,
+                "to": fitz.Point(0, 0),
+            })
+            doc.save(source)
+            doc.close()
+
+            # 向 Annots 数组中追加一个 xref == 0 的直接内联链接字典
+            doc = fitz.open(source)
+            annots_arr = doc.xref_get_key(doc[0].xref, "Annots")[1]
+            new_annots_arr = (
+                annots_arr[:-1]
+                + ' << /Type /Annot /Subtype /Link /Rect [50 50 150 70] /A << /S /URI /URI (https://inline-example.com) >> >> ]'
+            )
+            doc.xref_set_key(doc[0].xref, "Annots", new_annots_arr)
+            doc.saveIncr()
+            doc.close()
+
+            doc = fitz.open(source)
+            links_before = doc[0].get_links()
+            doc.close()
+            direct_links = [l for l in links_before if l["xref"] == 0]
+            self.assertEqual(len(direct_links), 1)
+
+            ok, msg = _process(source, output, {"cleanup_remove_external_uri"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            kinds = [l.get("kind") for l in doc[0].get_links()]
+            doc.close()
+            self.assertEqual(kinds, [fitz.LINK_GOTO])
+            self.assertIn("已删除外部URI链接", msg)
+
     def test_cleanup_remove_unknown_action_links_deletes_named_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "s.pdf")

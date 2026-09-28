@@ -616,9 +616,9 @@ def _cleanup_external_uri_fast_path(ctx):
                 except Exception:
                     pass
             try:
-                page.delete_link(link)
-                removed_count += 1
-                ctx.mark("已删除外部URI链接", count=1)
+                if bookmarks_links.delete_page_link(page, link):
+                    removed_count += 1
+                    ctx.mark("已删除外部URI链接", count=1)
             except Exception:
                 pass
 
@@ -656,7 +656,7 @@ def _cleanup_all_links_bookmarks(ctx):
         # 兜底：再按 get_links 删除一遍
         for link in page_state["links"]:
             try:
-                page.delete_link(link)
+                bookmarks_links.delete_page_link(page, link)
             except Exception:
                 pass
     ctx.mark("已删除全部链接和书签")
@@ -713,13 +713,13 @@ def _cleanup_links_general_path(ctx):
                     decolor_rects.append(fitz.Rect(link.get("from")))
                 except Exception:
                     pass
-            page.delete_link(link)
-            if kind == fitz.LINK_URI:
-                ctx.mark("已删除外部URI链接", count=1)
-            elif kind == fitz.LINK_NONE:
-                ctx.mark("已删除失效链接", count=1)
-            else:
-                ctx.mark("已删除未知动作链接", count=1)
+            if bookmarks_links.delete_page_link(page, link):
+                if kind == fitz.LINK_URI:
+                    ctx.mark("已删除外部URI链接", count=1)
+                elif kind == fitz.LINK_NONE:
+                    ctx.mark("已删除失效链接", count=1)
+                else:
+                    ctx.mark("已删除未知动作链接", count=1)
 
         if (
             "cleanup_remove_external_uri_and_text_black" in options
