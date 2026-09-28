@@ -966,11 +966,8 @@ def _check_page_links(ctx):
 
         for annot in page.annots() or []:
             try:
-                if annot.type[0] == 8:
-                    uri = getattr(annot, "uri", "") or ""
-                    if not uri and hasattr(annot, "info"):
-                        uri = annot.info.get("uri", "") or ""
-                    if ctx.wants("cleanup_remove_external_uri") and uri:
+                if annot.type[0] == fitz.PDF_ANNOT_LINK:
+                    if ctx.wants("cleanup_remove_external_uri"):
                         ctx.add_suggestion("cleanup_remove_external_uri", "页面注释中包含外部URI链接")
                 else:
                     ctx.has_non_link_annotation = True

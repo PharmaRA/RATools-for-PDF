@@ -514,12 +514,9 @@ class PrecheckCleanupTests(unittest.TestCase):
 
             self.assertIn("cleanup_remove_annotations", _suggested_ids(report))
 
-    def test_highlight_only_pdf_misses_remove_annotations_current_behavior(self):
-        # 已知缺陷（特征测试固化现状）：build_precheck_report 的注释扫描用
-        # annot.type[0] == 8 判定"链接注释"，但 page.annots() 里 8 是高亮
-        # （Link 注释根本不会出现在 annots() 中，见 ANNOTATION_TYPE_LABELS 注释）。
-        # 结果：仅含高亮批注的 PDF 不会触发 cleanup_remove_annotations 建议。
-        # report_only 的批注复核项（annotation_precheck_review）不受影响。
+    def test_highlight_only_pdf_triggers_remove_annotations(self):
+        # 修正 _LINK_ANNOT_TYPE 与 annot.type 判定后，8 为高亮批注而非 Link。
+        # 仅含高亮批注的 PDF 能够正确触发 cleanup_remove_annotations 建议。
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "s.pdf")
             doc = fitz.open()
@@ -532,7 +529,7 @@ class PrecheckCleanupTests(unittest.TestCase):
             report = _report(path)
 
             ids = _suggested_ids(report)
-            self.assertNotIn("cleanup_remove_annotations", ids)
+            self.assertIn("cleanup_remove_annotations", ids)
             self.assertIn("annotation_precheck_review", ids)
 
 

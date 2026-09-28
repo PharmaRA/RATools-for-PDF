@@ -578,15 +578,7 @@ _CLEANUP_PAGE_OPTIONS = (
 
 _EXTERNAL_URI_OPTS = {"cleanup_remove_external_uri", "cleanup_remove_external_uri_and_text_black"}
 
-_LINK_ANNOT_TYPE = 8  # PDF 注释类型编号：Link
-
-
-def _annot_uri(annot):
-    """兼容不同 PyMuPDF 版本的 Link 注释 uri 读取。"""
-    uri = getattr(annot, "uri", "") or ""
-    if not uri and hasattr(annot, "info"):
-        uri = annot.info.get("uri", "") or ""
-    return uri
+_LINK_ANNOT_TYPE = getattr(fitz, "PDF_ANNOT_LINK", 1)  # PDF 注释类型编号：Link (1)
 
 
 def _decolor_rects_to_black(ctx, page, rects):
@@ -625,19 +617,15 @@ def _cleanup_external_uri_fast_path(ctx):
         if decolor:
             _decolor_rects_to_black(ctx, page, decolor_rects)
 
-        # 兼容兜底：若仍有 URI 链接残留，再做一次注释级删除
-        if removed_count > 0 and any(
-            l.get("kind", fitz.LINK_NONE) == fitz.LINK_URI for l in page.get_links()
-        ):
-            for annot in page.annots() or []:
-                try:
-                    if annot.type[0] != _LINK_ANNOT_TYPE:
-                        continue
-                    if _annot_uri(annot):
-                        page.delete_annot(annot)
-                        ctx.mark("已删除外部URI链接", count=1)
-                except Exception:
-                    pass
+        # 兼容兜底：若仍有 URI 链接残留，针对底层链接结构进行二次清洗
+        residual_uris = [l for l in page.get_links() if l.get("kind", fitz.LINK_NONE) == fitz.LINK_URI]
+        for l in residual_uris:
+            try:
+                if bookmarks_links.delete_page_link(page, l):
+                    removed_count += 1
+                    ctx.mark("已删除外部URI链接", count=1)
+            except Exception:
+                pass
 
 
 def _cleanup_all_links_bookmarks(ctx):
@@ -646,19 +634,36 @@ def _cleanup_all_links_bookmarks(ctx):
     doc.set_toc([])
     for page in doc:
         page_state = hyperlink_styles._collect_page_state(page)
-        # 直接删除 Link 注释，避免部分 PDF 中 delete_link 命中不到
-        for annot in page_state["annots"]:
-            try:
-                if annot.type[0] == _LINK_ANNOT_TYPE:
-                    page.delete_annot(annot)
-            except Exception:
-                pass
-        # 兜底：再按 get_links 删除一遍
         for link in page_state["links"]:
             try:
                 bookmarks_links.delete_page_link(page, link)
             except Exception:
                 pass
+        # 清除底层可能残留的全部 Link 注释对象
+        try:
+            pdf_page = fitz._as_pdf_page(page.this, required=False)
+            if pdf_page and pdf_page.m_internal:
+                mupdf = fitz.mupdf
+                annots = mupdf.pdf_dict_get(pdf_page.obj(), fitz.PDF_NAME("Annots"))
+                if annots.m_internal:
+                    i = mupdf.pdf_array_len(annots) - 1
+                    while i >= 0:
+                        item = mupdf.pdf_array_get(annots, i)
+                        is_link = False
+                        if mupdf.pdf_is_dict(item):
+                            subtype = mupdf.pdf_to_name(mupdf.pdf_dict_get(item, fitz.PDF_NAME("Subtype")))
+                            is_link = (subtype == "Link")
+                        elif mupdf.pdf_to_num(item) > 0:
+                            oxref = mupdf.pdf_to_num(item)
+                            obj_subtype = page.parent.xref_get_key(oxref, "Subtype")
+                            is_link = (obj_subtype[1] == "/Link")
+                        if is_link:
+                            mupdf.pdf_array_delete(annots, i)
+                        i -= 1
+                    mupdf.pdf_dict_put(pdf_page.obj(), fitz.PDF_NAME("Annots"), annots)
+                    fitz.JM_refresh_links(pdf_page)
+        except Exception:
+            pass
     ctx.mark("已删除全部链接和书签")
 
 
@@ -668,23 +673,6 @@ def _cleanup_links_general_path(ctx):
     for page in ctx.doc:
         page_state = hyperlink_styles._collect_page_state(page)
         decolor_rects = []
-
-        # 外部 URI 链接：优先用 delete_annot 方式确保真的移除可点击行为
-        if (
-            "cleanup_remove_external_uri" in options
-            or "cleanup_remove_external_uri_and_text_black" in options
-        ):
-            for annot in page_state["annots"]:
-                try:
-                    if annot.type[0] != _LINK_ANNOT_TYPE:
-                        continue
-                    if _annot_uri(annot):
-                        if "cleanup_remove_external_uri_and_text_black" in options:
-                            decolor_rects.append(annot.rect)
-                        page.delete_annot(annot)
-                        ctx.mark("已删除外部URI链接", count=1)
-                except Exception:
-                    pass
 
         for link in page_state["links"]:
             kind = link.get("kind", fitz.LINK_NONE)

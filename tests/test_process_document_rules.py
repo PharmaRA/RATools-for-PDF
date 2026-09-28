@@ -1158,6 +1158,32 @@ class CleanupRulesTests(unittest.TestCase):
             self.assertEqual(links, [])
             self.assertIn("已删除全部链接和书签", msg)
 
+    def test_cleanup_remove_all_links_bookmarks_preserves_regular_annotations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "s.pdf")
+            output = os.path.join(tmp, "out.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.add_highlight_annot(fitz.Rect(50, 50, 150, 70))
+            page.insert_link({
+                "kind": fitz.LINK_URI,
+                "from": fitz.Rect(50, 100, 150, 120),
+                "uri": "https://example.com",
+            })
+            doc.save(source)
+            doc.close()
+
+            ok, msg = _process(source, output, {"cleanup_remove_all_links_bookmarks"})
+
+            self.assertTrue(ok, msg)
+            doc = fitz.open(output)
+            links = doc[0].get_links()
+            annot_types = [a.type[0] for a in doc[0].annots() or []]
+            doc.close()
+            self.assertEqual(links, [])
+            self.assertEqual(len(annot_types), 1)
+            self.assertEqual(annot_types[0], 8)
+
     def test_cleanup_remove_external_uri_and_text_black_recolors_blue_text(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "s.pdf")
