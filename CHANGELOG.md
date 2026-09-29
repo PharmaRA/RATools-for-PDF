@@ -8,6 +8,30 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-29
+
+### 新增
+
+- **Nuitka 独立编译工程化构建体系**：
+  - 正式构建与 GitHub Actions CI/CD 流水线全面切换为 Nuitka standalone 方案，显著压缩构建分发体积并提升启动和运行表现；同时保留 PyInstaller 方案作为备选
+  - 自动化构建脚本 `build_nuitka.bat` 升级支持 `all`、`main` 与 `no_update` 多目标构建，智能内联 Windows 应用图标与版本元数据
+  - 引入模块排除与依赖精简机制，自动排除无关联的重型依赖包，并结合 PyMuPDF 原生运行时装配与 Scons 并行编译加速
+  - 自动集成 `plugins/qpdf` 完整底层执行引擎与配套 DLL，以及稳定 ABI 运行时动态库 `python3.dll`；清理冗余的 Qt OpenSSL 插件以消除特定 Windows 环境下的启动 DLL 冲突
+  - 产物规范化归档至 `dist\RATools-for-PDF_v<版本号>` 与 `dist\RATools-for-PDF-NoUpdate_v<版本号>`，打通一键打包发布流水线
+
+### 修复
+
+- **底层内联链接字典删除**：修复直接内嵌在 `/Annots` 数组中且未建立间接对象的链接字典（`xref == 0`）因 PyMuPDF 原生 `page.delete_link` 无法定位而残留的问题；新增 `bookmarks_links.delete_page_link` 底层操作，直接修改 MuPDF 注释数组与对象树并刷新页面链接状态，确保彻底物理擦除
+- **链接与批注判定及清理管线**：
+  - 修正 `_LINK_ANNOT_TYPE` 常量为 `fitz.PDF_ANNOT_LINK`（类型常量 1），修复此前因误判断为批注类型 8 导致仅包含高亮等真实批注时无法触发 `cleanup_remove_annotations` 预检建议的缺陷
+  - 清理 `page.annots()` 中对 Link 注释的无效查找与冗余删除逻辑，杜绝原生 `delete_annot` 对常规批注的潜在误伤
+  - 重构「删除全部链接与书签」及外部 URI 快速清理管线，统一由底层 `delete_page_link` 调度，并在全量清理时彻底清空物理 `/Link` 对象，同时完整保留高亮等常规业务批注
+- **智能处理模式预检别名反查**：修复在智能处理模式（`smart`）下勾选复合规则（如「删除外部超链接并将文本置黑」`cleanup_remove_external_uri_and_text_black`、「删除失效超链接并将文本置黑」`cleanup_remove_invalid_links_and_text_black`）时，因预检建议的是对应标准项而导致复合选项被误判为未命中并静默跳过的缺陷；引入 `PRECHECK_OPTION_ALIASES` 双向映射反查机制，确保复合别名规则被正确判定并执行
+
+### 变更
+
+- 更新 `README.md` 中的构建说明章节，详述 Nuitka standalone 构建体系、参数配置及产物目录结构
+
 ## [0.7.6] - 2026-09-27
 
 ### 新增

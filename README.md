@@ -348,12 +348,16 @@ dist/RATools-for-PDF-NoUpdate_x.x.x/RATools-for-PDF_NoUpdate.exe
 
 当前默认脚本会先使用更稳定的 console bootloader 构建，再将最终 exe 修正为 GUI 子系统。这样可以避免 `windowed` bootloader 在部分环境下出现的启动兼容性问题，同时保持桌面程序不显示控制台窗口。
 
-### 5. Nuitka 说明
+### 5. 构建方案与 Nuitka 说明
 
-仓库中仍保留 `build_nuitka.bat` 作为可选构建路径，但正式发布流程仍优先使用 `PyInstaller onedir`。如果维护或启用 Nuitka 路径，需要确认它与当前的 `icon.ico`、`plugins/` 目录和 Python 依赖保持同步；未完成验证时，请不要将其作为正式发布流程。
+当前自动化构建与正式发布流程已切换为 `Nuitka standalone` 构建方案（`build_nuitka.bat`），同时保留 `build_pyinstaller.bat` 作为备选路径。
 
-`build_nuitka.bat` 会先检查 `main.py`、`icon.ico` 和 `plugins/` 是否存在，再尝试执行 Nuitka 构建；输出目录会自动命名为 `main_v版本号.dist`，便于区分不同构建版本，`main.exe` 文件名保持不变。
-
+`build_nuitka.bat` 会自动检查环境、前置依赖并构建标准版本与 NoUpdate 无更新版本：
+- 自动集成嵌入程序应用图标（`--windows-icon-from-ico`）与元数据
+- 排除非相关重量级第三方库，结合 PyMuPDF 原生扩展运行时装配与 Scons 并行加速，避免编译膨胀与跨模块分析阻塞
+- 自动装配打包 `plugins/qpdf` 完整底层执行引擎与配套 DLL，以及稳定 ABI 运行时动态库 `python3.dll`
+- 产物自动归档至 `dist\RATools-for-PDF_v版本号` 与 `dist\RATools-for-PDF-NoUpdate_v版本号`，支持直接一键压缩与发布
+- 支持指定参数只构建特定变体：`build_nuitka.bat main`、`build_nuitka.bat no_update` 或默认的 `build_nuitka.bat all`
 ## qpdf 说明
 
 `PDF版本转换`、`启用线性化 (快速网页浏览)` 与 `PDF解除权限限制` 当前默认使用 `qpdf` 执行，以尽量保留 PDF 内部目录、书签和链接结构。

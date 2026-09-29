@@ -10,3 +10,4 @@ settings.ini
 /*.spec
 /.worktrees
 .claude/
+/.pi
