@@ -576,6 +576,46 @@ class PrecheckFileLevelTests(unittest.TestCase):
 
             self.assertIn("fast_web_view", _suggested_ids(report))
 
+    def test_linearized_pdf_does_not_trigger_fast_web_view(self):
+        from ratools_pdf.pdf import qpdf
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, "raw.pdf")
+            lin_path = os.path.join(tmp, "lin.pdf")
+            doc = fitz.open()
+            doc.new_page()
+            doc.save(raw_path)
+            doc.close()
+
+            qpdf.rewrite_with_qpdf(raw_path, lin_path, linearize=True)
+            report = _report(lin_path)
+
+            self.assertNotIn("fast_web_view", _suggested_ids(report))
+
+    def test_incrementally_modified_linearized_pdf_triggers_fast_web_view(self):
+        from ratools_pdf.pdf import qpdf
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, "raw.pdf")
+            lin_path = os.path.join(tmp, "lin.pdf")
+            mod_path = os.path.join(tmp, "mod.pdf")
+            doc = fitz.open()
+            doc.new_page()
+            doc.save(raw_path)
+            doc.close()
+
+            qpdf.rewrite_with_qpdf(raw_path, lin_path, linearize=True)
+            import shutil
+            shutil.copy(lin_path, mod_path)
+            with open(mod_path, "ab") as f:
+                f.write(b"\n%%EOF\n% incremental modification\n")
+
+            report = _report(mod_path)
+            self.assertIn("fast_web_view", _suggested_ids(report))
+
+            # 在智能处理模式下，该规则应被预检命中并保留在执行列表中，绝不能跳过
+            plan = resolve_processing_options(mod_path, {"fast_web_view"}, processing_mode="smart")
+            self.assertIn("fast_web_view", plan["options"])
+            self.assertNotIn("fast_web_view", plan["skipped"])
+
     def test_missing_file_reports_unavailable(self):
         report = _report(os.path.join(tempfile.gettempdir(), "does_not_exist_x.pdf"))
 

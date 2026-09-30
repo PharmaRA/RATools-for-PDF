@@ -327,14 +327,63 @@ def read_pdf_header_version(input_path: str) -> str:
     return match.group(1).decode("ascii") if match else ""
 
 
-def is_pdf_linearized(input_path: str) -> bool:
-    """检查 PDF 是否处于线性化状态。"""
+def is_pdf_linearized(input_path: str, timeout: int = 15) -> bool:
+    """检查 PDF 是否处于有效线性化（Fast Web View / 快速网页浏览）状态。
+
+    采用两级校验：
+    1. 极速初筛（纯 Python，耗时 < 1ms）：
+       - 检查文件前部（8192字节）是否存在 /Linearized 标记；不存在则必定未线性化。
+       - 解析线性化字典中的 /L 参数（全文档预期字节数），若与实际文件大小不符（如发生增量保存/二次编辑），
+         依据 ISO 32000-1 Annex F.1 明确判定为非线性化。
+    2. 权威校验（qpdf 子进程）：
+       - 当初筛通过时，调用 qpdf --check-linearization 进行完整的线性化表与提示流语法校验。
+       - 若 qpdf 执行失败或异常，以初筛结果保底。
+    """
+    if not input_path or not os.path.exists(input_path):
+        return False
     try:
+        actual_size = os.path.getsize(input_path)
+        if actual_size < 100:
+            return False
         with open(input_path, "rb") as f:
-            header = f.read(4096)
+            header = f.read(8192)
     except Exception:
         return False
-    return b"/Linearized" in header
+
+    if b"/Linearized" not in header:
+        return False
+
+    # 检查线性化字典中的 /L 参数（全文件字节大小）
+    m_dict = re.search(rb"<<\s*([^>]*?/Linearized[^>]*?)>>", header, re.DOTALL)
+    dict_content = m_dict.group(1) if m_dict else header
+
+    m_l = re.search(rb"/L\s+(\d+)", dict_content)
+    if m_l:
+        try:
+            declared_size = int(m_l.group(1))
+            # ISO 32000-1 Annex F.1: 若被追加修改，文件大小必然不等于 /L 声明大小
+            if declared_size != actual_size:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+    # 初筛通过，调用 qpdf --check-linearization 进行权威校验
+    try:
+        res = run_qpdf_command(["--check-linearization", input_path], timeout=timeout)
+        out = (res.stdout or "").lower()
+        err = (res.stderr or "").lower()
+        if "is not linearized" in out or "is not linearized" in err:
+            return False
+        if "no linearization errors" in out:
+            return True
+        if res.returncode in (0, 3) and "linearization" in out and "not linearized" not in out:
+            return True
+        if res.returncode not in (0, 3):
+            return False
+    except Exception:
+        pass
+
+    return True
 
 
 def qpdf_encryption_info(input_path: str) -> str:

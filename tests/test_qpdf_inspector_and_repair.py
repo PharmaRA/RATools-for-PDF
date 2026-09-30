@@ -40,15 +40,28 @@ class PdfInspectorAndRepairEngineTests(unittest.TestCase):
             lin_pdf = os.path.join(tmp, "lin.pdf")
             _create_sample_pdf(raw_pdf, 3)
 
-            # 未线性化报告
+            # 未线性化报告与函数判定
             rep_raw = qpdf.get_linearization_report(raw_pdf)
             self.assertIn("not linearized", rep_raw.lower())
+            self.assertFalse(qpdf.is_pdf_linearized(raw_pdf))
 
-            # 线性化后报告
+            # 线性化后报告与函数判定
             qpdf.rewrite_with_qpdf(raw_pdf, lin_pdf, linearize=True)
             rep_lin = qpdf.get_linearization_report(lin_pdf)
             self.assertIn("linearization data", rep_lin.lower())
             self.assertNotIn("not linearized", rep_lin.lower())
+            self.assertTrue(qpdf.is_pdf_linearized(lin_pdf))
+
+            # 增量修改后破坏线性化状态的判定
+            mod_pdf = os.path.join(tmp, "mod.pdf")
+            import shutil
+            shutil.copy(lin_pdf, mod_pdf)
+            with open(mod_pdf, "ab") as f:
+                f.write(b"\n%%EOF\n% incremental modification\n")
+
+            rep_mod = qpdf.get_linearization_report(mod_pdf)
+            self.assertIn("not linearized", rep_mod.lower())
+            self.assertFalse(qpdf.is_pdf_linearized(mod_pdf))
 
     def test_inspect_pdf_json_ast(self):
         with tempfile.TemporaryDirectory() as tmp:
