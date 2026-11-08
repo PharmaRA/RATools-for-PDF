@@ -131,22 +131,22 @@ class DecryptWorker(QThread):
         success_cnt = 0
         fail_cnt = 0
         total = len(self.tasks)
-        inputs = [path for _, path in self.tasks]
-        common_base = common_base_dir(inputs)
         plan = []
         try:
+            inputs = [path for _, path in self.tasks]
+            common_base = common_base_dir(inputs)
             for in_path in inputs:
                 name_no_ext, ext = os.path.splitext(os.path.basename(in_path))
                 out_name = f"{name_no_ext}{self.suffix}{ext}" if self.suffix else os.path.basename(in_path)
                 subdir = relative_source_directory(in_path, common_base)
                 plan.append((in_path, os.path.join(self.output_dir, subdir, out_name)))
             validate_output_plan(plan, inputs, allow_in_place=not self.suffix)
+            os.makedirs(self.output_dir, exist_ok=True)
         except Exception as exc:
             for row_idx, _ in self.tasks:
                 self.file_finished.emit(row_idx, False, str(exc))
             self.finished_all.emit(0, total, self.output_dir)
             return
-        os.makedirs(self.output_dir, exist_ok=True)
 
         for i, ((row_idx, in_path), (_, out_path)) in enumerate(zip(self.tasks, plan)):
             base_name = os.path.basename(in_path)
@@ -828,6 +828,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             event.acceptProposedAction()
 
     def _execute_decryption(self):
+        if self.decrypt_worker is not None:
+            return
         if self.decrypt_table.rowCount() == 0:
             QMessageBox.warning(self, "提示", "请先添加至少一个待解密 PDF 文件！")
             return
@@ -849,21 +851,31 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.btn_open_target.setVisible(False)
         self.lbl_status.setText("⏳ 正在批量解密脱壳...")
 
-        self.decrypt_worker = DecryptWorker(
-            tasks=tasks,
-            output_dir=out_dir,
-            password=password,
-            suffix=suffix,
-            remove_restrictions=self.cb_dec_remove_restrictions.isChecked(),
-            remove_acroform=self.cb_dec_remove_acroform.isChecked(),
-            linearize=self.cb_dec_linearize.isChecked(),
-            object_streams=self.cb_dec_objstms.isChecked(),
-            parent=self,
-        )
-        self.decrypt_worker.progress.connect(lambda msg: self.lbl_status.setText(msg))
-        self.decrypt_worker.file_finished.connect(self._on_dec_file_finished)
-        self.decrypt_worker.finished_all.connect(self._on_dec_finished_all)
-        self.decrypt_worker.start()
+        self._decrypt_summary = None
+        self._decrypt_rows = {row for row, _ in tasks}
+        self._decrypt_output_dir = out_dir
+        try:
+            self.decrypt_worker = DecryptWorker(
+                tasks=tasks,
+                output_dir=out_dir,
+                password=password,
+                suffix=suffix,
+                remove_restrictions=self.cb_dec_remove_restrictions.isChecked(),
+                remove_acroform=self.cb_dec_remove_acroform.isChecked(),
+                linearize=self.cb_dec_linearize.isChecked(),
+                object_streams=self.cb_dec_objstms.isChecked(),
+                parent=self,
+            )
+            self.decrypt_worker.progress.connect(lambda msg: self.lbl_status.setText(msg))
+            self.decrypt_worker.file_finished.connect(self._on_dec_file_finished)
+            self.decrypt_worker.finished_all.connect(self._on_dec_finished_all)
+            self.decrypt_worker.finished.connect(self._on_dec_thread_finished)
+            self.decrypt_worker.start()
+        except Exception as exc:
+            for row, _ in tasks:
+                self._on_dec_file_finished(row, False, f"解密启动失败: {exc}")
+            self._decrypt_summary = (0, len(tasks), out_dir)
+            self._finish_decryption_thread()
 
     def _on_dec_file_finished(self, row_idx: int, success: bool, msg: str):
         it_status = self.decrypt_table.item(row_idx, 3)
@@ -875,11 +887,28 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             it_desc.setText(msg)
 
     def _on_dec_finished_all(self, success_cnt: int, fail_cnt: int, out_dir: str):
+        self._decrypt_summary = (success_cnt, fail_cnt, out_dir)
+
+    def _on_dec_thread_finished(self):
+        if self.sender() is self.decrypt_worker:
+            self._finish_decryption_thread()
+
+    def _finish_decryption_thread(self):
+        worker = self.decrypt_worker
+        self.decrypt_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        summary = self._decrypt_summary
+        if summary is None:
+            for row in self._decrypt_rows:
+                self._on_dec_file_finished(row, False, "解密线程未返回完成结果，请重试")
+            summary = (0, len(self._decrypt_rows), self._decrypt_output_dir)
+        success_cnt, fail_cnt, out_dir = summary
         self.btn_execute.setEnabled(True)
         self.btn_cancel.setEnabled(True)
         self.lbl_status.setText(f"解密完成：成功 {success_cnt} 个，失败 {fail_cnt} 个")
-        self.last_decrypt_dir = out_dir
-        self.btn_open_target.setVisible(True)
+        self.last_decrypt_dir = out_dir if success_cnt else ""
+        self.btn_open_target.setVisible(success_cnt > 0)
 
         if fail_cnt == 0:
             QMessageBox.information(
@@ -888,8 +917,8 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         else:
             QMessageBox.warning(
                 self,
-                "部分完成",
-                f"解密处理结束：成功 {success_cnt} 个，失败 {fail_cnt} 个。\n请检查失败文档是否需要指定有效打开密码。",
+                "部分完成" if success_cnt else "解密失败",
+                f"解密处理结束：成功 {success_cnt} 个，失败 {fail_cnt} 个。\n请查看列表中的失败原因，修正后重试。",
             )
 
     # =========================================================================

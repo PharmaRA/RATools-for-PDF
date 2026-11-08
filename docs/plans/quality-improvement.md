@@ -31,8 +31,8 @@
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 75e57df；5/5；全量 356/356；review 通过 |
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 60957f8；9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
 | 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 7a9903e；6/6；全量 371/371；review 通过 |
-| 15 | R-15 | P2 | 诊断任务结果归属 | 已完成 | 9/9；旧诊断 5/5；全量 380/380；review 通过 |
-| 16 | R-16 | P2 | 解密准备异常反馈 | 待实施 | — |
+| 15 | R-15 | P2 | 诊断任务结果归属 | 已完成 | a565e7b；9/9；旧诊断 5/5；全量 380/380；review 通过 |
+| 16 | R-16 | P2 | 解密准备异常反馈 | 已完成 | 7/7；全量 387/387；review 通过 |
 | 17 | R-17 | P2 | Pillow 打包及能力反馈 | 待实施 | — |
 | 18 | R-18 | P2 | 按真实尺寸计算压缩 DPI | 待实施 | — |
 
@@ -202,3 +202,12 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - Review：`ui_review` 实现及新增夹具 review 通过，独立内存复验 9/9；旧诊断测试补齐 reviewer 建议的 isValid 检查，已销毁线程包装不会阻断对话框清理，专项再验 5/5。
 - 最终全量：`python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：380/380 通过，60.648 秒；日志 `backups/verification/R15-lifecycle-full.log`。最后仅新增测试清理有效性检查后专项 5/5 通过，生产实现未变。临时隔离运行器已移入回收站；排查日志保留。
 - 提交主题：`fix: bind diagnosis results and AST exports to the current request`。
+
+### R-16：解密准备失败与界面恢复（2026-11-09）
+
+- RED：初始六项全部未通过，复现目录权限/设备错误和普通文件占用路径时异常逃逸，真实线程失败后不恢复、无摘要退出和启动失败无兜底。
+- 修复：输出规划和根目录创建统一纳入准备异常处理，逐文件报告失败并发一次批次摘要。UI 保存摘要到真实 QThread.finished 后再释放引用、恢复执行/关闭按钮；无摘要及启动异常均明确报告失败，支持重试。全部失败时不显示打开结果目录，提示用户查看具体失败原因。
+- GREEN：`test_decrypt_failure_recovery.py` 7/7，覆盖模拟权限拒绝/断开设备、真实普通文件路径保全、真实受控错误线程两次重试、无摘要退出、启动异常及真实 qpdf 成功输出内容。
+- Review：`ui_review` 明确通过，独立七项内存验证覆盖目录准备、结果先于线程结束、重复启动、无摘要、构造/启动异常及恢复，无阻断。
+- 全量：`python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：387/387 通过，59.778 秒；日志 `backups/verification/R16-full.log`。
+- 提交主题：`fix: report decryption preparation failures and restore dialog controls`。
