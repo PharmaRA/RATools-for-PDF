@@ -33,8 +33,8 @@
 | 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 7a9903e；6/6；全量 371/371；review 通过 |
 | 15 | R-15 | P2 | 诊断任务结果归属 | 已完成 | a565e7b；9/9；旧诊断 5/5；全量 380/380；review 通过 |
 | 16 | R-16 | P2 | 解密准备异常反馈 | 已完成 | ac4a795；7/7；全量 387/387；review 通过 |
-| 17 | R-17 | P2 | Pillow 打包及能力反馈 | 已完成 | 3/3；全量 390/390；两个真实 EXE 自检通过；二轮 review 通过 |
-| 18 | R-18 | P2 | 按真实尺寸计算压缩 DPI | 待实施 | — |
+| 17 | R-17 | P2 | Pillow 打包及能力反馈 | 已完成 | 96c9f31；3/3；全量 390/390；两个真实 EXE 自检通过；二轮 review 通过 |
+| 18 | R-18 | P2 | 按真实尺寸计算压缩 DPI | 已完成 | 11/11；全量 401/401；review 通过；最终双变体 EXE 自检通过 |
 
 ## 验证与推进记录
 
@@ -222,3 +222,22 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 首轮全量 390 项仅旧结构测试失败：仍要求 bat 内联构建。已更新为检查实际 Python 入口/包模块路径；最终全量 `python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：390/390 通过，63.325 秒，日志 `backups/verification/R17-reviewed-full.log`。
 - 构建与成品自检说明：[Windows 构建验收](../build-verification.md)。本项只验证图片压缩的成品能力，不声称完整 GUI 或真实业务文档资格验证。
 - 提交主题：`fix: include Pillow in releases and verify packaged image compression`。
+
+### R-18：按实际绘制尺寸计算 DPI（2026-11-09）
+
+- RED：初始九项测试中八项未通过（共享图像两个页序子场景），复现一英寸 1200 像素小图选择 300 DPI 仍不压缩、横向/大页面压得过小、共享与旋转/Form 位置忽略实际尺寸。低于目标 DPI 的正常保留场景原通过。
+- 修复：先收集所有页面和同页出现位置的图像绘制矩阵，使用图像两个轴的向量长度计算物理尺寸，再统一处理每个 xref 一次；共享图像采用最大像素需求。两个轴均保留至少目标 DPI 所需像素，保留图像比例且不放大；像素向上取整，无法可靠测量的图像保守跳过。保留 R-05 的透明度与体积下降条件。
+- GREEN：`test_image_placement_dpi.py` 11/11：小图、12×6 英寸横向图、20 英寸大纸张、同/跨页共享和两种页序、非等比拉伸、图像与页面旋转、嵌套 Form、UserUnit、斜切及低 DPI 不放大；原压缩 11/11、透明度 6/6 通过。
+- Review：`pdf_core_review` 明确通过，独立内存 PDF 往返复验 11 项，并验证共享图像后续页测量失败时原始图像流及字典保持不变。
+- 全量：`python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：401/401 通过，65.037 秒，日志 `backups/verification/R18-full.log`。
+- 最终发布包已重建至 `dist/91d691bb7e0c404b96ddbc07fb4c2813/`；主/分析子进程清理保护探针通过，两个 EXE 均自检退出 0。1800×2200 图像压为实际绘制所需的 432×528，PDF 504960→21996 字节；报告在 `backups/verification/R18-final-normal/verification.json` 与 `R18-final-no-update/verification.json`，构建日志 `R18-final-build.log`。
+- 边界：非等比或共享绘制按最高需要保留，较小位置有效 DPI 可能高于设置值；源图低于目标 DPI 时不放大。未声明所有批注外观或任意复杂裁切图像都已纳入测量。
+- 提交主题：`fix: compute image compression DPI from every drawn placement`。
+
+## 最终交付（2026-11-09）
+
+- 原始 R-01 至 R-18 均完成针对性复现、修复、验收和只读 review，各项独立提交。最后全量 401/401，通过安全测试入口完成；验证不等同于真实 Acrobat 证书、任意 PDF 主动内容或所有业务文档资格认证。
+- 最终更新版：`dist/91d691bb7e0c404b96ddbc07fb4c2813/RATools-for-PDF/RATools-for-PDF.exe`。
+- 最终 NoUpdate 版：`dist/91d691bb7e0c404b96ddbc07fb4c2813/RATools-for-PDF-NoUpdate/RATools-for-PDF-NoUpdate.exe`。分发时保留各自完整文件夹及 `_internal`，不能只复制 EXE。
+- 发布包基于当前工作区，包含用户保留的 `theme.py` 本地修改；该修改与 `.playwright-mcp/` 未纳入本轮提交。未向远程推送。
+- 原生崩溃排查用临时运行器及九个遗留测试目录已移入回收站。备份、失败/成功日志和成品验证报告保留，供追溯。

@@ -772,6 +772,7 @@ def _step_image_compression(ctx):
     """
     if "compress_images" not in ctx.options:
         return
+    import math
 
     # 尝试导入 Pillow
     try:
@@ -784,38 +785,60 @@ def _step_image_compression(ctx):
     target_dpi = settings["dpi"]
     quality = settings["quality"]
 
-    max_width_at_target = int(target_dpi * 8.5)  # A4 宽度约 8.27 英寸，放宽到 8.5
-    max_height_at_target = int(target_dpi * 11.7)  # A4 高度约 11.69 英寸
-
     doc = ctx.doc
     compressed_count = 0
     skipped_count = 0
     seen_xrefs = set()
+    requirements = {}
+    unmeasurable = set()
 
     with ctx.prof.phase(f"图像压缩(目标{target_dpi}DPI)"):
+        # Collect all occurrences before modifying a shared object. Matrix column
+        # lengths are the physical image axes, including rotation, stretching,
+        # nested Form transforms and page UserUnit as resolved by MuPDF.
         for page in doc:
             for img in page.get_images(full=True):
                 xref = img[0]
-                # 同一 xref 可能被多页引用，只处理一次（避免重复解码/重编码）
-                if xref in seen_xrefs:
-                    continue
                 seen_xrefs.add(xref)
+                width, height = img[2:4]
                 try:
-                    if _compress_single_image(
-                        doc, xref,
-                        max_width_at_target, max_height_at_target, quality,
-                    ):
-                        compressed_count += 1
-                    else:
-                        skipped_count += 1
+                    for _rect, transform in page.get_image_rects(xref, transform=True):
+                        drawn_width = math.hypot(transform.a, transform.b)
+                        drawn_height = math.hypot(transform.c, transform.d)
+                        if not all(math.isfinite(value) and value > 0 for value in
+                                   (drawn_width, drawn_height, width, height)):
+                            raise ValueError("无法测量图像绘制尺寸")
+                        # Preserve aspect ratio and enough pixels for BOTH axes.
+                        # A stretched image may therefore exceed target DPI on
+                        # its shorter axis; it must not fall below on the longer.
+                        scale = max(drawn_width * target_dpi / (72 * width),
+                                    drawn_height * target_dpi / (72 * height))
+                        prior = requirements.get(xref, (width, height, 0))
+                        requirements[xref] = (width, height, max(prior[2], scale))
                 except Exception:
-                    # 单个图像失败不影响整体处理
+                    unmeasurable.add(xref)
+
+        for xref in seen_xrefs:
+            if xref in unmeasurable or xref not in requirements:
+                skipped_count += 1
+                continue
+            width, height, scale = requirements[xref]
+            if scale >= 1:
+                skipped_count += 1
+                continue
+            try:
+                if _compress_single_image(doc, xref, math.ceil(width * scale),
+                                          math.ceil(height * scale), quality):
+                    compressed_count += 1
+                else:
                     skipped_count += 1
+            except Exception:
+                skipped_count += 1
 
     if compressed_count > 0:
         ctx.mark("图像压缩", count=compressed_count)
     if seen_xrefs and skipped_count > 0:
-        reason = "未超目标尺寸、压缩后无法变小或格式不支持"
+        reason = "未超目标 DPI、压缩后无法变小或无法可靠测量/处理"
         if compressed_count > 0:
             ctx.notes.append(f"图像压缩：另有 {skipped_count} 张跳过（{reason}）")
         else:
@@ -836,6 +859,7 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
     """
     from io import BytesIO
     from PIL import Image, ImageChops
+    import math
     import zlib
 
     # "压缩后更小才替换"的比较基准必须是 PDF 中实际存储的流长度：
@@ -883,7 +907,7 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
 
     width_px, height_px = img_pil.size
 
-    # 缩放比例：超过目标 DPI 下的 A4 尺寸才缩，只缩小不放大
+    # Limits are derived from the largest measured placement; never upscale.
     scale_x = max_width / width_px if width_px > max_width else 1.0
     scale_y = max_height / height_px if height_px > max_height else 1.0
     scale = min(scale_x, scale_y, 1.0)
@@ -891,7 +915,7 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
         return False
 
     # 重采样（使用 LANCZOS 高质量算法）
-    img_resized = img_pil.resize((max(1, int(width_px * scale)), max(1, int(height_px * scale))), Image.Resampling.LANCZOS)
+    img_resized = img_pil.resize((max(1, math.ceil(width_px * scale)), max(1, math.ceil(height_px * scale))), Image.Resampling.LANCZOS)
     alpha_bytes = None
     if 'A' in img_resized.getbands():
         alpha = img_resized.getchannel('A')
