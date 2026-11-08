@@ -124,7 +124,7 @@ class MainController(QObject):
 
         action_label 用于拼接提示文案，如 "移除队列项" → "请等待当前批量处理结束后再移除队列项。"
         """
-        if self.worker and self.worker.isRunning():
+        if self.worker is not None:
             self.view.show_warning_message("⚠️ 正在处理中", f"请等待当前批量处理结束后再{action_label}。")
             return False
         if self._is_precheck_running():
@@ -132,6 +132,9 @@ class MainController(QObject):
             return False
         if self._is_detection_running():
             self.view.show_warning_message("⚠️ 正在检测", f"请等待当前检测结束后再{action_label}。")
+            return False
+        if self.io.is_running():
+            self.view.show_warning_message("⚠️ 正在导入导出", f"请等待当前导入导出结束后再{action_label}。")
             return False
         return True
 
@@ -276,7 +279,10 @@ class MainController(QObject):
             self.add_files(file_paths)
 
     def add_files(self, paths):
-        # 批量处理运行中允许追加文件（历史行为），只挡预检与检测
+        # 批量处理运行中允许追加文件（历史行为），预检、检测及 IO 期间冻结队列。
+        if self.io.is_running():
+            self.view.show_warning_message("⚠️ 正在导入导出", "请等待当前导入导出结束后再添加文件。")
+            return
         if self._is_precheck_running():
             self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检结束后再添加文件。")
             return
@@ -419,11 +425,7 @@ class MainController(QObject):
             self.view.btn_skip_current.setEnabled(False)
             return
 
-        if self._is_precheck_running():
-            self.view.show_warning_message("⚠️ 正在预检", "请等待当前预检完成后再开始处理。")
-            return
-        if self._is_detection_running():
-            self.view.show_warning_message("⚠️ 正在检测", "请等待当前检测完成后再开始处理。")
+        if not self.ensure_idle("开始处理"):
             return
 
         if not self.loaded_files:
@@ -474,8 +476,6 @@ class MainController(QObject):
         overwrite_original = overwrite_cb.isChecked() if overwrite_cb else False
         processing_mode = self.view.get_processing_mode()
         max_workers = self._get_processing_worker_count()
-        self.processing_parallel_mode = max_workers > 1
-        self.processing_worker_count = max_workers
         out_dir = ""
         common_base = ""
 
@@ -496,9 +496,17 @@ class MainController(QObject):
                 return
 
             out_dir = os.path.join(user_selected_dir, "RATools_Output")
-            self.last_output_dir = out_dir
 
             common_base = common_base_dir(processing_files)
+
+        # Modal prompts may dispatch another task. Recheck before taking
+        # ownership or changing shared batch state.
+        if not self.ensure_idle("开始处理"):
+            return
+        self.processing_parallel_mode = max_workers > 1
+        self.processing_worker_count = max_workers
+        if out_dir:
+            self.last_output_dir = out_dir
 
         self.view.btn_start.setEnabled(True)
         self.view.btn_start.setText("■ 停止处理")
@@ -540,21 +548,34 @@ class MainController(QObject):
         self._refresh_processing_hint()
         self.processing_timer.start()
 
-        self.worker = ProcessWorker(
-            processing_files,
-            selected_options,
-            out_dir,
-            common_base,
-            overwrite_original,
-            max_workers=max_workers,
-            processing_mode=processing_mode,
-            compression_settings=self.view.get_compression_settings(),
-        )
-        self.worker.progress.connect(self.update_progress)
-        self.worker.structured_progress.connect(self.record_process_log_event)
-        self.worker.finished_all.connect(self.processing_finished)
-        self.worker.error.connect(self.processing_error)
-        self.worker.start()
+        try:
+            self.worker = ProcessWorker(
+                processing_files,
+                selected_options,
+                out_dir,
+                common_base,
+                overwrite_original,
+                max_workers=max_workers,
+                processing_mode=processing_mode,
+                compression_settings=self.view.get_compression_settings(),
+            )
+            self.worker.progress.connect(self.update_progress)
+            self.worker.structured_progress.connect(self.record_process_log_event)
+            self.worker.finished_all.connect(self.processing_finished)
+            self.worker.error.connect(self.processing_error)
+            self.worker.finished.connect(self._on_processing_thread_finished)
+            self.view.set_task_busy("processing", True)
+            self.worker.start()
+        except Exception as exc:
+            self._on_processing_thread_finished()
+            self.processing_error(str(exc))
+
+    def _on_processing_thread_finished(self):
+        worker = self.worker
+        self.worker = None
+        self.view.set_task_busy("processing", False)
+        if worker is not None:
+            worker.deleteLater()
 
     def _prompt_skip_signed_files(self, processing_files):
         """处理前检测已签名文件，并询问用户如何处理。

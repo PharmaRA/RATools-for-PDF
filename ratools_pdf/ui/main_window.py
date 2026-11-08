@@ -964,6 +964,15 @@ class MainWindow(QMainWindow):
             self.btn_precheck.show()
         self.refresh_selection_summary()
 
+    def set_task_busy(self, task_kind, busy):
+        tasks = set(getattr(self, "_busy_tasks", set()))
+        if busy:
+            tasks.add(task_kind)
+        else:
+            tasks.discard(task_kind)
+        self._busy_tasks = tasks
+        self.refresh_selection_summary()
+
     def refresh_selection_summary(self):
         selected_count = len([
             opt for opt in self.get_selected_options()
@@ -988,24 +997,31 @@ class MainWindow(QMainWindow):
         self.info_label.setText(f"{total_files} 个文件 · {selected_count} 条规则 · {preset_text}")
 
         is_prechecking = hasattr(self, "btn_precheck") and self.btn_precheck.property("precheckMode") is True
+        busy_tasks = getattr(self, "_busy_tasks", set())
+        is_processing = self.btn_start.property("stopMode") is True
+        other_busy = bool(busy_tasks - {"processing"})
+        # The result signal may precede thread completion. Keep the controls
+        # locked through that final interval as well.
+        finishing_processing = "processing" in busy_tasks and not is_processing
 
-        if is_prechecking:
+        if is_prechecking or other_busy or finishing_processing:
+            busy_hint = "任务进行中，请稍候"
             self.btn_start.setEnabled(False)
-            self.btn_start.setToolTip("预检进行中，请稍候")
+            self.btn_start.setToolTip(busy_hint)
             self.btn_precheck.setEnabled(False)
-            self.btn_precheck.setToolTip("预检进行中，请稍候")
+            self.btn_precheck.setToolTip(busy_hint)
             if hasattr(self, "btn_retry_failed"):
                 self.btn_retry_failed.setEnabled(False)
                 self.btn_retry_failed.hide()
-                self.btn_retry_failed.setToolTip("预检进行中，请稍候")
+                self.btn_retry_failed.setToolTip(busy_hint)
             if hasattr(self, "btn_apply_precheck"):
                 self.btn_apply_precheck.setEnabled(False)
                 self.btn_apply_precheck.hide()
-                self.btn_apply_precheck.setToolTip("预检进行中，请稍候")
+                self.btn_apply_precheck.setToolTip(busy_hint)
             if hasattr(self, "btn_process_precheck_suggested"):
                 self.btn_process_precheck_suggested.setEnabled(False)
                 self.btn_process_precheck_suggested.hide()
-                self.btn_process_precheck_suggested.setToolTip("预检进行中，请稍候")
+                self.btn_process_precheck_suggested.setToolTip(busy_hint)
         elif self.btn_start.property("stopMode") is not True:
             can_start = (total_files > 0 and selected_count > 0)
             self.btn_start.setEnabled(can_start)
@@ -1065,6 +1081,13 @@ class MainWindow(QMainWindow):
                 self.btn_process_precheck_suggested.setEnabled(False)
                 self.btn_process_precheck_suggested.hide()
                 self.btn_process_precheck_suggested.setToolTip("处理中无法仅处理建议文件")
+
+        busy = bool(busy_tasks) or is_prechecking or is_processing
+        for name in ("btn_bookmark_io_wizard", "btn_link_io_wizard",
+                     "btn_detect_annotations", "btn_detect_broken_refs", "btn_clear"):
+            getattr(self, name).setEnabled(total_files > 0 and not busy)
+        for name in ("btn_add_files", "add_folder_btn", "drop_zone"):
+            getattr(self, name).setEnabled(not (is_prechecking or other_busy or finishing_processing))
 
         overwrite_cb = self.all_checkboxes.get("覆盖原始文件 (不推荐)")
         if overwrite_cb and overwrite_cb.isChecked():

@@ -21,7 +21,7 @@ class PrecheckController(QObject):
         self.precheck_result_current = False
 
     def is_running(self):
-        return bool(self.precheck_worker and self.precheck_worker.isRunning())
+        return self.precheck_worker is not None
 
     def mark_stale(self):
         """队列变化或处理完成后，上一轮预检结果不再可信。"""
@@ -31,13 +31,7 @@ class PrecheckController(QObject):
 
     def start_precheck(self):
         host, view = self.host, self.view
-        if host.worker and host.worker.isRunning():
-            view.show_warning_message("⚠️ 正在处理", "批量处理进行中，无法执行预检。")
-            return
-        if host._is_detection_running():
-            view.show_warning_message("⚠️ 正在检测", "检测进行中，请稍候再执行预检。")
-            return
-        if self.is_running():
+        if not host.ensure_idle("执行预检"):
             return
         if not host.loaded_files:
             view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
@@ -58,13 +52,25 @@ class PrecheckController(QObject):
         view.btn_precheck.setProperty("precheckMode", True)
         view.btn_start.setEnabled(False)
 
-        self.precheck_worker = PreCheckWorker(self.precheck_files)
-        self.precheck_worker.progress.connect(host.update_progress)
-        self.precheck_worker.result_ready.connect(self._record_precheck_result)
-        self.precheck_worker.finished_precheck.connect(self.precheck_finished)
-        self.precheck_worker.error_precheck.connect(self.precheck_error)
-        self.precheck_worker.finished.connect(self.precheck_worker.deleteLater)
-        self.precheck_worker.start()
+        try:
+            self.precheck_worker = PreCheckWorker(self.precheck_files)
+            self.precheck_worker.progress.connect(host.update_progress)
+            self.precheck_worker.result_ready.connect(self._record_precheck_result)
+            self.precheck_worker.finished_precheck.connect(self.precheck_finished)
+            self.precheck_worker.error_precheck.connect(self.precheck_error)
+            self.precheck_worker.finished.connect(self._on_thread_finished)
+            view.set_task_busy("precheck", True)
+            self.precheck_worker.start()
+        except Exception as exc:
+            self._on_thread_finished()
+            self.precheck_error(str(exc))
+
+    def _on_thread_finished(self):
+        worker = self.precheck_worker
+        self.precheck_worker = None
+        self.view.set_task_busy("precheck", False)
+        if worker is not None:
+            worker.deleteLater()
 
     def _record_precheck_result(self, row):
         self.last_precheck_results.append(dict(row))
@@ -123,7 +129,6 @@ class PrecheckController(QObject):
         self.view.btn_precheck.setProperty("precheckMode", False)
         self.view.btn_start.setEnabled(True)
         self.precheck_files = []
-        self.precheck_worker = None
 
     def precheck_finished(self, summary):
         self.host.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"

@@ -22,11 +22,17 @@ class IOController(QObject):
         self.view = view
         self.io_worker = None
 
+    def is_running(self):
+        # Ownership includes the interval between the result and QThread.finished.
+        return self.io_worker is not None
+
     def _loaded_files_common_base(self):
         return common_base_dir(self.host.loaded_files)
 
     def handle_io_wizard(self, default_data_kind):
         host, view = self.host, self.view
+        if not host.ensure_idle("执行导入导出"):
+            return
         if not host.loaded_files:
             view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
             return
@@ -57,6 +63,8 @@ class IOController(QObject):
     def handle_io_action(self, action_type, dir_path=None, common_base=None, confirmed=False,
                          link_scope="all", link_mode="overwrite"):
         host, view = self.host, self.view
+        if not host.ensure_idle("执行导入导出"):
+            return
         if not host.loaded_files:
             view.show_warning_message("⚠️ 警告", "请先添加目标 PDF 文件！")
             return
@@ -81,21 +89,37 @@ class IOController(QObject):
                 view.show_warning_message("⚠️ 未找到数据文件", f"所选目录中没有匹配的 {data_type} 文件。")
                 return
 
-        out_dir = None
-        if not is_export:
-            first_file = Path(host.loaded_files[0])
-            out_dir_path = first_file.parent / f"RATools_{action_name}完成"
-            out_dir_path.mkdir(exist_ok=True)
-            out_dir = str(out_dir_path)
+        # A directory picker runs a nested event loop; recheck before writing.
+        if not host.ensure_idle("执行导入导出"):
+            return
+        try:
+            out_dir = None
+            if not is_export:
+                first_file = Path(host.loaded_files[0])
+                out_dir_path = first_file.parent / f"RATools_{action_name}完成"
+                out_dir_path.mkdir(exist_ok=True)
+                out_dir = str(out_dir_path)
 
-        self.io_worker = IOActionWorker(
-            action_types, host.loaded_files, dir_path, out_dir, common_base,
-            link_scope=link_scope, link_mode=link_mode,
-        )
-        self.io_worker.progress.connect(host.update_progress)
-        self.io_worker.finished_action.connect(self.on_io_action_finished)
-        self.io_worker.error_action.connect(self.on_io_action_error)
-        self.io_worker.start()
+            self.io_worker = IOActionWorker(
+                action_types, host.loaded_files, dir_path, out_dir, common_base,
+                link_scope=link_scope, link_mode=link_mode,
+            )
+            self.io_worker.progress.connect(host.update_progress)
+            self.io_worker.finished_action.connect(self.on_io_action_finished)
+            self.io_worker.error_action.connect(self.on_io_action_error)
+            self.io_worker.finished.connect(self._on_thread_finished)
+            view.set_task_busy("io", True)
+            self.io_worker.start()
+        except Exception as exc:
+            self._on_thread_finished()
+            self.on_io_action_error(str(exc))
+
+    def _on_thread_finished(self):
+        worker = self.io_worker
+        self.io_worker = None
+        self.view.set_task_busy("io", False)
+        if worker is not None:
+            worker.deleteLater()
 
     def on_io_action_finished(self, result_msg):
         self.host.process_logs += f"\n{result_msg}\n"

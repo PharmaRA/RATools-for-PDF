@@ -29,21 +29,14 @@ class DetectionController(QObject):
         self.last_detection_results = []
 
     def is_running(self):
-        return bool(self.detection_worker and self.detection_worker.isRunning())
+        return self.detection_worker is not None
 
     def start_detection(self, ui_kind):
         host, view = self.host, self.view
         detection_kind = self.KIND_MAP.get(ui_kind, "annotation")
         kind_title = self.KIND_TITLES[detection_kind]
 
-        if host.worker and host.worker.isRunning():
-            view.show_warning_message("⚠️ 正在处理", f"批量处理进行中，无法执行{kind_title}。")
-            return
-        if host._is_precheck_running():
-            view.show_warning_message("⚠️ 正在预检", f"预检进行中，无法执行{kind_title}。")
-            return
-        if self.is_running():
-            view.show_warning_message("⚠️ 正在检测", "已有检测任务进行中，请稍候。")
+        if not host.ensure_idle(f"执行{kind_title}"):
             return
         if not host.loaded_files:
             view.show_warning_message("⚠️ 警告", "请至少添加一个 PDF 文件！")
@@ -56,17 +49,30 @@ class DetectionController(QObject):
         view.btn_detect_annotations.setEnabled(False)
         view.btn_detect_broken_refs.setEnabled(False)
 
-        self.detection_worker = DetectionWorker(self.detection_files, detection_kind)
-        self.detection_worker.progress.connect(host.update_progress)
-        self.detection_worker.result_ready.connect(self._record_detection_result)
-        self.detection_worker.finished_detection.connect(
-            lambda summary, results, title=kind_title: self.detection_finished(summary, results, title)
-        )
-        self.detection_worker.error_detection.connect(
-            lambda error_msg, title=kind_title: self.detection_error(error_msg, title)
-        )
-        self.detection_worker.finished.connect(self.detection_worker.deleteLater)
-        self.detection_worker.start()
+        try:
+            self.detection_worker = DetectionWorker(self.detection_files, detection_kind)
+            self.detection_worker.progress.connect(host.update_progress)
+            self.detection_worker.result_ready.connect(self._record_detection_result)
+            self.detection_worker.finished_detection.connect(
+                lambda summary, results, title=kind_title: self.detection_finished(summary, results, title)
+            )
+            self.detection_worker.error_detection.connect(
+                lambda error_msg, title=kind_title: self.detection_error(error_msg, title)
+            )
+            self.detection_worker.finished.connect(self._on_thread_finished)
+            view.set_task_busy("detection", True)
+            self.detection_worker.start()
+        except Exception as exc:
+            self._on_thread_finished()
+            self.detection_error(str(exc), kind_title)
+
+    def _on_thread_finished(self):
+        worker = self.detection_worker
+        self.detection_worker = None
+        self._restore_detection_buttons()
+        self.view.set_task_busy("detection", False)
+        if worker is not None:
+            worker.deleteLater()
 
     def _record_detection_result(self, row):
         self.last_detection_results.append(dict(row))
@@ -76,9 +82,7 @@ class DetectionController(QObject):
         self.view.btn_detect_broken_refs.setEnabled(True)
 
     def _reset_state(self):
-        self._restore_detection_buttons()
         self.detection_files = []
-        self.detection_worker = None
 
     def detection_finished(self, summary, results, kind_title):
         self.host.process_logs += f"\n{'=' * 56}\n{kind_title}结束\n{summary}\n{'=' * 56}\n"

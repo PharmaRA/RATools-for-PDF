@@ -26,8 +26,8 @@
 | 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 785f5b3；10/10；全量 312/312；review 通过 |
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 3684dbd；11/11；原签名 5/5；全量 323/323；review 通过 |
 | 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | e02b45c；8/8；全量 331/331；review 通过 |
-| 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | 7/7；直接回归 22/22；全量 338/338；review 通过 |
-| 11 | R-11 | P1 | IO 忙碌互斥 | 待实施 | — |
+| 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | d3af2c0；7/7；直接回归 22/22；全量 338/338；review 通过 |
+| 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 13/13；全量 351/351；二轮 review 通过 |
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 待实施 | — |
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 待实施 | — |
 | 14 | R-14 | P2 | 过期预检拦截 | 待实施 | — |
@@ -149,3 +149,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：338/338 通过，53.024 秒；日志 `backups/verification/R10-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: reap processing jobs on scheduler failures and drain results before join`。
 - 边界：大消息测试验证真实 IPC 机制，不代表已证明生产日志一定达到该大小；本项管理已登记的 Python 子进程，未实现或验证 qpdf 后代进程树终止。
+
+### R-11：IO 与后台任务互斥（2026-11-09）
+
+- RED：初始五组测试全部未通过，复现其他任务运行时仍创建 IO、IO 运行时队列可操作、结果先于线程退出时按钮提前启用及启动异常逃逸。
+- 修复：主处理/IO/预检/检测共用忙碌守卫；IO 向导及执行入口均受保护，队列增删清空在 IO 期间受保护。视图保留任务忙碌状态，普通刷新不会提前启用入口；控制器保留线程引用至 QThread.finished 后再释放。主处理原有运行中追加行为保留，运行队列使用 R-09 快照。
+- 准备与启动异常经统一错误反馈和状态恢复；IO 目录选择后重检忙碌。预检/检测的线程启动失败补充 RED→GREEN。
+- Review：首轮指出主处理模态提示后缺少第二次守卫；新增真实方法回归复现后，在全部模态交互之后、共享状态赋值及创建 worker 之前重检，RED→GREEN。`controllers_review` 二轮明确通过。
+- GREEN：`test_io_busy.py` 13/13；含 IO/主处理/预检/检测的受控真实 QThread 成功和失败、结果与退出分离、重复启动、队列保护、目录准备和线程启动失败、双向目录选择重入。主处理回归使用实际 QObject 接收槽，避免非 Qt 夹具的连接限制。
+- 初轮全量 348/348；最终全量：`python -X utf8 -B scripts/run_tests_safely.py`：351/351 通过，55.205 秒；日志 `backups/verification/R11-reviewed-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: serialize IO and processing tasks until worker threads finish`。

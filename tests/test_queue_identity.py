@@ -29,6 +29,7 @@ class QueueIdentityTests(unittest.TestCase):
         self.addCleanup(self.tree.close)
         self.host = SimpleNamespace(
             loaded_files=[], folder_nodes={}, file_nodes={},
+            io=SimpleNamespace(is_running=lambda: False),
             _is_precheck_running=lambda:False, _is_detection_running=lambda:False,
             _mark_precheck_stale=Mock(),
             view=SimpleNamespace(tree=self.tree,show_info_message=Mock(),show_warning_message=Mock(),
