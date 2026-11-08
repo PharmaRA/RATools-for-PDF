@@ -4,6 +4,7 @@
 """
 
 import os
+import tempfile
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -30,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 from ratools_pdf.pdf import qpdf
+from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
+from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 
@@ -128,20 +131,33 @@ class DecryptWorker(QThread):
         success_cnt = 0
         fail_cnt = 0
         total = len(self.tasks)
+        inputs = [path for _, path in self.tasks]
+        common_base = common_base_dir(inputs)
+        plan = []
+        try:
+            for in_path in inputs:
+                name_no_ext, ext = os.path.splitext(os.path.basename(in_path))
+                out_name = f"{name_no_ext}{self.suffix}{ext}" if self.suffix else os.path.basename(in_path)
+                subdir = relative_source_directory(in_path, common_base)
+                plan.append((in_path, os.path.join(self.output_dir, subdir, out_name)))
+            validate_output_plan(plan, inputs, allow_in_place=not self.suffix)
+        except Exception as exc:
+            for row_idx, _ in self.tasks:
+                self.file_finished.emit(row_idx, False, str(exc))
+            self.finished_all.emit(0, total, self.output_dir)
+            return
         os.makedirs(self.output_dir, exist_ok=True)
 
-        for i, (row_idx, in_path) in enumerate(self.tasks):
+        for i, ((row_idx, in_path), (_, out_path)) in enumerate(zip(self.tasks, plan)):
             base_name = os.path.basename(in_path)
-            name_no_ext, ext = os.path.splitext(base_name)
             self.progress.emit(f"正在解密 ({i+1}/{total}): {base_name}...")
-
-            out_name = f"{name_no_ext}{self.suffix}{ext}" if self.suffix else base_name
-            out_path = os.path.join(self.output_dir, out_name)
-
-            is_same = os.path.abspath(in_path) == os.path.abspath(out_path)
-            target_out = (out_path + ".tmp.pdf") if is_same else out_path
-
+            staging_dir = None
             try:
+                check_unlinked_path(out_path)
+                parent_dir = os.path.dirname(os.path.abspath(out_path))
+                os.makedirs(parent_dir, exist_ok=True)
+                staging_dir = tempfile.mkdtemp(prefix='.ratools-decrypt-', dir=parent_dir)
+                target_out = os.path.join(staging_dir, 'result.pdf')
                 res = qpdf.decrypt_pdf(
                     input_pdf=in_path,
                     output_pdf=target_out,
@@ -152,23 +168,22 @@ class DecryptWorker(QThread):
                     object_streams="generate" if self.object_streams else None,
                 )
                 if res.is_success:
-                    if is_same:
-                        os.replace(target_out, out_path)
+                    check_unlinked_path(out_path)
+                    os.replace(target_out, out_path)
                     success_cnt += 1
                     self.file_finished.emit(row_idx, True, "解密成功")
                 else:
-                    if is_same and os.path.exists(target_out):
-                        os.remove(target_out)
                     fail_cnt += 1
                     self.file_finished.emit(row_idx, False, res.stderr or "解密失败")
             except Exception as e:
-                if is_same and os.path.exists(target_out):
-                    try:
-                        os.remove(target_out)
-                    except Exception:
-                        pass
                 fail_cnt += 1
                 self.file_finished.emit(row_idx, False, str(e))
+            finally:
+                if staging_dir:
+                    try:
+                        recycle_owned_path(staging_dir, staging_dir)
+                    except Exception:
+                        self.progress.emit(f"临时文件未能移入回收站，已保留于: {staging_dir}")
 
         self.finished_all.emit(success_cnt, fail_cnt, self.output_dir)
 

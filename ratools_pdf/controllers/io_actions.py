@@ -1,30 +1,10 @@
 import os
 import re
 
-
-def common_base_dir(file_paths, fallback=""):
-    """求一组文件所在目录的公共根；跨盘符等场景返回 fallback。"""
-    try:
-        dirs = [os.path.dirname(os.path.abspath(p)) for p in file_paths]
-        return os.path.commonpath(dirs)
-    except ValueError:
-        return fallback
-
+from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory
 
 def _safe_relative_subdir(file_path, common_base):
-    if not common_base:
-        return ''
-    try:
-        rel_dir = os.path.relpath(os.path.dirname(os.path.abspath(file_path)), common_base)
-    except ValueError:
-        return ''
-    rel_norm = os.path.normpath(rel_dir)
-    if rel_norm in ('.', ''):
-        return ''
-    if rel_norm.startswith('..') or os.path.isabs(rel_norm):
-        safe_leaf = os.path.basename(os.path.dirname(os.path.abspath(file_path))) or 'external'
-        return os.path.join('_external', safe_leaf)
-    return rel_norm
+    return relative_source_directory(file_path, common_base)
 
 
 def _normalized_ectd_name(base_name, fallback_index):

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from ratools_pdf.pdf import qpdf
+from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 
@@ -56,6 +57,8 @@ class PageAssemblyWorker(QThread):
     def run(self):
         try:
             if self.mode in ("merge", "extract"):
+                validate_output_plan([(self.specs[0].file_path, self.output_path)],
+                                     [spec.file_path for spec in self.specs])
                 self.progress.emit("正在装配页面...")
                 res = qpdf.assemble_pages(
                     specs=self.specs,
@@ -76,9 +79,17 @@ class PageAssemblyWorker(QThread):
 
             elif self.mode == "split":
                 self.progress.emit("正在执行拆分...")
+                inputs = [spec.file_path for spec in self.specs]
+                common_base = common_base_dir(inputs)
+                plan = []
                 for spec in self.specs:
                     base_name = os.path.splitext(os.path.basename(spec.file_path))[0]
-                    pattern = os.path.join(self.output_path, f"{base_name}_part_%d.pdf")
+                    subdir = relative_source_directory(spec.file_path, common_base)
+                    pattern = os.path.join(self.output_path, subdir, f"{base_name}_part_%d.pdf")
+                    plan.append((spec.file_path, pattern))
+                validate_output_plan(plan, inputs, patterns=True)
+                for spec, (_, pattern) in zip(self.specs, plan):
+                    os.makedirs(os.path.dirname(pattern), exist_ok=True)
                     qpdf.split_pages(
                         input_pdf=spec.file_path,
                         output_pattern=pattern,

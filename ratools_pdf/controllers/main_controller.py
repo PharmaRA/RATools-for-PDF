@@ -444,18 +444,9 @@ class MainController(QObject):
             return
 
         if "filename_ectd_format" in selected_options:
-            rename_pairs, collisions = _collect_ectd_rename_plan(processing_files)
-
-            if collisions:
-                details = "\n".join([
-                    f"{name}: {len(paths)} files"
-                    for name, paths in sorted(collisions.items())
-                ])
-                self.view.show_error_message(
-                    "Filename collision",
-                    f"eCTD formatting would generate duplicate output names; processing was stopped:\n{details}",
-                )
-                return
+            # Check final-path collisions after choosing the output root; equal names
+            # in distinct retained source directories are valid.
+            rename_pairs, _ = _collect_ectd_rename_plan(processing_files)
 
             if rename_pairs:
                 details = "\n".join([

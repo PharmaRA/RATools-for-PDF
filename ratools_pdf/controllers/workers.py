@@ -15,6 +15,7 @@ from ratools_pdf.controllers.io_actions import (
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
+from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
@@ -51,7 +52,7 @@ class ProcessWorker(QThread):
         self.processing_mode = str(processing_mode or "smart").lower()
         self.compression_settings = compression_settings
         self.output_dir = output_dir
-        self.common_base = common_base
+        self.common_base = common_base or common_base_dir(files)
         self.overwrite_original = overwrite_original
         self.max_workers = max(1, int(max_workers or 1))
         self._stop_requested = False
@@ -72,6 +73,14 @@ class ProcessWorker(QThread):
             self._skip_requested_files.add(os.path.normcase(os.path.normpath(file_path)))
 
     def run(self):
+        try:
+            rename_ectd = "filename_ectd_format" in self.options
+            pairs = [(path, self._build_output_path(i, path, rename_ectd)[1])
+                     for i, path in enumerate(self.files)]
+            validate_output_plan(pairs, self.files, allow_in_place=self.overwrite_original)
+        except Exception as exc:
+            self.error.emit(str(exc))
+            return
         if self.max_workers <= 1:
             self._run_serial()
         else:
@@ -86,18 +95,8 @@ class ProcessWorker(QThread):
         if self.overwrite_original:
             return base_name, file_path
 
-        if self.common_base:
-            file_dir = os.path.dirname(os.path.abspath(file_path))
-            rel_dir = os.path.relpath(file_dir, self.common_base)
-            if rel_dir == '.':
-                target_dir = self.output_dir
-            else:
-                target_dir = os.path.join(self.output_dir, rel_dir)
-        else:
-            target_dir = self.output_dir
-
-        check_unlinked_path(target_dir)
-        os.makedirs(target_dir, exist_ok=True)
+        rel_dir = relative_source_directory(file_path, self.common_base)
+        target_dir = os.path.join(self.output_dir, rel_dir) if rel_dir else self.output_dir
         return base_name, os.path.join(target_dir, base_name)
 
     def _start_process_task(self, index, file_path, rename_ectd):
@@ -108,6 +107,7 @@ class ProcessWorker(QThread):
         if not self.overwrite_original and same_path:
             raise ValueError("输出路径与输入文件相同，请选择其他输出目录或明确启用覆盖原文件")
         # Same filesystem as the final destination, so a successful publish is atomic.
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         staging_dir = tempfile.mkdtemp(prefix=".ratools-task-", dir=os.path.dirname(os.path.abspath(out_path)))
         work_path = os.path.join(staging_dir, "result.pdf")
         now = datetime.now().strftime('%H:%M:%S')
@@ -660,12 +660,28 @@ class IOActionWorker(QThread):
         self.files = list(files)
         self.target_dir = target_dir
         self.output_dir = output_dir
-        self.common_base = common_base
+        self.common_base = common_base or common_base_dir(self.files)
         self.link_scope = "external" if link_scope == "external" else "all"
         self.link_mode = "incremental" if link_mode == "incremental" else "overwrite"
 
     def run(self):
         try:
+            pairs = []
+            for file_path in self.files:
+                file_outputs = set()
+                for action_type in self.action_types:
+                    meta = _io_action_metadata(action_type)
+                    data_path, out_pdf = _build_io_paths_for_file(
+                        file_path, meta['data_kind'], self.target_dir, self.output_dir, self.common_base,
+                    )
+                    destination = data_path if meta['is_export'] else out_pdf
+                    if not destination:
+                        raise ValueError('导入书签或链接时缺少输出目录')
+                    # Several import actions intentionally form one pipeline per PDF.
+                    if destination not in file_outputs:
+                        pairs.append((file_path, destination))
+                        file_outputs.add(destination)
+            validate_output_plan(pairs, self.files)
             for row_idx, file_path in enumerate(self.files):
                 base_name = os.path.basename(file_path)
 
