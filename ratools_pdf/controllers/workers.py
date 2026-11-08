@@ -192,6 +192,17 @@ class ProcessWorker(QThread):
         except Exception:
             pass
 
+    def _fail_process_task(self, task, message):
+        try:
+            if "proc" in task:
+                self._terminate_process_task(task)
+        except Exception as exc:
+            message += f"；进程收尾异常: {exc}"
+        finally:
+            if "parent_conn" in task:
+                self._close_task_connection(task)
+        self._finish_process_task(task, False, message)
+
     def _finish_process_task(self, task, success, msg):
         out_path = task["out_path"]
         if success:
@@ -262,6 +273,8 @@ class ProcessWorker(QThread):
         )
 
     def _run_serial(self):
+        task = None
+        failure = None
         try:
             started_at = datetime.now()
             success_count = 0
@@ -273,9 +286,10 @@ class ProcessWorker(QThread):
                     stopped = True
                     break
 
+                # Keep a retryable identity even if preparation/spawn fails.
+                task = {"file_path": file_path, "out_path": ""}
+                task["out_path"] = self._build_output_path(i, file_path, rename_ectd)[1]
                 task = self._start_process_task(i, file_path, rename_ectd)
-                base_name = task["base_name"]
-                out_path = task["out_path"]
                 parent_conn = task["parent_conn"]
                 proc = task["proc"]
 
@@ -298,29 +312,45 @@ class ProcessWorker(QThread):
                     if parent_conn.poll(1.0):
                         break
 
-                self._join_process_task(task)
                 self._can_skip_current = False
                 self._current_file_path = ""
 
                 if stopped:
                     self._emit_stopped_task(task)
                     self._close_task_connection(task)
+                    task = None
                     break
 
                 if skipped_current:
                     self._emit_skipped_task(task)
                     self._close_task_connection(task)
+                    task = None
                     continue
 
+                # Drain the pipe before joining: send() may still be blocked on
+                # a result larger than the OS pipe buffer even after poll().
                 if parent_conn.poll():
                     success, msg = parent_conn.recv()
                 else:
                     success, msg = False, "处理进程无返回结果"
-                parent_conn.close()
+                self._join_process_task(task)
 
                 if self._finish_process_task(task, success, msg):
                     success_count += 1
+                self._close_task_connection(task)
+                task = None
 
+        except Exception as exc:
+            failure = str(exc)
+        finally:
+            self._can_skip_current = False
+            self._current_file_path = ""
+            if task is not None:
+                self._fail_process_task(task, f"批处理异常: {failure or '处理中断'}")
+
+        if failure is not None:
+            self.error.emit(failure)
+        else:
             if stopped:
                 summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
             else:
@@ -329,23 +359,25 @@ class ProcessWorker(QThread):
             summary += f" 总耗时 {elapsed_sec}s。"
             self.finished_all.emit(summary)
 
-        except Exception as e:
-            self.error.emit(str(e))
-
     def _run_parallel(self):
+        running = {}
+        starting_task = None
+        failure = None
         try:
             started_at = datetime.now()
             success_count = 0
             rename_ectd = "filename_ectd_format" in self.options
             stopped = False
             next_index = 0
-            running = {}
 
             while next_index < len(self.files) or running:
                 while not self._stop_requested and next_index < len(self.files) and len(running) < self.max_workers:
                     file_path = self.files[next_index]
+                    starting_task = {"file_path": file_path, "out_path": ""}
+                    starting_task["out_path"] = self._build_output_path(next_index, file_path, rename_ectd)[1]
                     task = self._start_process_task(next_index, file_path, rename_ectd)
                     running[next_index] = task
+                    starting_task = None
                     next_index += 1
 
                 if self._stop_requested:
@@ -367,7 +399,7 @@ class ProcessWorker(QThread):
                         self._close_task_connection(task)
                         running.pop(task_id)
 
-                finished_keys = []
+                completed_any = False
                 for key, task in list(running.items()):
                     parent_conn = task["parent_conn"]
                     proc = task["proc"]
@@ -378,24 +410,29 @@ class ProcessWorker(QThread):
                     else:
                         continue
 
-                    proc.join(timeout=2)
-                    if proc.is_alive():
-                        try:
-                            proc.kill()
-                        except Exception:
-                            pass
-                        proc.join(timeout=1)
-                    self._close_task_connection(task)
+                    self._join_process_task(task)
                     if self._finish_process_task(task, success, msg):
                         success_count += 1
-                    finished_keys.append(key)
-
-                for key in finished_keys:
+                    self._close_task_connection(task)
                     running.pop(key, None)
+                    completed_any = True
 
-                if running and not finished_keys:
+                if running and not completed_any:
                     self.msleep(100)
 
+        except Exception as exc:
+            failure = str(exc)
+        finally:
+            for task in running.values():
+                self._fail_process_task(task, f"批处理异常: {failure or '处理中断'}")
+            if starting_task is not None:
+                self._fail_process_task(starting_task, f"启动处理失败: {failure or '处理中断'}")
+
+        # Only release the UI after child processes, connections and stages have
+        # been handled and every started/failed-to-start file has a terminal state.
+        if failure is not None:
+            self.error.emit(failure)
+        else:
             if stopped:
                 summary = f"任务已停止。已成功处理 {success_count} / {len(self.files)} 个文件。"
             else:
@@ -403,10 +440,6 @@ class ProcessWorker(QThread):
             elapsed_sec = int((datetime.now() - started_at).total_seconds())
             summary += f" 总耗时 {elapsed_sec}s。"
             self.finished_all.emit(summary)
-
-        except Exception as e:
-            self.error.emit(str(e))
-
 
 class PreCheckWorker(QThread):
     """

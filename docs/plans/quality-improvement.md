@@ -25,8 +25,8 @@
 | 06 | R-05 | P1 | 图像透明信息 | 已完成 | 17350c7；6/6；原压缩 11/11；全量 302/302；review 通过 |
 | 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 785f5b3；10/10；全量 312/312；review 通过 |
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 3684dbd；11/11；原签名 5/5；全量 323/323；review 通过 |
-| 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | 8/8；全量 331/331；review 通过 |
-| 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 待实施 | — |
+| 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | e02b45c；8/8；全量 331/331；review 通过 |
+| 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | 7/7；直接回归 22/22；全量 338/338；review 通过 |
 | 11 | R-11 | P1 | IO 忙碌互斥 | 待实施 | — |
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 待实施 | — |
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 待实施 | — |
@@ -139,3 +139,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：331/331 通过，53.174 秒；日志 `backups/verification/R09-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: deduplicate queued files and track parallel jobs independently`。
 - 边界：调度异常后的统一收尾及大消息 IPC 顺序属于 R-10，仍待实施。
+
+### R-10：异常进程收尾与管道接收（2026-11-09）
+
+- RED：初始七项回归中六项失败，复现启动/通信异常遗留任务、缺少可重试终态及串行大消息 WinError 109；另一个测试夹具重复目录错误已改为独立临时目录。
+- 修复：启动前保留失败任务身份；串行/并行 finally 收尾已登记进程、连接及 staging，再向 UI 发错误。完成任务立即移出注册表，后续异常不会重复污染成功记录。串行先完整 recv，再 join，允许发送大消息的子进程正常结束。
+- GREEN：`test_worker_lifecycle.py` 7/7；既有输出保全 14/14、队列身份 8/8。覆盖第二项启动、poll/recv、发布异常、串行状态恢复；既有停止/跳过回归通过。真实 Windows spawn/Pipe 传输约 1.4 MB 结果，完整消息、退出码 0、实际 PDF 输出均通过。
+- Review：`controllers_review` 明确通过，独立纯内存探针补验上述异常及停止时首次 join 抛错，全部已登记任务仍收尾；确认 recv→join 顺序，无阻断。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：338/338 通过，53.024 秒；日志 `backups/verification/R10-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: reap processing jobs on scheduler failures and drain results before join`。
+- 边界：大消息测试验证真实 IPC 机制，不代表已证明生产日志一定达到该大小；本项管理已登记的 Python 子进程，未实现或验证 qpdf 后代进程树终止。
