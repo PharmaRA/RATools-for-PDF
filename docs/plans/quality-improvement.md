@@ -22,8 +22,8 @@
 | 03 | R-02 | P1 | 链接改色内容流 | 已完成 | e82c5af；11/11；全量 277/277；review 通过 |
 | 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | ac3bc4e；9/9；全量 286/286；review 通过 |
 | 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 4b584ea；10/10；全量 296/296；review 通过 |
-| 06 | R-05 | P1 | 图像透明信息 | 已完成 | 6/6；原压缩 11/11；全量 302/302；review 通过 |
-| 07 | R-06 | P1 | 动态内容精确清理 | 待实施 | — |
+| 06 | R-05 | P1 | 图像透明信息 | 已完成 | 17350c7；6/6；原压缩 11/11；全量 302/302；review 通过 |
+| 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 10/10；全量 312/312；review 通过；见下方记录 |
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 待实施 | — |
 | 09 | R-09 | P1 | 队列去重与任务身份 | 待实施 | — |
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 待实施 | — |
@@ -108,3 +108,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：302/302 通过，43.151 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R05-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: retain image transparency during PDF compression`。
 - 边界：DPI 根据实际绘制尺寸计算属于 R-18，仍待实施；本项没有把该能力标记完成。
+
+### R-06：动态入口精确清理与预检（2026-11-09）
+
+- RED：六组测试全部未通过，复现附件丢失、动态批注及 OpenAction/AA 脚本残留、智能预检遗漏和无修改时仍假报变更。
+- 修复：共用只读清理计划；仅移除 Names/JavaScript 分支，保留 Dests/EmbeddedFiles。处理 Catalog/OpenAction、Catalog/页面/批注/字段 AA、A/Next、书签动作和嵌套字段；移除 3D/RichMedia/Movie/Sound 批注及相应动态动作。复制动作链以保留安全后继顺序，避免修改共享原对象；循环引用有限终止，超深链明确报错。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_dynamic_content_safety.py`：10/10 通过，含预检输入字节/xref 不变、命名书签和附件保留、普通评论/表单值、安全动作顺序、共享循环脚本、智能 OpenAction 及富媒体实际输出。富媒体合成样例补齐合法静态外观流后无相关 MuPDF 警告。
+- Review：`pdf_core_review` 明确通过，独立八项内存回归及嵌套共享动作顺序验证通过，无阻断。
+- 全量：312/312 通过，43.695 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R06-full.log`。随后对增强的富媒体保存断言重跑本项 10/10 通过，生产实现不变。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: remove dynamic PDF entries without losing navigation or attachments`。
+- 范围：支持上述 PDF 结构入口；XFA/XML 包内脚本未实现解析清理，未删除整个 XFA 以避免丢失其表单布局。本项不作任意 PDF 主动内容的全面安全认证。

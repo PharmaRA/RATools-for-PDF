@@ -7,6 +7,7 @@ import fitz
 
 from ratools_pdf.config import rules_catalog
 from ratools_pdf.pdf import bookmarks_links, qpdf
+from ratools_pdf.pdf.dynamic_content import has_dynamic_content
 
 
 def _option_title(option_id):
@@ -1003,15 +1004,7 @@ def _check_cleanup_targets(ctx):
             ctx.add_suggestion("cleanup_remove_metadata", "文档包含可清理的元数据")
 
     if ctx.wants("cleanup_remove_dynamic_content"):
-        catalog_object = ""
-        try:
-            catalog_object = doc.xref_object(ctx.catalog_xref)
-        except Exception:
-            catalog_object = ""
-        names_kind, _names_value = _catalog_key(doc, ctx.catalog_xref, "Names")
-        names_value = _catalog_key_resolved_value(doc, ctx.catalog_xref, "Names")
-        dynamic_probe = f"{catalog_object}\n{names_value}"
-        if names_kind != "null" and any(marker in dynamic_probe for marker in ["/JavaScript", "/JS", "/RichMedia", "/3D"]):
+        if has_dynamic_content(doc):
             ctx.add_suggestion("cleanup_remove_dynamic_content", "文档包含 JavaScript、3D 或富媒体入口")
 
 

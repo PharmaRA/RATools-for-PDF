@@ -8,6 +8,7 @@ import fitz
 
 from ratools_pdf.config.compression import normalize_compression_settings
 from ratools_pdf.pdf import bookmarks_links, hyperlink_styles, page_layout, precheck, qpdf
+from ratools_pdf.pdf.dynamic_content import remove_dynamic_content
 
 
 class _PhaseProfiler:
@@ -744,8 +745,9 @@ def _step_cleanup(ctx):
                         pass
 
     if "cleanup_remove_dynamic_content" in options:
-        doc.xref_set_key(ctx.catalog_xref, "Names", "null")
-        ctx.mark("已删除动态内容/JavaScript")
+        removed = remove_dynamic_content(doc)
+        if removed:
+            ctx.mark("已删除动态内容/JavaScript", count=removed)
     if "cleanup_remove_attachments" in options:
         if doc.embfile_count() > 0:
             attachment_count = doc.embfile_count()
