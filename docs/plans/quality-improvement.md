@@ -23,8 +23,8 @@
 | 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | ac3bc4e；9/9；全量 286/286；review 通过 |
 | 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 4b584ea；10/10；全量 296/296；review 通过 |
 | 06 | R-05 | P1 | 图像透明信息 | 已完成 | 17350c7；6/6；原压缩 11/11；全量 302/302；review 通过 |
-| 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 10/10；全量 312/312；review 通过；见下方记录 |
-| 08 | R-07 | P1 | 签名烘焙失败保护 | 待实施 | — |
+| 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 785f5b3；10/10；全量 312/312；review 通过 |
+| 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 11/11；原签名 5/5；全量 323/323；review 通过 |
 | 09 | R-09 | P1 | 队列去重与任务身份 | 待实施 | — |
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 待实施 | — |
 | 11 | R-11 | P1 | IO 忙碌互斥 | 待实施 | — |
@@ -118,3 +118,14 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：312/312 通过，43.695 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R06-full.log`。随后对增强的富媒体保存断言重跑本项 10/10 通过，生产实现不变。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: remove dynamic PDF entries without losing navigation or attachments`。
 - 范围：支持上述 PDF 结构入口；XFA/XML 包内脚本未实现解析清理，未删除整个 XFA 以避免丢失其表单布局。本项不作任意 PDF 主动内容的全面安全认证。
+
+### R-07：签名烘焙失败保护（2026-11-09）
+
+- RED：初始七项验收发现渲染/插图/控件移除失败仍保存、qpdf 吞异常继续解除限制，以及原位处理源文件锁未释放；原测试五个失败及四个错误（含清理错误）。
+- 修复：独立字节文档避免 Widget/Annot 延迟释放锁住源文件；先成功写入外观，再删除控件并计数；任一控件失败中止整份文档。所有外观完成后保存到独立同盘目录，成功后原子替换。qpdf 重写及解密遇到烘焙异常停止，不再回退原文件继续；中间目录移入回收站。
+- 备用渲染使用未旋转坐标裁剪并恢复原旋转角。空矩形/实际不可见外观与渲染错误区分，不因渲染失败判为成功。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_signature_failure_safety.py`：11/11；原 `test_signature_baker.py`：5/5。包含第二控件失败、部分保存失败、成功/失败原位处理、隐藏/零矩形、旋转备用渲染和两个 qpdf 入口。旋转像素对照使用与烘焙相同 DPI，避免重复重采样误差。
+- Review：`pdf_core_review` 明确通过，独立验证渲染/插图/删除/保存/替换故障均不发布不安全结果，qpdf 不再继续，已分配工作目录进入回收路径。
+- 全量：323/323 通过，46.999 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R07-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: stop signature processing when appearance baking fails`。
+- 限制：字节工作副本需要额外约一个输入 PDF 大小的内存；本项未扩展既有签名探测覆盖范围，也未执行真实 Acrobat/签名证书资格验证。

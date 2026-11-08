@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ratools_pdf.config.paths import get_resource_path
+from ratools_pdf.services.file_safety import recycle_owned_path
 
 
 @dataclass
@@ -215,6 +216,12 @@ class QpdfCommandBuilder:
         return args
 
 
+def _recycle_signature_workspace(temp_baked):
+    if temp_baked:
+        directory = os.path.dirname(temp_baked)
+        recycle_owned_path(directory, directory)
+
+
 def rewrite_with_qpdf(
     input_pdf: str,
     output_pdf: str,
@@ -251,8 +258,9 @@ def rewrite_with_qpdf(
                 baked_cnt = bake_digital_signatures(input_pdf, temp_baked, dpi=300)
                 if baked_cnt > 0 and os.path.exists(temp_baked):
                     actual_input = temp_baked
-        except Exception:
-            actual_input = input_pdf
+        except Exception as exc:
+            _recycle_signature_workspace(temp_baked)
+            raise RuntimeError('签名外观烘焙失败，已停止解除限制并保留原文件') from exc
 
     try:
         builder = QpdfCommandBuilder(input_pdf=actual_input, output_pdf=output_pdf)
@@ -291,14 +299,7 @@ def rewrite_with_qpdf(
             raise RuntimeError(f"qpdf 执行失败: {detail}")
         return res
     finally:
-        if temp_baked and os.path.exists(temp_baked):
-            try:
-                os.remove(temp_baked)
-                p_dir = os.path.dirname(temp_baked)
-                if os.path.exists(p_dir):
-                    os.rmdir(p_dir)
-            except Exception:
-                pass
+        _recycle_signature_workspace(temp_baked)
 
     return res
 
@@ -587,8 +588,9 @@ def decrypt_pdf(
                 )
                 if baked_cnt > 0 and os.path.exists(temp_baked):
                     actual_input = temp_baked
-        except Exception:
-            actual_input = input_pdf
+        except Exception as exc:
+            _recycle_signature_workspace(temp_baked)
+            raise RuntimeError('签名外观烘焙失败，已停止解密并保留原文件') from exc
 
     try:
         cmd_args = []
@@ -615,14 +617,7 @@ def decrypt_pdf(
             raise RuntimeError(f"解密失败: {formatted}")
         return res
     finally:
-        if temp_baked and os.path.exists(temp_baked):
-            try:
-                os.remove(temp_baked)
-                parent_dir = os.path.dirname(temp_baked)
-                if os.path.exists(parent_dir):
-                    os.rmdir(parent_dir)
-            except Exception:
-                pass
+        _recycle_signature_workspace(temp_baked)
 
 
 def apply_overlay_underlay(

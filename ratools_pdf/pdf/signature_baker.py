@@ -13,9 +13,12 @@
 import os
 import re
 import shutil
+import tempfile
 from typing import Optional
 
 import fitz
+
+from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
 
 
 def has_digital_signatures(pdf_path: str, password: Optional[str] = None) -> bool:
@@ -117,8 +120,14 @@ def bake_digital_signatures(
         raise FileNotFoundError(f"输入文件不存在: {input_pdf}")
 
     doc = None
+    staging_dir = None
     try:
-        doc = fitz.open(input_pdf)
+        check_unlinked_path(input_pdf)
+        check_unlinked_path(output_pdf)
+        # Widget/annotation handles may outlive Document.close(). A byte-backed
+        # working copy keeps exceptions and in-place replacement from locking input.
+        with open(input_pdf, 'rb') as source:
+            doc = fitz.open(stream=source.read(), filetype='pdf')
         if doc.needs_pass:
             if password:
                 if not doc.authenticate(password):
@@ -170,10 +179,7 @@ def bake_digital_signatures(
 
             # 1. 扫描当前页所有签名控件
             sig_widgets = []
-            try:
-                raw_widgets = list(page.widgets() or [])
-            except Exception:
-                raw_widgets = []
+            raw_widgets = list(page.widgets() or [])
 
             for w in raw_widgets:
                 try:
@@ -213,37 +219,35 @@ def bake_digital_signatures(
 
                     # 兜底：若从 _annot 提取失败或无内容，尝试页面局部裁剪
                     if pix is None or pix.width <= 0 or pix.height <= 0:
+                        original_rotation = page.rotation
                         try:
+                            page.set_rotation(0)
                             pix = page.get_pixmap(clip=rect, dpi=dpi, annots=True, alpha=True)
                         except Exception:
                             pix = None
+                        finally:
+                            page.set_rotation(original_rotation)
+
+                    if pix is None or pix.width <= 0 or pix.height <= 0:
+                        raise RuntimeError('签名外观渲染失败，已停止烘焙并保留原文件')
 
                     # 检查是否包含实质可见像素
                     has_visible = False
                     if pix and pix.width > 0 and pix.height > 0:
                         if pix.alpha:
-                            try:
-                                has_visible = max(pix.samples[3::4]) > 0
-                            except Exception:
-                                has_visible = True
+                            has_visible = max(pix.samples[pix.n-1::pix.n], default=0) > 0
                         else:
                             has_visible = True
-
-                    # 安全移除签名控件
-                    page.delete_widget(w)
-                    baked_count += 1
 
                     # 将外观图像物理固化写入正文流（覆盖在原矩形区域）
                     if has_visible and pix:
                         page.insert_image(rect, pixmap=pix, overlay=True, keep_proportion=False)
+                    # Count only after successful appearance insertion and widget removal.
+                    page.delete_widget(w)
+                    baked_count += 1
 
-                except Exception:
-                    # 单个控件容错处理
-                    try:
-                        page.delete_widget(w)
-                        baked_count += 1
-                    except Exception:
-                        pass
+                except Exception as exc:
+                    raise RuntimeError('签名外观烘焙失败，未发布修改后的文档') from exc
 
             # 提前终止优化：若文档声明的签名域已全部烘焙完毕，无需再遍历后续成百上千页
             if total_sig_fields > 0 and baked_count >= total_sig_fields:
@@ -261,14 +265,14 @@ def bake_digital_signatures(
             except Exception:
                 pass
 
-            is_same = os.path.abspath(input_pdf) == os.path.abspath(output_pdf)
-            save_target = output_pdf if not is_same else output_pdf + ".bake_tmp.pdf"
+            staging_dir = tempfile.mkdtemp(prefix='.ratools-signature-', dir=os.path.dirname(os.path.abspath(output_pdf)))
+            save_target = os.path.join(staging_dir, 'baked.pdf')
             # 极速中间保存：关闭二次 deflate 压缩与全表递归垃圾回收，依靠下游 QPDF 执行高效 C++ 压缩
             doc.save(save_target, garbage=1, deflate=False)
             doc.close()
             doc = None
-            if is_same:
-                os.replace(save_target, output_pdf)
+            check_unlinked_path(output_pdf)
+            os.replace(save_target, output_pdf)
         else:
             doc.close()
             doc = None
@@ -282,3 +286,5 @@ def bake_digital_signatures(
                 doc.close()
             except Exception:
                 pass
+        if staging_dir:
+            recycle_owned_path(staging_dir, staging_dir)
