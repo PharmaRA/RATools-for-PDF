@@ -1,5 +1,7 @@
 import fitz
 
+from ratools_pdf.pdf.navigation_geometry import resize_local_destinations
+
 
 def _transform_rect(rect, scale, dx, dy):
     return fitz.Rect(
@@ -135,6 +137,7 @@ def _resize_pages_with_padding(doc, target_rect):
     if not any(page_transforms):
         return 0
 
+    resize_local_destinations(doc, page_transforms)
     # 先调整每页内容和页面内对象坐标
     for page_index, page in enumerate(doc):
         transform = page_transforms[page_index]
@@ -142,66 +145,12 @@ def _resize_pages_with_padding(doc, target_rect):
             continue
 
         scale = transform["scale"]
-        dx = transform["dx"]
-        dy = transform["dy"]
-        links = page.get_links()
-        old_derotation = page.derotation_matrix
         physical_target = transform['physical_target']
         crop = transform['crop']
         _wrap_page_contents(page, scale, transform['pdf_dx'], transform['pdf_dy'], crop)
         _transform_annotation_geometry(page, scale, transform['pdf_dx'], transform['pdf_dy'])
         page.set_mediabox(physical_target)
         page.set_cropbox(page.mediabox)
-
-        for link in links:
-            try:
-                # Navigation destinations are handled separately from page-local geometry.
-                if link.get("kind") == fitz.LINK_GOTO and link.get("to") is not None:
-                    dest_page = int(link.get("page", page_index))
-                    dest_transform = page_transforms[dest_page] if 0 <= dest_page < len(page_transforms) else None
-                    if dest_transform is not None:
-                        d_scale = dest_transform["scale"]
-                        d_dx = dest_transform["dx"]
-                        d_dy = dest_transform["dy"]
-                        to_point = link.get("to")
-                        if hasattr(to_point, "x") and hasattr(to_point, "y"):
-                            link["to"] = _transform_point(to_point, d_scale, d_dx, d_dy)
-                        local_dx = (physical_target.width - crop.width * scale) / 2
-                        local_dy = (physical_target.height - crop.height * scale) / 2
-                        link['from'] = _transform_rect(fitz.Rect(link['from']) * old_derotation,
-                                                       scale, local_dx, local_dy)
-                        page.update_link(link)
-            except Exception:
-                continue
-
-    # 再调整书签目标坐标
-    toc = doc.get_toc(simple=False)
-    if toc:
-        toc_changed = False
-        for item in toc:
-            if len(item) < 4 or not isinstance(item[3], dict):
-                continue
-            dest = item[3]
-            if dest.get("kind") != fitz.LINK_GOTO:
-                continue
-
-            target_page = item[2] - 1
-            if not (0 <= target_page < len(page_transforms)):
-                continue
-
-            transform = page_transforms[target_page]
-            to_point = dest.get("to")
-            if transform is None or to_point is None or not hasattr(to_point, "x") or not hasattr(to_point, "y"):
-                continue
-
-            scale = transform["scale"]
-            dx = transform["dx"]
-            dy = transform["dy"]
-            dest["to"] = _transform_point(to_point, scale, dx, dy)
-            toc_changed = True
-
-        if toc_changed:
-            doc.set_toc(toc)
 
     return sum(1 for item in page_transforms if item is not None)
 

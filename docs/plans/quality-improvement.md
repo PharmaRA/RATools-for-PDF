@@ -20,8 +20,8 @@
 | 01 | R-01 | P1 | 临时输出所有权、成功提交、失败回收 | 已完成 | aa1ee0e；14/14；全量 252/252；review 通过 |
 | 02 | R-08 | P1 | 普通批次/IO/拆分/解密输出冲突 | 已完成 | 35ff9d0；14/14；全量 266/266；review 通过 |
 | 03 | R-02 | P1 | 链接改色内容流 | 已完成 | e82c5af；11/11；全量 277/277；review 通过 |
-| 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | 9/9；全量 286/286；review 通过；见下方记录 |
-| 05 | R-04 | P1 | 缩放后导航恢复 | 待实施 | — |
+| 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | ac3bc4e；9/9；全量 286/286；review 通过 |
+| 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 10/10；全量 296/296；review 通过；见下方记录 |
 | 06 | R-05 | P1 | 图像透明信息 | 待实施 | — |
 | 07 | R-06 | P1 | 动态内容精确清理 | 待实施 | — |
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 待实施 | — |
@@ -89,3 +89,12 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 最终全量：`python -X utf8 -B scripts/run_tests_safely.py`：286/286 通过，43.221 秒；日志 `backups/verification/R03-reviewed-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: preserve rotated page content during paper normalization`。
 - 边界：书签及跨页导航的目标坐标仍按 R-04 独立修复；本项完成页面可见内容和页面内对象的适配。
+
+### R-04：缩放后的本地导航（2026-11-09）
+
+- RED：初始六组测试出现七个失败子场景，覆盖书签变为 (40,1000)、不缩放源页跨页链接变为 (20,500)、旋转目标、共享命名目标以及打开动作。原两个场景正确结果均为 (40,200)。
+- 修复：修改页面几何前，按目标页原始 PDF 坐标计算本地目标；复制目标数组后统一写回。覆盖 Outlines、页面链接（含内联）、Catalog/OpenAction、AA/Next、Names/Dests 名称树和旧 Dests 字典，支持 XYZ/FitH/FitV/FitBH/FitBV/FitR；保留 null、固定缩放、名称、书签层级和动作参数。远程 GoToR 目标不变。
+- Review：`pdf_core_review` 首轮指出 OpenAction 动作字典被通用目标入口误认，直接/间接 GoToR 的新增回归 RED→GREEN；现按数组/动作类型分派，二轮明确通过。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_page_navigation_resize.py`：10/10 通过。包括两个页面顺序、共享数组仅缩放一次、远程共享数组不污染、循环动作终止、内联点击区域、原名命名目标及实际 Letter 输出后的书签层级/坐标/缩放。
+- 最终全量：296/296 通过，44.728 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R04-reviewed-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: transform local navigation targets before resizing pages`。
