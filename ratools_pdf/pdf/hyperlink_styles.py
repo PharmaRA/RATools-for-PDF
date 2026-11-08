@@ -152,22 +152,114 @@ def _make_text_block_blue(block_text):
     return _make_text_block_color(block_text, (0.0, 0.0, 1.0))
 
 
-def _make_text_block_color(block_text, color_rgb):
-    r, g, b = color_rgb
-    color_cmd = f"{r:g} {g:g} {b:g} rg"
+def _content_operations(text):
+    """Yield operator and complete operand span, treating strings/arrays as data.
 
-    if " rg" in block_text:
-        return re.sub(r"(?<![0-9.])-?[0-9.]+\s+-?[0-9.]+\s+-?[0-9.]+\s+rg", color_cmd, block_text, count=1)
-    if " g" in block_text:
-        return re.sub(r"(?<![0-9.])-?[0-9.]+\s+g", color_cmd, block_text, count=1)
+    Inline images cannot be delimited safely by a general text scan; callers leave
+    those streams unchanged. No content is written until the full scan succeeds.
+    """
+    index, operand_start = 0, None
+    containers = []
+    whitespace = '\x00\t\n\f\r '
+    delimiters = whitespace + '()<>[]{}/%'
+    while index < len(text):
+        char = text[index]
+        if char in whitespace:
+            index += 1
+            continue
+        if char == '%':
+            while index < len(text) and text[index] not in '\r\n':
+                index += 1
+            continue
+        start = index
+        opaque = False
+        if char == '(':
+            depth = 1
+            index += 1
+            while index < len(text) and depth:
+                if text[index] == '\\':
+                    index += 2
+                    continue
+                if text[index] == '(':
+                    depth += 1
+                elif text[index] == ')':
+                    depth -= 1
+                index += 1
+            if depth:
+                raise ValueError('Unterminated PDF string')
+            opaque = True
+        elif char == '<' and not text.startswith('<<', index):
+            end = text.find('>', index + 1)
+            if end < 0:
+                raise ValueError('Unterminated PDF hex string')
+            index = end + 1
+            opaque = True
+        elif text.startswith(('<<', '>>'), index):
+            index += 2
+        elif char in '[]':
+            index += 1
+        else:
+            if char == '/':
+                index += 1
+                opaque = True
+            while index < len(text) and text[index] not in delimiters:
+                index += 1
+            if index == start:
+                raise ValueError('Unsupported PDF delimiter')
+        token = text[start:index]
+        if token in ('[', '<<'):
+            if operand_start is None:
+                operand_start = start
+            containers.append(']' if token == '[' else '>>')
+            continue
+        if token in (']', '>>'):
+            if not containers or containers.pop() != token:
+                raise ValueError('Unbalanced PDF container')
+            continue
+        if containers or opaque or token in ('true', 'false', 'null') or re.fullmatch(r'[+-]?(?:\d+\.?\d*|\.\d+)', token):
+            if operand_start is None:
+                operand_start = start
+            continue
+        if token == 'BI':
+            raise ValueError('Inline image stream requires a binary parser')
+        yield token, operand_start if operand_start is not None else start, index
+        operand_start = None
+    if containers:
+        raise ValueError('Unterminated PDF container')
 
-    tj_pos = block_text.find("TJ")
-    if tj_pos == -1:
-        tj_pos = block_text.find("Tj")
-    if tj_pos == -1:
-        return block_text
 
-    return block_text[:tj_pos] + color_cmd + "\n" + block_text[tj_pos:]
+def _fill_color_after(operator, command, state):
+    """Keep the exact original color-space commands, including resource names."""
+    if operator in ('g', 'rg', 'k'):
+        space = {'g': '/DeviceGray cs', 'rg': '/DeviceRGB cs', 'k': '/DeviceCMYK cs'}[operator]
+        return space, command
+    if operator == 'cs':
+        return command, command
+    if operator in ('sc', 'scn'):
+        return state[0], state[0] + '\n' + command
+    return state
+
+
+def _make_text_block_color(block_text, color_rgb, initial_state=('/DeviceGray cs', '0 g')):
+    color_cmd = ' '.join(f'{part:g}' for part in color_rgb) + ' rg'
+    state, stack, edits = initial_state, [], []
+    for operator, start, end in _content_operations(block_text):
+        command = block_text[start:end]
+        if operator in ('Tj', 'TJ', "'", '"'):
+            # Keep operands attached to their display operator. Restore only color,
+            # so following text retains inherited font/spacing and text matrices.
+            edits.append((start, end, color_cmd + '\n' + command + '\n' + state[1] + '\n'))
+        elif operator == 'q':
+            stack.append(state)
+        elif operator == 'Q':
+            if not stack:
+                raise ValueError('Graphics state crosses text block boundary')
+            state = stack.pop()
+        else:
+            state = _fill_color_after(operator, command, state)
+    for start, end, replacement in reversed(edits):
+        block_text = block_text[:start] + replacement + block_text[end:]
+    return block_text
 
 
 def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, only_if_blue=False):
@@ -175,7 +267,8 @@ def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, onl
         return False
 
     target_indexes = set()
-    for trace_index, trace in enumerate(page.get_texttrace()):
+    traces = page.get_texttrace()
+    for trace_index, trace in enumerate(traces):
         if trace.get("type") != 0:
             continue
 
@@ -220,37 +313,55 @@ def _apply_text_color_via_content_stream(doc, page, target_rects, color_rgb, onl
     if not target_indexes:
         return False
 
-    text_block_index = 0
-    changed = False
     content_xrefs = page.get_contents()
     if not isinstance(content_xrefs, (list, tuple)):
         content_xrefs = [content_xrefs]
 
-    for xref in content_xrefs:
-        stream_bytes = doc.xref_stream(xref)
-        stream_text = stream_bytes.decode("latin1", "ignore")
-
-        def replace_bt_block(match):
-            nonlocal text_block_index, changed
-            block = match.group(0)
-            if "Tj" not in block and "TJ" not in block:
-                return block
-
-            current_index = text_block_index
-            text_block_index += 1
-            if current_index not in target_indexes:
-                return block
-
-            new_block = _make_text_block_color(block, color_rgb)
-            if new_block != block:
-                changed = True
-            return new_block
-
-        new_stream_text = re.sub(r"BT.*?ET", replace_bt_block, stream_text, flags=re.S)
-        if new_stream_text != stream_text:
-            doc.update_stream(xref, new_stream_text.encode("latin1"))
-
-    return changed
+    streams, blocks = {}, []
+    state, stack = ('/DeviceGray cs', '0 g'), []
+    try:
+        for xref in content_xrefs:
+            stream_text = doc.xref_stream(xref).decode('latin1')
+            streams[xref] = stream_text
+            active = None
+            has_text = False
+            for operator, start, end in _content_operations(stream_text):
+                if operator == 'BT':
+                    if active is not None:
+                        raise ValueError('Nested text object')
+                    active = (start, state)
+                    has_text = False
+                elif operator in ('Tj', 'TJ', "'", '"'):
+                    has_text = True
+                elif operator == 'ET':
+                    if active is not None and has_text:
+                        blocks.append((xref, active[0], end, active[1]))
+                    active = None
+                elif operator == 'q':
+                    stack.append(state)
+                elif operator == 'Q':
+                    if not stack:
+                        raise ValueError('Unbalanced graphics state')
+                    state = stack.pop()
+                else:
+                    state = _fill_color_after(operator, stream_text[start:end], state)
+            if active is not None:
+                raise ValueError('Text object spans content streams')
+        # A trace can include Form XObjects or several spans in one text object.
+        # Do not guess which source text object a rendered span belongs to.
+        if len(blocks) != len(traces):
+            return False
+        for index in sorted(target_indexes, reverse=True):
+            xref, start, end, initial_state = blocks[index]
+            text = streams[xref]
+            replacement = _make_text_block_color(text[start:end], color_rgb, initial_state)
+            streams[xref] = text[:start] + replacement + text[end:]
+    except ValueError:
+        return False
+    for xref, text in streams.items():
+        if text.encode('latin1') != doc.xref_stream(xref):
+            doc.update_stream(xref, text.encode('latin1'))
+    return True
 
 
 def _collect_page_state(page):

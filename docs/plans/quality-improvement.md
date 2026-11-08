@@ -18,8 +18,8 @@
 | 顺序 | 发现 | 优先级 | 修复范围 | 状态 | 验收/提交 |
 |---|---|---|---|---|---|
 | 01 | R-01 | P1 | 临时输出所有权、成功提交、失败回收 | 已完成 | aa1ee0e；14/14；全量 252/252；review 通过 |
-| 02 | R-08 | P1 | 普通批次/IO/拆分/解密输出冲突 | 已完成 | 14/14；全量 266/266；review 通过；见下方记录 |
-| 03 | R-02 | P1 | 链接改色内容流 | 待实施 | — |
+| 02 | R-08 | P1 | 普通批次/IO/拆分/解密输出冲突 | 已完成 | 35ff9d0；14/14；全量 266/266；review 通过 |
+| 03 | R-02 | P1 | 链接改色内容流 | 已完成 | 11/11；全量 277/277；review 通过；见下方记录 |
 | 04 | R-03 | P1 | 旋转页纸张适配 | 待实施 | — |
 | 05 | R-04 | P1 | 缩放后导航恢复 | 待实施 | — |
 | 06 | R-05 | P1 | 图像透明信息 | 待实施 | — |
@@ -68,3 +68,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：266/266 通过，41.166 秒；日志 `backups/verification/R08-reviewed-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: prevent batch output collisions across processing tools`。
 - 兼容性：跨盘 IO 数据及多目录拆分/解密采用保留来源层级的新路径；旧版平铺导出的数据需按新预览路径放置或重新导出。未在真实多卷/网络共享上写入，跨盘与大小写规则由 Windows 路径测试覆盖。
+
+### R-02：链接改色正文保全（2026-11-08）
+
+- RED：初始 7 个真实内存 PDF 测试全部失败，覆盖 Tj/TJ、继承颜色、括号转义、正文/注释中的 BT/ET/rg 和后续正文状态。
+- 修复：识别完整 PDF 操作边界；字符串、数组、十六进制文字和注释不作为指令。颜色指令写在完整显示操作之前，随后恢复原填充颜色/颜色空间；不重写文字操作数，不重置字体、字间距或文本矩阵。先完成整页解析再写回，避免部分修改。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_hyperlink_content_safety.py`：11/11 通过；检查文字与坐标、重新打开后蓝色像素、后续正文颜色、跨流继承颜色，以及 process_document 实际保存后的文字和 URI 链接。
+- Review：`pdf_core_review` 明确通过，并独立补验 CMYK、cs/sc、q/Q 颜色恢复及重复内容流引用；无阻断。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：277/277 通过，41.314 秒；日志 `backups/verification/R02-reviewed-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: preserve PDF text and color state when styling links`。
+- 安全边界：内联图像、跨流文本对象或源码文本块与渲染跨度无法可靠对应时，不猜测并改写原流；这类复杂页面的改色覆盖能力未作全面资格声明。文字安全与本项明确验收已通过。
