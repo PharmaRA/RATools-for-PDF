@@ -26,8 +26,24 @@ class PrecheckController(QObject):
     def mark_stale(self):
         """队列变化或处理完成后，上一轮预检结果不再可信。"""
         self.precheck_result_current = False
+        self.last_precheck_suggested_files = []
         self.view.btn_precheck.setProperty("precheckResultCurrent", False)
         self.view.btn_precheck.show()
+        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
+        self.view.btn_apply_precheck.setEnabled(False)
+        self.view.btn_apply_precheck.hide()
+        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
+        self.view.btn_process_precheck_suggested.setEnabled(False)
+        self.view.btn_process_precheck_suggested.hide()
+        self.view.refresh_selection_summary()
+
+    def _require_current_result(self):
+        if not self.host.ensure_idle("使用预检建议"):
+            return False
+        if not self.precheck_result_current:
+            self.view.show_warning_message("⚠️ 预检结果已失效", "请重新执行预检后再使用建议。")
+            return False
+        return True
 
     def start_precheck(self):
         host, view = self.host, self.view
@@ -85,6 +101,8 @@ class PrecheckController(QObject):
         self.view.refresh_selection_summary()
 
     def apply_precheck_suggestions(self):
+        if not self._require_current_result():
+            return
         view = self.view
         suggested_options = []
         seen = set()
@@ -116,6 +134,8 @@ class PrecheckController(QObject):
         view.show_success_message("✅ 已应用", f"已自动勾选 {len(suggested_options)} 条预检建议规则。")
 
     def start_precheck_suggested_processing(self):
+        if not self._require_current_result():
+            return
         host = self.host
         suggested_files = [path for path in self.last_precheck_suggested_files if path in host.loaded_files]
         if not suggested_files:
@@ -142,5 +162,5 @@ class PrecheckController(QObject):
     def precheck_error(self, error_msg):
         self.host.process_logs += f"\n{'!' * 56}\n[预检错误] {error_msg}\n{'!' * 56}\n"
         self._reset_precheck_ui()
-        self.view.refresh_selection_summary()
+        self.mark_stale()
         self.view.show_error_message("❌ 预检失败", f"预检过程中发生错误：\n{error_msg}")

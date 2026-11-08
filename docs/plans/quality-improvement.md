@@ -29,8 +29,8 @@
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | d3af2c0；7/7；直接回归 22/22；全量 338/338；review 通过 |
 | 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 2cec9ab；13/13；全量 351/351；二轮 review 通过 |
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 75e57df；5/5；全量 356/356；review 通过 |
-| 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
-| 14 | R-14 | P2 | 过期预检拦截 | 待实施 | — |
+| 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 60957f8；9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
+| 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 6/6；全量 371/371；review 通过 |
 | 15 | R-15 | P2 | 诊断任务结果归属 | 待实施 | — |
 | 16 | R-16 | P2 | 解密准备异常反馈 | 待实施 | — |
 | 17 | R-17 | P2 | Pillow 打包及能力反馈 | 待实施 | — |
@@ -181,3 +181,12 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：365/365 通过，56.537 秒；日志 `backups/verification/R13-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: preserve named bookmark targets and file actions in CSV round trips`。
 - 兼容性：新导出多一个 NamedDest 列；旧三列及原扩展格式仍支持。不能表示的远程目标（例如 Fit 模式）明确报错，避免静默生成错误跳转。
+
+### R-14：过期预检建议拦截（2026-11-09）
+
+- RED：初始六项中五项未通过（处理成功/失败两个子场景），确认新增/移除队列项、处理后、部分预检失败及忙碌状态仍可执行旧建议；重新预检的正常路径原已通过。
+- 修复：mark_stale 清空可执行建议文件集合及两个按钮的建议属性，禁用并隐藏建议入口。应用规则和建议文件处理均检查统一 idle 与 current；主处理成功/失败、预检失败均使结果失效。原始结果行保留用于查看，不能据其执行建议。
+- GREEN：`test_precheck_staleness.py` 6/6，调用真实队列添加/移除及处理回调，验证规则不被勾选、不持久化设置、不启动处理；重新成功预检后恢复规则应用和建议文件处理。
+- Review：`controllers_review` 明确通过，确认失效逻辑、直接执行入口保护、异常路径和重新预检恢复，无阻断。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：371/371 通过，56.718 秒；日志 `backups/verification/R14-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: reject stale precheck suggestions before applying or processing`。

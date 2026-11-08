@@ -764,12 +764,7 @@ class MainController(QObject):
         batch_summary = self._build_batch_result_summary(summary)
         self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{batch_summary}\n{'=' * 56}\n"
         # 处理会改变文件状态，上一轮预检结果随之失效
-        self.precheck.precheck_result_current = False
-        self.view.btn_precheck.setProperty("precheckResultCurrent", False)
-        self.view.btn_apply_precheck.setProperty("hasPrecheckSuggestions", False)
-        self.view.btn_apply_precheck.hide()
-        self.view.btn_process_precheck_suggested.setProperty("hasPrecheckSuggestedFiles", False)
-        self.view.btn_process_precheck_suggested.hide()
+        self._mark_precheck_stale()
         self._reset_processing_ui()
 
         if "任务已停止" in summary:
@@ -786,6 +781,7 @@ class MainController(QObject):
 
     def processing_error(self, error_msg):
         self.process_logs += f"\n{'!' * 56}\n[致命错误] {error_msg}\n{'!' * 56}\n"
+        self._mark_precheck_stale()
         self._reset_processing_ui()
         self.view.show_error_message("❌ 处理异常", f"处理过程中发生错误：\n{error_msg}")
 
