@@ -24,8 +24,8 @@
 | 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 4b584ea；10/10；全量 296/296；review 通过 |
 | 06 | R-05 | P1 | 图像透明信息 | 已完成 | 17350c7；6/6；原压缩 11/11；全量 302/302；review 通过 |
 | 07 | R-06 | P1 | 动态内容精确清理 | 已完成 | 785f5b3；10/10；全量 312/312；review 通过 |
-| 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 11/11；原签名 5/5；全量 323/323；review 通过 |
-| 09 | R-09 | P1 | 队列去重与任务身份 | 待实施 | — |
+| 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 3684dbd；11/11；原签名 5/5；全量 323/323；review 通过 |
+| 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | 8/8；全量 331/331；review 通过 |
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 待实施 | — |
 | 11 | R-11 | P1 | IO 忙碌互斥 | 待实施 | — |
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 待实施 | — |
@@ -129,3 +129,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：323/323 通过，46.999 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R07-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: stop signature processing when appearance baking fails`。
 - 限制：字节工作副本需要额外约一个输入 PDF 大小的内存；本项未扩展既有签名探测覆盖范围，也未执行真实 Acrobat/签名证书资格验证。
+
+### R-09：队列与运行任务身份（2026-11-09）
+
+- RED：初始六项测试全部失败，复现文件与父目录重复、相对/绝对及大小写别名、外部列表修改影响运行队列、并行任务被覆盖和按路径跳过遗漏。
+- 修复：逐项按绝对路径及 Windows 大小写规则去重，保留首次绝对路径；worker 持有队列快照。并行任务按独立索引登记，路径仅用于匹配跳过请求，完成/跳过/整批停止均逐个收尾。
+- GREEN：初始六项 RED→GREEN，再增加不同目录同名文件和整批停止场景，共 8/8 通过。公共输出规划仍提前拒绝重复输出；低层调度回归直接调用调度器，验证调用方变化也不会静默遗失已启动任务。
+- Review：`controllers_review` 明确通过，独立内存探针验证同路径及大小写别名在完成、跳过、停止三条路径均 join 全部进程并关闭各自连接，无阻断。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：331/331 通过，53.174 秒；日志 `backups/verification/R09-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: deduplicate queued files and track parallel jobs independently`。
+- 边界：调度异常后的统一收尾及大消息 IPC 顺序属于 R-10，仍待实施。

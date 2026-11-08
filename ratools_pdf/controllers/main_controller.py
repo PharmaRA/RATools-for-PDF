@@ -23,6 +23,7 @@ from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import ProcessWorker
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.services import system_shell
+from ratools_pdf.services.output_paths import path_key
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
@@ -293,7 +294,14 @@ class MainController(QObject):
                         if file.lower().endswith('.pdf'):
                             valid_pdf_paths.append(os.path.normpath(os.path.join(root, file)))
 
-        to_add = [p for p in valid_pdf_paths if p not in self.loaded_files]
+        seen = {path_key(path) for path in self.loaded_files}
+        to_add = []
+        for path in valid_pdf_paths:
+            absolute = os.path.abspath(path)
+            key = path_key(absolute)
+            if key not in seen:
+                seen.add(key)
+                to_add.append(absolute)
         if not to_add:
             if paths:
                 self.view.show_info_message("ℹ️ 提示", "添加的文件或文件夹中没有新的 PDF 文件，或文件已存在于列表中。")

@@ -15,7 +15,7 @@ from ratools_pdf.controllers.io_actions import (
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
-from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
+from ratools_pdf.services.output_paths import common_base_dir, path_key, relative_source_directory, validate_output_plan
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
@@ -47,12 +47,12 @@ class ProcessWorker(QThread):
 
     def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart", compression_settings=None):
         super().__init__()
-        self.files = files
+        self.files = list(files)
         self.options = options
         self.processing_mode = str(processing_mode or "smart").lower()
         self.compression_settings = compression_settings
         self.output_dir = output_dir
-        self.common_base = common_base or common_base_dir(files)
+        self.common_base = common_base or common_base_dir(self.files)
         self.overwrite_original = overwrite_original
         self.max_workers = max(1, int(max_workers or 1))
         self._stop_requested = False
@@ -70,7 +70,7 @@ class ProcessWorker(QThread):
 
     def request_skip_file(self, file_path):
         if file_path:
-            self._skip_requested_files.add(os.path.normcase(os.path.normpath(file_path)))
+            self._skip_requested_files.add(path_key(file_path))
 
     def run(self):
         try:
@@ -345,7 +345,7 @@ class ProcessWorker(QThread):
                 while not self._stop_requested and next_index < len(self.files) and len(running) < self.max_workers:
                     file_path = self.files[next_index]
                     task = self._start_process_task(next_index, file_path, rename_ectd)
-                    running[os.path.normcase(os.path.normpath(file_path))] = task
+                    running[next_index] = task
                     next_index += 1
 
                 if self._stop_requested:
@@ -358,13 +358,14 @@ class ProcessWorker(QThread):
                     break
 
                 for skip_key in list(self._skip_requested_files):
-                    task = running.pop(skip_key, None)
                     self._skip_requested_files.discard(skip_key)
-                    if not task:
-                        continue
-                    self._terminate_process_task(task)
-                    self._emit_skipped_task(task, "用户终止选中文件")
-                    self._close_task_connection(task)
+                    for task_id, task in list(running.items()):
+                        if path_key(task['file_path']) != skip_key:
+                            continue
+                        self._terminate_process_task(task)
+                        self._emit_skipped_task(task, "用户终止选中文件")
+                        self._close_task_connection(task)
+                        running.pop(task_id)
 
                 finished_keys = []
                 for key, task in list(running.items()):
