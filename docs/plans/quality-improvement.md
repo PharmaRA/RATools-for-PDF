@@ -21,8 +21,8 @@
 | 02 | R-08 | P1 | 普通批次/IO/拆分/解密输出冲突 | 已完成 | 35ff9d0；14/14；全量 266/266；review 通过 |
 | 03 | R-02 | P1 | 链接改色内容流 | 已完成 | e82c5af；11/11；全量 277/277；review 通过 |
 | 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | ac3bc4e；9/9；全量 286/286；review 通过 |
-| 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 10/10；全量 296/296；review 通过；见下方记录 |
-| 06 | R-05 | P1 | 图像透明信息 | 待实施 | — |
+| 05 | R-04 | P1 | 缩放后导航恢复 | 已完成 | 4b584ea；10/10；全量 296/296；review 通过 |
+| 06 | R-05 | P1 | 图像透明信息 | 已完成 | 6/6；原压缩 11/11；全量 302/302；review 通过 |
 | 07 | R-06 | P1 | 动态内容精确清理 | 待实施 | — |
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 待实施 | — |
 | 09 | R-09 | P1 | 队列去重与任务身份 | 待实施 | — |
@@ -98,3 +98,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_page_navigation_resize.py`：10/10 通过。包括两个页面顺序、共享数组仅缩放一次、远程共享数组不污染、循环动作终止、内联点击区域、原名命名目标及实际 Letter 输出后的书签层级/坐标/缩放。
 - 最终全量：296/296 通过，44.728 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R04-reviewed-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: transform local navigation targets before resizing pages`。
+
+### R-05：压缩透明图像保全（2026-11-09）
+
+- RED：六个专项测试全部失败，半透明、颜色键、Matte 和显式遮罩的平均像素差约 84，原共享 SMask 被清空。
+- 修复：从 PDF 解码像素读取颜色（应用 Decode、颜色键、Matte 解混），合并软透明度后降采样；颜色 JPEG 与无损 Flate SMask 分开写入，新遮罩独立 xref，体积比较包含新增遮罩。显式二值 Mask 保留原对象和分辨率，避免细透明条纹二次采样；无白底铺平。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_image_transparency.py`：6/6 通过，要求实际降采样且保存重开后平均通道差小于 3。`test_image_compression.py` 原 11 项通过；含主处理管线输出、共享遮罩保全。
+- Review：`pdf_core_review` 明确通过，独立五项内存回归及反向 Decode、JPX SMaskInData=1/2 均通过，补充场景像素差 0 至 1.0，无阻断。
+- 全量：302/302 通过，43.151 秒；命令 `python -X utf8 -B scripts/run_tests_safely.py`，日志 `backups/verification/R05-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: retain image transparency during PDF compression`。
+- 边界：DPI 根据实际绘制尺寸计算属于 R-18，仍待实施；本项没有把该能力标记完成。

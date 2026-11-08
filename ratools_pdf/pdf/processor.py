@@ -834,7 +834,8 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
     无论何种替换方式，字典与流必须同步更新，否则图像整体花屏。
     """
     from io import BytesIO
-    from PIL import Image
+    from PIL import Image, ImageChops
+    import zlib
 
     # "压缩后更小才替换"的比较基准必须是 PDF 中实际存储的流长度：
     # extract_image() 对 FlateDecode 图像会重编码为 PNG，长度失真，
@@ -848,12 +849,33 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
     if doc.xref_get_key(xref, "ImageMask")[1] == "true":
         return False
 
-    base_image = doc.extract_image(xref)
-    if not base_image:
-        return False
-
     try:
-        img_pil = Image.open(BytesIO(base_image["image"]))
+        # PDF decoding applies Decode, color-key masks and Matte unblending.
+        # Extracting the encoded base stream alone loses this information.
+        pixmap = fitz.Pixmap(doc, xref)
+        if pixmap.colorspace and pixmap.colorspace.n not in (1, 3):
+            pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+        img_pil = Image.open(BytesIO(pixmap.tobytes('png')))
+        img_pil.load()
+        mask_kind, mask_value = doc.xref_get_key(xref, 'SMask')
+        explicit_mask = None
+        if mask_kind != 'xref':
+            explicit_kind, explicit_value = doc.xref_get_key(xref, 'Mask')
+            if explicit_kind == 'xref':
+                # Binary stencil masks have their own resolution. Preserve that
+                # object so thin transparency boundaries are not blurred a second time.
+                explicit_mask = explicit_value
+        if mask_kind == 'xref':
+            mask = fitz.Pixmap(doc, int(mask_value.split()[0]))
+            if mask.n != 1:
+                return False
+            alpha = Image.frombytes('L', (mask.width, mask.height), mask.samples)
+            if alpha.size != img_pil.size:
+                alpha = alpha.resize(img_pil.size, Image.Resampling.LANCZOS)
+            if 'A' in img_pil.getbands():
+                alpha = ImageChops.multiply(img_pil.getchannel('A'), alpha)
+            img_pil = img_pil.convert('RGBA')
+            img_pil.putalpha(alpha)
     except Exception:
         # 无法解析的图像格式，跳过
         return False
@@ -868,24 +890,36 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
         return False
 
     # 重采样（使用 LANCZOS 高质量算法）
-    img_resized = img_pil.resize((int(width_px * scale), int(height_px * scale)), Image.Resampling.LANCZOS)
-
-    # JPEG 无透明通道：带 alpha 的模式铺白底后转 RGB，其余模式转 RGB（保留灰度 L）
-    if img_resized.mode in ("RGBA", "LA", "P"):
-        if img_resized.mode != "RGBA":
-            img_resized = img_resized.convert("RGBA")
-        rgb_img = Image.new("RGB", img_resized.size, (255, 255, 255))
-        rgb_img.paste(img_resized, mask=img_resized.split()[3])
-        img_resized = rgb_img
-    elif img_resized.mode not in ("RGB", "L"):
+    img_resized = img_pil.resize((max(1, int(width_px * scale)), max(1, int(height_px * scale))), Image.Resampling.LANCZOS)
+    alpha_bytes = None
+    if 'A' in img_resized.getbands():
+        alpha = img_resized.getchannel('A')
+        if alpha.getextrema() != (255, 255):
+            alpha_bytes = zlib.compress(alpha.tobytes())
+        # Keep unassociated color. A white backdrop would destroy compositing.
+        img_resized = img_resized.convert('L' if img_resized.mode == 'LA' else 'RGB')
+    elif img_resized.mode not in ('RGB', 'L'):
         img_resized = img_resized.convert("RGB")
 
     output = BytesIO()
     img_resized.save(output, format="JPEG", quality=quality, optimize=True)
     new_image_bytes = output.getvalue()
 
-    if len(new_image_bytes) >= orig_stream_len:
+    # Include the newly allocated mask, even if the old mask is shared elsewhere.
+    if len(new_image_bytes) + len(alpha_bytes or b'') >= orig_stream_len:
         return False
+
+    mask_xref = None
+    if alpha_bytes is not None:
+        mask_xref = doc.get_new_xref()
+        doc.update_object(mask_xref,
+                          f'<< /Type /XObject /Subtype /Image /Width {img_resized.width} '
+                          f'/Height {img_resized.height} /ColorSpace /DeviceGray /BitsPerComponent 8 >>')
+        try:
+            doc.update_stream(mask_xref, alpha_bytes, compress=0)
+        except TypeError:
+            doc.update_stream(mask_xref, alpha_bytes, deflate=False)
+        doc.xref_set_key(mask_xref, 'Filter', '/FlateDecode')
 
     # 原样写入 JPEG 字节（关闭 PyMuPDF 的自动 flate 压缩——否则存储的是
     # deflate 包裹的 JPEG，与下面声明的 /DCTDecode 不符）。
@@ -900,8 +934,10 @@ def _compress_single_image(doc, xref, max_width, max_height, quality):
     doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if img_resized.mode == "L" else "/DeviceRGB")
     doc.xref_set_key(xref, "BitsPerComponent", "8")
     # 旧流遗留的键对新 JPEG 不再合法，必须一并清掉
-    for stale_key in ("SMask", "Mask", "Decode", "DecodeParms"):
+    for stale_key in ("Decode", "DecodeParms", "SMaskInData"):
         doc.xref_set_key(xref, stale_key, "null")
+    doc.xref_set_key(xref, 'Mask', explicit_mask or 'null')
+    doc.xref_set_key(xref, 'SMask', f'{mask_xref} 0 R' if mask_xref is not None else 'null')
     return True
 
 
