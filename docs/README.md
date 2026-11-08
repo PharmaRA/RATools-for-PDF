@@ -1,0 +1,7 @@
+# 项目文档
+
+- [2026-11-08 代码审查：18 项发现与证据](reviews/2026-11-08-code-review.md)
+- [质量改进执行计划：修复顺序、验收与提交记录](plans/quality-improvement.md)
+- [Acrobat 字体嵌入自动化说明](acrobat-font-embedding-automation-notes.md)
+
+审查报告记录问题及原始证据；质量计划记录当前修复进度。历史基线测试通过不代表当前版本已完成验收。
