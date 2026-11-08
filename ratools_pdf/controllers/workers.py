@@ -14,6 +14,7 @@ from ratools_pdf.controllers.io_actions import (
 )
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
+from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
@@ -83,7 +84,7 @@ class ProcessWorker(QThread):
             base_name = _normalized_ectd_name(base_name, index + 1)
 
         if self.overwrite_original:
-            return base_name, file_path + ".tmp_overwrite.pdf"
+            return base_name, file_path
 
         if self.common_base:
             file_dir = os.path.dirname(os.path.abspath(file_path))
@@ -95,11 +96,20 @@ class ProcessWorker(QThread):
         else:
             target_dir = self.output_dir
 
+        check_unlinked_path(target_dir)
         os.makedirs(target_dir, exist_ok=True)
         return base_name, os.path.join(target_dir, base_name)
 
     def _start_process_task(self, index, file_path, rename_ectd):
         base_name, out_path = self._build_output_path(index, file_path, rename_ectd)
+        check_unlinked_path(file_path)
+        check_unlinked_path(out_path)
+        same_path = os.path.normcase(os.path.abspath(file_path)) == os.path.normcase(os.path.abspath(out_path))
+        if not self.overwrite_original and same_path:
+            raise ValueError("输出路径与输入文件相同，请选择其他输出目录或明确启用覆盖原文件")
+        # Same filesystem as the final destination, so a successful publish is atomic.
+        staging_dir = tempfile.mkdtemp(prefix=".ratools-task-", dir=os.path.dirname(os.path.abspath(out_path)))
+        work_path = os.path.join(staging_dir, "result.pdf")
         now = datetime.now().strftime('%H:%M:%S')
         self.structured_progress.emit({
             "type": "start",
@@ -112,21 +122,34 @@ class ProcessWorker(QThread):
             "正在处理...",
             f"\n[{now}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
-        parent_conn, child_conn = mp.Pipe(duplex=False)
-        proc = mp.Process(
-            target=_process_document_task_pipe,
-            args=(file_path, out_path, self.options, self.processing_mode, self.compression_settings, child_conn),
-        )
-        proc.start()
-        child_conn.close()
-        return {
+        task = {
             "index": index,
             "file_path": file_path,
             "base_name": base_name,
             "out_path": out_path,
-            "parent_conn": parent_conn,
-            "proc": proc,
+            "work_path": work_path,
+            "staging_dir": staging_dir,
         }
+        parent_conn = child_conn = None
+        try:
+            parent_conn, child_conn = mp.Pipe(duplex=False)
+            proc = mp.Process(
+                target=_process_document_task_pipe,
+                args=(file_path, work_path, self.options, self.processing_mode, self.compression_settings, child_conn),
+            )
+            proc.start()
+            task.update(parent_conn=parent_conn, proc=proc)
+            return task
+        except Exception as exc:
+            if parent_conn is not None:
+                parent_conn.close()
+            warning = self._recycle_task_output(task)
+            if warning:
+                raise RuntimeError(f"{exc}；{warning}") from exc
+            raise
+        finally:
+            if child_conn is not None:
+                child_conn.close()
 
     def _terminate_process_task(self, task):
         proc = task["proc"]
@@ -153,15 +176,15 @@ class ProcessWorker(QThread):
                 pass
             proc.join(timeout=1)
 
-    def _remove_partial_output(self, out_path):
-        # 正式输出文件，以及子进程被强制终止时可能残留的中间临时文件
-        # （pdf_processor 处理流程会先写 out_path + ".tmp.pdf" 再交给 qpdf）。
-        for path in (out_path, f"{out_path}.tmp.pdf"):
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
+    def _recycle_task_output(self, task):
+        staging_dir = task.get("staging_dir")
+        if not staging_dir:
+            return ""
+        try:
+            recycle_owned_path(staging_dir, staging_dir)
+            return ""
+        except Exception:
+            return f"临时文件未能移入回收站，已保留于: {staging_dir}"
 
     def _close_task_connection(self, task):
         try:
@@ -171,18 +194,19 @@ class ProcessWorker(QThread):
 
     def _finish_process_task(self, task, success, msg):
         out_path = task["out_path"]
-        if success and self.overwrite_original:
+        if success:
             try:
-                os.replace(out_path, task["file_path"])
-                out_path = task["file_path"]
+                check_unlinked_path(out_path)
+                check_unlinked_path(task["work_path"])
+                os.replace(task["work_path"], out_path)
             except Exception as e:
                 success = False
-                msg = f"覆盖原文件失败: {str(e)}"
-                self._remove_partial_output(task["out_path"])
+                msg = f"提交输出失败（原文件已保留）: {str(e)}"
 
         status = "处理完成" if success else "处理失败"
-        if not success:
-            self._remove_partial_output(task["out_path"])
+        warning = self._recycle_task_output(task)
+        if warning:
+            msg = f"{msg}；{warning}"
 
         now = datetime.now().strftime('%H:%M:%S')
         self.structured_progress.emit({
@@ -201,7 +225,8 @@ class ProcessWorker(QThread):
         return success
 
     def _emit_stopped_task(self, task):
-        self._remove_partial_output(task["out_path"])
+        warning = self._recycle_task_output(task)
+        reason = "用户手动停止处理" + (f"；{warning}" if warning else "")
         now = datetime.now().strftime('%H:%M:%S')
         self.structured_progress.emit({
             "type": "terminal",
@@ -209,16 +234,18 @@ class ProcessWorker(QThread):
             "file_path": task["file_path"],
             "out_path": task["out_path"],
             "status": "已停止",
-            "message": "用户手动停止处理",
+            "message": reason,
         })
         self.progress.emit(
             task["file_path"],
             "已停止",
-            f"[{now}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: 用户手动停止处理",
+            f"[{now}] {task['file_path']}\n    状态: 已停止\n    输出文件: {task['out_path']}\n    原因: {reason}",
         )
 
     def _emit_skipped_task(self, task, reason="已跳过当前文件"):
-        self._remove_partial_output(task["out_path"])
+        warning = self._recycle_task_output(task)
+        if warning:
+            reason = f"{reason}；{warning}"
         now = datetime.now().strftime('%H:%M:%S')
         self.structured_progress.emit({
             "type": "terminal",
