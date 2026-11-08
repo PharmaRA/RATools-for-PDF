@@ -777,9 +777,8 @@ def _step_image_compression(ctx):
     try:
         from PIL import Image
         from io import BytesIO
-    except ImportError:
-        ctx.notes.append("图像压缩需要安装 Pillow 库，本次未压缩图像")
-        return
+    except ImportError as exc:
+        raise RuntimeError("图像压缩不可用：缺少 Pillow 组件，请安装完整依赖或使用完整发布包") from exc
 
     settings = normalize_compression_settings(ctx.compression_settings)
     target_dpi = settings["dpi"]

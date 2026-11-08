@@ -35,6 +35,12 @@ def configure_runtime():
 def run():
     configure_runtime()
 
+    if len(sys.argv) > 1 and sys.argv[1] == '--verify-image-compression':
+        if len(sys.argv) != 3:
+            raise SystemExit('Usage: --verify-image-compression NEW_OUTPUT_DIRECTORY')
+        from ratools_pdf.services.compression_check import verify_image_compression
+        raise SystemExit(verify_image_compression(sys.argv[2]))
+
     app = QApplication(sys.argv)
     view = MainWindow()
     controller = MainController(view)

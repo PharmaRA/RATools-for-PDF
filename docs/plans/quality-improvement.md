@@ -32,8 +32,8 @@
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 60957f8；9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
 | 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 7a9903e；6/6；全量 371/371；review 通过 |
 | 15 | R-15 | P2 | 诊断任务结果归属 | 已完成 | a565e7b；9/9；旧诊断 5/5；全量 380/380；review 通过 |
-| 16 | R-16 | P2 | 解密准备异常反馈 | 已完成 | 7/7；全量 387/387；review 通过 |
-| 17 | R-17 | P2 | Pillow 打包及能力反馈 | 待实施 | — |
+| 16 | R-16 | P2 | 解密准备异常反馈 | 已完成 | ac4a795；7/7；全量 387/387；review 通过 |
+| 17 | R-17 | P2 | Pillow 打包及能力反馈 | 已完成 | 3/3；全量 390/390；两个真实 EXE 自检通过；二轮 review 通过 |
 | 18 | R-18 | P2 | 按真实尺寸计算压缩 DPI | 待实施 | — |
 
 ## 验证与推进记录
@@ -211,3 +211,14 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - Review：`ui_review` 明确通过，独立七项内存验证覆盖目录准备、结果先于线程结束、重复启动、无摘要、构造/启动异常及恢复，无阻断。
 - 全量：`python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：387/387 通过，59.778 秒；日志 `backups/verification/R16-full.log`。
 - 提交主题：`fix: report decryption preparation failures and restore dialog controls`。
+
+### R-17：Pillow 发布能力与可重复构建（2026-11-09）
+
+- RED：构建显式排除 PIL、请求图片压缩却缺 Pillow 时仍返回成功，两个测试均失败。修复后缺依赖在保存前明确失败，保留已有输出。
+- 构建入口改为 Python 安全运行器；每次 work/dist 使用独立 UUID，不覆盖旧产物，回收清理不回退物理删除，保留双变体、版本信息、资源及 GUI 子系统。PIL 不再排除。隔离安装 PyInstaller 6.22.3，应用运行依赖仍来自当前 Python 环境；首次下载失败，7890 代理成功。
+- Review 首轮实证 PyInstaller isolated 子进程未继承主进程 audit；新增专用 sitecustomize 继承有界回收/audit，加载失败立即退出，并在正式构建前用真实 isolated.call 合成删除事件验证主/子进程均 BLOCKED。二轮 `controllers_review` 明确通过；未观察到首轮实际物理删除，不把探针漏洞描述为已发生删除。
+- 新增 `--verify-image-compression NEW_DIRECTORY` 无界面成品自检，生成合成 PDF、调用真实管线、检查降采样/体积下降/可渲染；拒绝覆盖已有自检目录。源码专项 3/3。
+- 最终成品：`dist/265f6edc86d1439a8938508d066a7042/`，更新版与 NoUpdate 两个 EXE 均退出 0，原 1800×2200 图像压为 612×748，PDF 504960→38211 字节。验证报告 `backups/verification/R17-guarded-normal/verification.json` 与 `R17-guarded-no-update/verification.json`；构建日志 `R17-guarded-build.log` 含主/子保护探针通过。
+- 首轮全量 390 项仅旧结构测试失败：仍要求 bat 内联构建。已更新为检查实际 Python 入口/包模块路径；最终全量 `python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：390/390 通过，63.325 秒，日志 `backups/verification/R17-reviewed-full.log`。
+- 构建与成品自检说明：[Windows 构建验收](../build-verification.md)。本项只验证图片压缩的成品能力，不声称完整 GUI 或真实业务文档资格验证。
+- 提交主题：`fix: include Pillow in releases and verify packaged image compression`。

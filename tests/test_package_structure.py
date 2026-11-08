@@ -96,16 +96,19 @@ class PackageStructureTests(unittest.TestCase):
 
     def test_build_scripts_use_package_module_paths(self):
         repo_root = Path(__file__).resolve().parents[1]
-        pyinstaller_script = (repo_root / "build_pyinstaller.bat").read_text(encoding="utf-8")
+        pyinstaller_wrapper = (repo_root / "build_pyinstaller.bat").read_text(encoding="utf-8")
+        self.assertIn("build_pyinstaller_safely.py", pyinstaller_wrapper)
+        pyinstaller_script = (repo_root / "scripts" / "build_pyinstaller_safely.py").read_text(encoding="utf-8")
         nuitka_script = (repo_root / "build_nuitka.bat").read_text(encoding="utf-8")
         release_workflow = (repo_root / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
         package_version_import = "from ratools_pdf.config.version import APP_VERSION_STR"
 
-        self.assertIn(package_version_import, pyinstaller_script)
+        self.assertIn("from ratools_pdf.config.version import ", pyinstaller_script)
+        self.assertIn("APP_VERSION_STR", pyinstaller_script)
         self.assertIn(package_version_import, nuitka_script)
         self.assertIn(package_version_import, release_workflow)
         self.assertIn("--include-module=ratools_pdf.config.paths", nuitka_script)
-        self.assertIn("--exclude-module ratools_pdf.services.update_checker", pyinstaller_script)
+        self.assertIn("['--exclude-module','ratools_pdf.services.update_checker']", pyinstaller_script)
         self.assertNotIn("from app_version import", pyinstaller_script)
         self.assertNotIn("from app_version import", nuitka_script)
         self.assertNotIn("from app_version import", release_workflow)
