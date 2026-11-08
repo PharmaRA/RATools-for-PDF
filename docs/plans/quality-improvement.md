@@ -19,8 +19,8 @@
 |---|---|---|---|---|---|
 | 01 | R-01 | P1 | 临时输出所有权、成功提交、失败回收 | 已完成 | aa1ee0e；14/14；全量 252/252；review 通过 |
 | 02 | R-08 | P1 | 普通批次/IO/拆分/解密输出冲突 | 已完成 | 35ff9d0；14/14；全量 266/266；review 通过 |
-| 03 | R-02 | P1 | 链接改色内容流 | 已完成 | 11/11；全量 277/277；review 通过；见下方记录 |
-| 04 | R-03 | P1 | 旋转页纸张适配 | 待实施 | — |
+| 03 | R-02 | P1 | 链接改色内容流 | 已完成 | e82c5af；11/11；全量 277/277；review 通过 |
+| 04 | R-03 | P1 | 旋转页纸张适配 | 已完成 | 9/9；全量 286/286；review 通过；见下方记录 |
 | 05 | R-04 | P1 | 缩放后导航恢复 | 待实施 | — |
 | 06 | R-05 | P1 | 图像透明信息 | 待实施 | — |
 | 07 | R-06 | P1 | 动态内容精确清理 | 待实施 | — |
@@ -78,3 +78,14 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：277/277 通过，41.314 秒；日志 `backups/verification/R02-reviewed-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: preserve PDF text and color state when styling links`。
 - 安全边界：内联图像、跨流文本对象或源码文本块与渲染跨度无法可靠对应时，不猜测并改写原流；这类复杂页面的改色覆盖能力未作全面资格声明。文字安全与本项明确验收已通过。
+
+### R-03：旋转页纸张适配（2026-11-09）
+
+- RED：初始四组测试出现八个失败子场景，复现 90/270 度方向及裁切、批注/内联链接错位、跨内容流字体状态丢失。
+- 修复：保留 Rotate，按照可见裁剪框在原始 PDF 坐标中缩放、居中和裁剪；为整个 Contents 添加独立前后流，避免修改共享内容流及逐流重置状态。按原始 PDF 几何统一调整批注、QuadPoints、表单与链接区域，保留动作和外观。
+- Review：`pdf_core_review` 首轮发现共享 BS 字典被重复缩放；已在修改前复制字典，三引用回归 RED→GREEN，二轮明确通过。
+- 全量初轮：284 项中三个页面适配用例发生回收 COM 错误。新增禁用循环 GC 的 Windows 独占打开测试，确认递归闭包保留底层 PDF 句柄；将递归助手移至顶层后 RED→GREEN，源文件可立即释放。原失败日志为 `backups/verification/R03-full.log`。
+- GREEN：`python -X utf8 -B scripts/run_tests_safely.py test_page_resize_safety.py`：9/9 通过，含四种旋转角度的文字坐标和像素、批注/高亮/表单/URI 渲染、CropBox、内联链接、共享流/样式以及实际 A4 管线输出。
+- 最终全量：`python -X utf8 -B scripts/run_tests_safely.py`：286/286 通过，43.221 秒；日志 `backups/verification/R03-reviewed-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: preserve rotated page content during paper normalization`。
+- 边界：书签及跨页导航的目标坐标仍按 R-04 独立修复；本项完成页面可见内容和页面内对象的适配。
