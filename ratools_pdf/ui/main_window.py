@@ -712,6 +712,11 @@ class MainWindow(QMainWindow):
                     self.row_custom_widget.setVisible(True)
 
     def closeEvent(self, event):
+        close_guard = getattr(self, "close_guard", None)
+        if close_guard is not None and not close_guard():
+            self.processing_hint_label.setText("后台任务仍在运行，请等待完成后关闭。")
+            event.ignore()
+            return
         self.persist_all_settings()
         super().closeEvent(event)
 

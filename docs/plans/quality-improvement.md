@@ -27,8 +27,8 @@
 | 08 | R-07 | P1 | 签名烘焙失败保护 | 已完成 | 3684dbd；11/11；原签名 5/5；全量 323/323；review 通过 |
 | 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | e02b45c；8/8；全量 331/331；review 通过 |
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | d3af2c0；7/7；直接回归 22/22；全量 338/338；review 通过 |
-| 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 13/13；全量 351/351；二轮 review 通过 |
-| 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 待实施 | — |
+| 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 2cec9ab；13/13；全量 351/351；二轮 review 通过 |
+| 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 5/5；全量 356/356；review 通过 |
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 待实施 | — |
 | 14 | R-14 | P2 | 过期预检拦截 | 待实施 | — |
 | 15 | R-15 | P2 | 诊断任务结果归属 | 待实施 | — |
@@ -159,3 +159,13 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - GREEN：`test_io_busy.py` 13/13；含 IO/主处理/预检/检测的受控真实 QThread 成功和失败、结果与退出分离、重复启动、队列保护、目录准备和线程启动失败、双向目录选择重入。主处理回归使用实际 QObject 接收槽，避免非 Qt 夹具的连接限制。
 - 初轮全量 348/348；最终全量：`python -X utf8 -B scripts/run_tests_safely.py`：351/351 通过，55.205 秒；日志 `backups/verification/R11-reviewed-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: serialize IO and processing tasks until worker threads finish`。
+
+### R-12：关闭与退出线程收尾（2026-11-09）
+
+- RED：四个工作台的顶部关闭、Escape、系统关闭、accept/done 共 20 个子场景均在工作线程运行时隐藏窗口；主窗口统一生命周期接口尚不存在。
+- 修复：对话框基类统一拦截所有关闭路径，检查全部子 QThread 的 wait(0)，包括被最新引用遮蔽的旧诊断线程。主窗口关闭前经控制器检查主处理、IO、预检、检测、更新及全部工作台子线程，未结束则保留窗口并提示等待。
+- 应用 aboutToQuit 统一等待所有受管理线程结束后退出，不使用超时后销毁运行中线程的路径。任务自然完成写入和子进程收尾；正常点击关闭被拦截后需在任务结束后重新关闭。直接退出等待期间可能持续至当前任务结束，本项没有实现中途强制取消。
+- GREEN：`test_window_lifecycle.py` 5/5，含上述 20 子场景、五类主控 worker、旧诊断线程、六线程退出等待及真实 Windows spawn PDF 任务；关闭时子进程保持运行，任务完成后子进程退出且有效 PDF 已发布，再允许关闭。测试绕过用户 QSettings，不读写真实设置。
+- Review：`ui_review` 明确通过，独立内存复验四项（含 20 个关闭场景），并验证真实 QApplication.exec→app.quit 会等待线程且设置退出状态；未发现线程依赖 GUI 回调造成死锁。真实 PDF 回归由主代理安全运行器验收。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：356/356 通过，53.763 秒；日志 `backups/verification/R12-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: guard window closure until background work has finished`。

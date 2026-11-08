@@ -1,5 +1,5 @@
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
@@ -80,6 +80,34 @@ class FramelessDraggableDialog(QDialog):
         bg_layout.addWidget(self.content_widget)
 
         self.main_layout.addWidget(self.bg_frame)
+
+    def _can_close(self):
+        # Inspect all children, including an older worker whose latest-reference
+        # attribute may have been replaced. wait(0) also covers final thread cleanup.
+        if any(not worker.wait(0) for worker in self.findChildren(QThread)):
+            status = getattr(self, "lbl_status", None)
+            if status is not None:
+                status.setText("后台任务仍在运行，请等待完成后关闭。")
+            return False
+        return True
+
+    def reject(self):
+        if self._can_close():
+            super().reject()
+
+    def accept(self):
+        if self._can_close():
+            super().accept()
+
+    def done(self, result):
+        if self._can_close():
+            super().done(result)
+
+    def closeEvent(self, event):
+        if not self._can_close():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def mousePressEvent(self, event):
         """接管鼠标按下事件：若点击在实际标题栏区域内，则记录起始坐标"""

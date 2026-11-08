@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QObject, QThread, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
@@ -63,11 +63,13 @@ class MainController(QObject):
         self.precheck = PrecheckController(self, self.view, parent=self)
         self.tree_actions = TreeActionsController(self, self.view, parent=self)
         self.updates = UpdateController(self.view, parent=self)
+        self._shutting_down = False
+        self.view.close_guard = self.can_close
 
         self.setup_connections()
         app = QCoreApplication.instance()
         if app:
-            app.aboutToQuit.connect(self.updates.shutdown)
+            app.aboutToQuit.connect(self.shutdown)
 
         # 树状态列颜色是逐节点 setForeground 写入的，主题切换后必须整树重刷，
         # 否则保留上一主题的前景色（暗底旧亮色对比度不足）。
@@ -115,6 +117,24 @@ class MainController(QObject):
     def _is_precheck_running(self):
         return self.precheck.is_running()
 
+    def _managed_workers(self):
+        workers = [self.worker, self.precheck.precheck_worker,
+                   self.detection.detection_worker, self.io.io_worker,
+                   self.updates.update_worker]
+        workers.extend(self.view.findChildren(QThread))
+        return list(dict.fromkeys(worker for worker in workers if worker is not None))
+
+    def can_close(self):
+        return all(worker.wait(0) for worker in self._managed_workers())
+
+    def shutdown(self):
+        # aboutToQuit can also be triggered without a window close event.
+        # Finish owned work before QObject/QThread destruction; a timeout would
+        # allow still-running writers to be destroyed when the event loop exits.
+        self._shutting_down = True
+        for worker in self._managed_workers():
+            worker.wait()
+
     @property
     def last_precheck_results(self):
         return self.precheck.last_precheck_results
@@ -124,6 +144,9 @@ class MainController(QObject):
 
         action_label 用于拼接提示文案，如 "移除队列项" → "请等待当前批量处理结束后再移除队列项。"
         """
+        if getattr(self, "_shutting_down", False):
+            self.view.show_warning_message("⚠️ 正在退出", "正在等待后台任务结束，请稍候。")
+            return False
         if self.worker is not None:
             self.view.show_warning_message("⚠️ 正在处理中", f"请等待当前批量处理结束后再{action_label}。")
             return False
