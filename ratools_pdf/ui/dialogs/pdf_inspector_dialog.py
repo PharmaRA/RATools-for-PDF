@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ratools_pdf.pdf import qpdf
+from ratools_pdf.services.output_paths import path_key
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 
@@ -66,6 +67,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self.resize(880, 640)
         self.setMinimumSize(800, 560)
         self.worker: Optional[DiagnosticWorker] = None
+        self._diagnosis_generation = 0
         self.current_json_ast: Optional[Dict[str, Any]] = None
 
         self.content_layout.setSpacing(10)
@@ -73,6 +75,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self._build_file_bar(initial_file)
         self._build_tabs()
         self._build_footer()
+        self.txt_path.textChanged.connect(self._invalidate_diagnosis)
 
         if initial_file and os.path.exists(initial_file):
             self.run_diagnosis(initial_file)
@@ -263,15 +266,63 @@ class PdfInspectorDialog(FramelessDraggableDialog):
             QMessageBox.warning(self, "提示", "请选择有效的 PDF 文件！")
             return
 
+        file_path = os.path.abspath(file_path)
+        self.txt_path.setText(file_path)
+        self._invalidate_diagnosis()
         self.btn_diagnose.setEnabled(False)
         self.lbl_status.setText("⏳ 正在进行深度诊断与 AST 解析...")
 
-        self.worker = DiagnosticWorker(file_path, parent=self)
-        self.worker.finished_signal.connect(self._on_diagnosis_finished)
-        self.worker.start()
+        worker = None
+        try:
+            worker = DiagnosticWorker(file_path, parent=self)
+            worker.diagnosis_generation = self._diagnosis_generation
+            worker.result_received = False
+            self.worker = worker
+            worker.finished_signal.connect(self._on_diagnosis_finished)
+            worker.finished.connect(self._on_diagnosis_thread_finished)
+            worker.start()
+        except Exception as exc:
+            self.worker = None
+            if worker is not None:
+                worker.deleteLater()
+            self.btn_diagnose.setEnabled(True)
+            self.lbl_status.setText("诊断启动失败，请重试")
+            self.txt_check_log.setPlainText(str(exc))
+
+    def _invalidate_diagnosis(self, *_):
+        self._diagnosis_generation += 1
+        self.current_json_ast = None
+        self.btn_export_json.setEnabled(False)
+        self.btn_diagnose.setEnabled(True)
+        self.tree_json.clear()
+        for widget in (self.txt_check_log, self.txt_enc_log, self.txt_lin_log):
+            widget.clear()
+        for badge in (self.lbl_check_badge, self.lbl_enc_badge, self.lbl_lin_badge):
+            badge.setText("尚未诊断")
+        self.lbl_status.setText("文件已更改，请开始诊断")
+
+    def _on_diagnosis_thread_finished(self):
+        worker = self.sender()
+        if self.worker is worker:
+            self.worker = None
+            self.btn_diagnose.setEnabled(True)
+            if worker.diagnosis_generation == self._diagnosis_generation and not worker.result_received:
+                self.lbl_status.setText("诊断未返回有效结果，请重试")
+        worker.deleteLater()
 
     def _on_diagnosis_finished(self, data: Dict[str, Any]):
-        self.btn_diagnose.setEnabled(True)
+        worker = self.sender()
+        if (worker is not self.worker or worker is None
+                or worker.diagnosis_generation != self._diagnosis_generation
+                or not data.get("path")
+                or path_key(data["path"]) != path_key(self.txt_path.text().strip())):
+            return
+        worker.result_received = True
+        if data.get("error"):
+            self.lbl_status.setText("诊断失败，请重试")
+            self.lbl_check_badge.setText("诊断失败")
+            self.txt_check_log.setPlainText(str(data["error"]))
+            return
         self.lbl_status.setText("诊断完成")
 
         # 1. 语法检查结果
@@ -359,10 +410,11 @@ class PdfInspectorDialog(FramelessDraggableDialog):
     def _on_export_json_clicked(self):
         if not self.current_json_ast:
             return
+        generation = self._diagnosis_generation
         save_path, _ = QFileDialog.getSaveFileName(
             self, "导出 PDF AST JSON", "pdf_ast.json", "JSON 文件 (*.json)"
         )
-        if save_path:
+        if save_path and self.current_json_ast and generation == self._diagnosis_generation:
             try:
                 with open(save_path, "w", encoding="utf-8") as f:
                     json.dump(self.current_json_ast, f, ensure_ascii=False, indent=2)

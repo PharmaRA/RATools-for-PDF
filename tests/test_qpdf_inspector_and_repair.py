@@ -5,7 +5,9 @@ import tempfile
 import unittest
 
 import fitz
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
+from shiboken6 import isValid
 
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.ui.dialogs.pdf_inspector_dialog import PdfInspectorDialog
@@ -97,14 +99,27 @@ class PdfInspectorDialogUiTests(unittest.TestCase):
             _create_sample_pdf(pdf_path, 1)
 
             dlg = PdfInspectorDialog(initial_file=pdf_path)
-            self.assertEqual(dlg.txt_path.text(), pdf_path)
-            self.assertEqual(dlg.tabs.count(), 5)
-            self.assertEqual(dlg.tabs.tabText(0), "语法健康体检")
-            self.assertEqual(dlg.tabs.tabText(1), "加密与权限透视")
-            self.assertEqual(dlg.tabs.tabText(2), "线性化(Web快速视图)")
-            self.assertEqual(dlg.tabs.tabText(3), "底层 JSON 探针")
-            self.assertEqual(dlg.tabs.tabText(4), "受损抢救修复")
-            dlg.close()
+            worker = dlg.worker
+            try:
+                self.assertEqual(dlg.txt_path.text(), pdf_path)
+                self.assertEqual(dlg.tabs.count(), 5)
+                self.assertEqual(dlg.tabs.tabText(0), "语法健康体检")
+                self.assertEqual(dlg.tabs.tabText(1), "加密与权限透视")
+                self.assertEqual(dlg.tabs.tabText(2), "线性化(Web快速视图)")
+                self.assertEqual(dlg.tabs.tabText(3), "底层 JSON 探针")
+                self.assertEqual(dlg.tabs.tabText(4), "受损抢救修复")
+                self.assertTrue(worker.wait(10000), 'diagnosis did not finish')
+                app.processEvents()
+                self.assertIsNone(dlg.worker)
+                self.assertIsNotNone(dlg.current_json_ast)
+            finally:
+                # The worker must not outlive its input directory or leave queued
+                # GUI callbacks to run inside a later test's style changes.
+                if worker is not None and isValid(worker):
+                    worker.wait()
+                dlg.close()
+                dlg.deleteLater()
+                QCoreApplication.sendPostedEvents(dlg, QEvent.DeferredDelete)
 
 
 if __name__ == "__main__":

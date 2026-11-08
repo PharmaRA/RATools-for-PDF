@@ -30,8 +30,8 @@
 | 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 2cec9ab；13/13；全量 351/351；二轮 review 通过 |
 | 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 75e57df；5/5；全量 356/356；review 通过 |
 | 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 60957f8；9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
-| 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 6/6；全量 371/371；review 通过 |
-| 15 | R-15 | P2 | 诊断任务结果归属 | 待实施 | — |
+| 14 | R-14 | P2 | 过期预检拦截 | 已完成 | 7a9903e；6/6；全量 371/371；review 通过 |
+| 15 | R-15 | P2 | 诊断任务结果归属 | 已完成 | 9/9；旧诊断 5/5；全量 380/380；review 通过 |
 | 16 | R-16 | P2 | 解密准备异常反馈 | 待实施 | — |
 | 17 | R-17 | P2 | Pillow 打包及能力反馈 | 待实施 | — |
 | 18 | R-18 | P2 | 按真实尺寸计算压缩 DPI | 待实施 | — |
@@ -190,3 +190,15 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - Review：`controllers_review` 明确通过，确认失效逻辑、直接执行入口保护、异常路径和重新预检恢复，无阻断。
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：371/371 通过，56.718 秒；日志 `backups/verification/R14-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: reject stale precheck suggestions before applying or processing`。
+
+### R-15：诊断结果与导出 AST 归属（2026-11-09）
+
+- RED：初始七项全部未通过，复现不同文件及 A→B→A 的旧结果覆盖、路径编辑后旧 AST 仍可导出、错误路径 payload 被接受、失败/启动失败和旧线程释放问题。
+- 修复：路径变化与每次诊断递增代次并清空旧展示/AST；结果必须来自当前 worker、匹配代次及规范化后的显示路径。失败不发布部分 AST。各线程在真实 finished 时按 sender 释放，旧任务不会清空新任务引用；启动异常恢复重试。
+- 导出保存对话框返回后再次核对代次，避免选择目录期间切换文件后写出错误内容；新增失败复现后修复。
+- GREEN：`test_diagnosis_identity.py` 9/9，包括真实受控 QThread 的 B→A 完成与两线程销毁、当前引用保全、错误路径、失败重试、导出重入及路径编辑失效。运行中的旧线程继续受 R-12 的父子关系关闭保护管理。
+- 全量前两轮在主题测试恢复全局样式表时发生原生 0xC0000005（`R15-full.log`、`R15-faulthandler-full.log`）；诊断+主题窄组合 18/18 通过。新增诊断测试夹具改为明确销毁自身对话框，并将 DeferredDelete 刷新限定到自身线程，排除测试对象延迟销毁和全局清理耦合；生产主题代码未修改，最终全量正在复验。
+- 上述夹具改动未单独解决崩溃；完整隔离保留生产代码，排除新增诊断测试 371/371、只排除旧诊断窗口初始化用例 379/379 通过。已确认旧初始化用例自动启动真实诊断，却未等待线程和排队结果就离开临时输入目录；R-12 的关闭守卫会拒绝其提前关闭。现该用例等待真实完成、处理结果、断言 AST 后定向销毁窗口，专项 5/5 通过，完整套件复验中。未把 GC、销毁信号参数或主题代码认定为未经证实的根因。
+- Review：`ui_review` 实现及新增夹具 review 通过，独立内存复验 9/9；旧诊断测试补齐 reviewer 建议的 isValid 检查，已销毁线程包装不会阻断对话框清理，专项再验 5/5。
+- 最终全量：`python -X utf8 -X faulthandler -B scripts/run_tests_safely.py`：380/380 通过，60.648 秒；日志 `backups/verification/R15-lifecycle-full.log`。最后仅新增测试清理有效性检查后专项 5/5 通过，生产实现未变。临时隔离运行器已移入回收站；排查日志保留。
+- 提交主题：`fix: bind diagnosis results and AST exports to the current request`。
