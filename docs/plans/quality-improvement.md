@@ -28,8 +28,8 @@
 | 09 | R-09 | P1 | 队列去重与任务身份 | 已完成 | e02b45c；8/8；全量 331/331；review 通过 |
 | 10 | R-10 | P1 | 并行异常收尾，串行 IPC 验证 | 已完成 | d3af2c0；7/7；直接回归 22/22；全量 338/338；review 通过 |
 | 11 | R-11 | P1 | IO 忙碌互斥 | 已完成 | 2cec9ab；13/13；全量 351/351；二轮 review 通过 |
-| 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 5/5；全量 356/356；review 通过 |
-| 13 | R-13 | P2 | 命名书签 CSV 往返 | 待实施 | — |
+| 12 | R-12 | P1 | 窗口关闭和应用退出收尾 | 已完成 | 75e57df；5/5；全量 356/356；review 通过 |
+| 13 | R-13 | P2 | 命名书签 CSV 往返 | 已完成 | 9/9；既有往返 7/7；全量 365/365；二轮 review 通过 |
 | 14 | R-14 | P2 | 过期预检拦截 | 待实施 | — |
 | 15 | R-15 | P2 | 诊断任务结果归属 | 待实施 | — |
 | 16 | R-16 | P2 | 解密准备异常反馈 | 待实施 | — |
@@ -169,3 +169,15 @@ Windows 本机使用 `python -X utf8 -B scripts/run_tests_safely.py [test_*.py]`
 - Review：`ui_review` 明确通过，独立内存复验四项（含 20 个关闭场景），并验证真实 QApplication.exec→app.quit 会等待线程且设置退出状态；未发现线程依赖 GUI 回调造成死锁。真实 PDF 回归由主代理安全运行器验收。
 - 全量：`python -X utf8 -B scripts/run_tests_safely.py`：356/356 通过，53.763 秒；日志 `backups/verification/R12-full.log`。仅有上游 fitz API 弃用提示。
 - 提交主题：`fix: guard window closure until background work has finished`。
+
+### R-13：书签 CSV 命名目标与文件动作（2026-11-09）
+
+- RED：初始六项测试中五项未通过，复现本地命名跳转变为空动作、远程目标丢失、不支持动作/CSV 类型被静默接受；旧三列格式原本通过。
+- 修复：新增 NamedDest 字段；先创建层级，再写回标准 GoTo/GoToR 命名动作。按原始 PDF 动作读取远程文件、命名/XYZ 目标和窗口标志；窗口未指定/true/false 三态保留。输入解析失败报告 CSV 行号，未知动作明确拒绝，导出验证完成后才覆盖 CSV；文档通过上下文管理器关闭。
+- PyMuPDF 边界：远程目标页码超出当前文档页数可让 get_toc 返回空列表，且远程命名目标/Launch 类型会误判。导出先保存原始文件动作，仅在未保存的内存文档去除动作后遍历标题层级，再合并原始数据；验证输入 PDF 字节不变。远程写回避开 set_toc 将命名字符串当 Point 的限制。
+- Review 首轮确认 Launch 被高层 API 误报 GoToR；新增回归 RED→GREEN，现按原始 /A/S 保留 Launch 类型及窗口标志。
+- GREEN：`test_bookmark_csv_targets.py` 9/9；原 `test_pdf_processor_roundtrip.py` 7/7。包括本地命名层级/解析目标、转义字符、远程命名与 XYZ、Launch、窗口三态、源字节保全、旧三列兼容及错误输入不覆盖已有产物。
+- Review：`pdf_core_review` 二轮明确通过，独立内存 PDF 往返复验 Launch 的窗口三态，原阻断解除。
+- 全量：`python -X utf8 -B scripts/run_tests_safely.py`：365/365 通过，56.537 秒；日志 `backups/verification/R13-full.log`。仅有上游 fitz API 弃用提示。
+- 提交主题：`fix: preserve named bookmark targets and file actions in CSV round trips`。
+- 兼容性：新导出多一个 NamedDest 列；旧三列及原扩展格式仍支持。不能表示的远程目标（例如 Fit 模式）明确报错，避免静默生成错误跳转。

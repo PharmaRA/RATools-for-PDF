@@ -6,102 +6,142 @@ from urllib.parse import unquote
 import fitz
 
 
+def _file_bookmark_data(doc, xref, kind):
+    """Read file actions directly: MuPDF may confuse Launch and GoToR."""
+    file_kind, filename = doc.xref_get_key(xref, "A/F")
+    if file_kind in ("dict", "xref"):
+        file_kind, filename = doc.xref_get_key(xref, "A/F/UF")
+        if file_kind == "null":
+            file_kind, filename = doc.xref_get_key(xref, "A/F/F")
+    if file_kind != "string" or not filename:
+        raise ValueError("不支持的远程书签文件说明")
+    window_kind, new_window = doc.xref_get_key(xref, "A/NewWindow")
+    data = {"kind": kind, "file": filename,
+            "newWindow": new_window if window_kind == "bool" else ""}
+    if kind == fitz.LINK_LAUNCH:
+        return data
+    target_kind, target = doc.xref_get_key(xref, "A/D")
+    if target_kind in ("string", "name"):
+        data.update(page=-1, nameddest=target[1:] if target_kind == "name" else target)
+    else:
+        number = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+        match = re.fullmatch(rf"\[([0-9]+)\s*/XYZ\s+({number})\s+({number})\s+({number})\s*\]", target)
+        if not match:
+            raise ValueError("不支持的远程书签目标；仅支持命名目标和显式 XYZ 坐标")
+        page, x, y, zoom = match.groups()
+        data.update(page=int(page), to=fitz.Point(float(x), float(y)), zoom=float(zoom))
+    return data
+
+
 def export_bookmarks(pdf_path, csv_path):
-    """Export bookmarks to CSV with enough action data for round-trip import."""
-    doc = fitz.open(pdf_path)
-    toc = doc.get_toc(simple=False)
-    with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Level', 'Title', 'Page', 'Kind', 'Uri', 'File', 'TargetPage', 'ToX', 'ToY', 'Zoom', 'NewWindow'])
-        for item in toc:
-            lvl, title, page, dest = item
-            if not isinstance(dest, dict):
-                dest = {}
-            point = dest.get('to')
-            writer.writerow([
-                lvl,
-                title,
-                page,
-                dest.get('kind', fitz.LINK_NONE),
-                dest.get('uri', ''),
-                dest.get('file', ''),
-                dest.get('page', ''),
-                getattr(point, 'x', ''),
-                getattr(point, 'y', ''),
-                dest.get('zoom', ''),
-                dest.get('newWindow', False),
-            ])
-    doc.close()
+    """Export complete supported actions; reject unsupported actions before writing."""
+    with fitz.open(pdf_path) as doc:
+        file_actions = {}
+        for xref in doc.get_outline_xrefs():
+            action = doc.xref_get_key(xref, "A/S")[1]
+            if action not in ("null", "/GoTo", "/GoToR", "/URI", "/Launch"):
+                raise ValueError(f"不支持的书签动作: {action}")
+            if action in ("/GoToR", "/Launch"):
+                kind = fitz.LINK_GOTOR if action == "/GoToR" else fitz.LINK_LAUNCH
+                file_actions[xref] = _file_bookmark_data(doc, xref, kind)
+                # Remote page numbers can exceed this document's page count and
+                # make MuPDF return an empty TOC. Traverse titles/hierarchy with
+                # remote actions removed only in this unsaved in-memory document.
+                doc.xref_set_key(xref, "A", "null")
+        rows = []
+        for lvl, title, page, dest in doc.get_toc(simple=False):
+            dest = file_actions.get(dest.get("xref"), dest)
+            kind = dest.get("kind", fitz.LINK_NONE)
+            if kind not in (fitz.LINK_NONE, fitz.LINK_GOTO, fitz.LINK_NAMED,
+                            fitz.LINK_GOTOR, fitz.LINK_URI, fitz.LINK_LAUNCH):
+                raise ValueError(f"不支持的书签类型: {kind}")
+            point = dest.get("to")
+            new_window = dest.get("newWindow", "")
+            rows.append([lvl, title, page, kind, dest.get("uri", ""), dest.get("file", ""),
+                         dest.get("page", ""), getattr(point, "x", ""), getattr(point, "y", ""),
+                         dest.get("zoom", ""), new_window, dest.get("nameddest", "")])
+    with open(csv_path, 'w', newline='', encoding='utf-8-sig') as stream:
+        writer = csv.writer(stream)
+        writer.writerow(['Level', 'Title', 'Page', 'Kind', 'Uri', 'File', 'TargetPage',
+                         'ToX', 'ToY', 'Zoom', 'NewWindow', 'NamedDest'])
+        writer.writerows(rows)
 
 
 def import_bookmarks(pdf_path, csv_path, output_path):
-    """Import bookmarks from CSV while remaining compatible with the old 3-column format."""
-    doc = fitz.open(pdf_path)
-    new_toc = []
-
-    with open(csv_path, 'r', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                lvl = int(row.get('Level', 1))
-                title = row.get('Title', '')
-                page = int(row.get('Page', 1))
-                page = max(1, min(page, doc.page_count))
-
-                kind_text = str(row.get('Kind', '') or '').strip()
-                if not kind_text:
-                    new_toc.append([lvl, title, page])
-                    continue
-
-                kind = int(kind_text)
-                if kind == fitz.LINK_URI:
-                    dest = {
-                        'kind': fitz.LINK_URI,
-                        'uri': row.get('Uri', ''),
-                    }
-                elif kind == fitz.LINK_GOTO:
-                    target_page = int(row.get('TargetPage', page - 1) or (page - 1))
-                    dest = {
-                        'kind': fitz.LINK_GOTO,
-                        'page': max(0, min(target_page, doc.page_count - 1)),
-                        'to': fitz.Point(float(row.get('ToX', 72.0) or 72.0), float(row.get('ToY', 36.0) or 36.0)),
-                        'zoom': float(row.get('Zoom', 0.0) or 0.0),
-                    }
-                elif kind == fitz.LINK_GOTOR:
-                    target_page = int(row.get('TargetPage', 0) or 0)
-                    dest = {
-                        'kind': fitz.LINK_GOTOR,
-                        'file': row.get('File', ''),
-                        'page': max(0, target_page),
-                        'to': fitz.Point(float(row.get('ToX', 72.0) or 72.0), float(row.get('ToY', 36.0) or 36.0)),
-                        'zoom': float(row.get('Zoom', 0.0) or 0.0),
-                        'newWindow': str(row.get('NewWindow', 'false')).lower() == 'true',
-                    }
-                elif kind == fitz.LINK_LAUNCH:
-                    dest = {
-                        'kind': fitz.LINK_LAUNCH,
-                        'file': row.get('File', ''),
-                        'newWindow': str(row.get('NewWindow', 'false')).lower() == 'true',
-                    }
-                else:
-                    dest = {'kind': fitz.LINK_NONE}
-
-                new_toc.append([lvl, title, page, dest])
-            except (ValueError, TypeError):
+    """Import action data or legacy three-column CSV without silently losing targets."""
+    with fitz.open(pdf_path) as doc:
+        new_toc, action_overrides = [], []
+        with open(csv_path, 'r', encoding='utf-8-sig', newline='') as stream:
+            for line, row in enumerate(csv.DictReader(stream), start=2):
+                try:
+                    lvl = int(row.get('Level', 1))
+                    title = row.get('Title', '')
+                    page = max(1, min(int(row.get('Page', 1)), doc.page_count))
+                    kind_text = str(row.get('Kind', '') or '').strip()
+                    if not kind_text:
+                        new_toc.append([lvl, title, page])
+                        action_overrides.append(None)
+                        continue
+                    kind = int(kind_text)
+                    override = None
+                    if kind == fitz.LINK_NONE:
+                        dest = {'kind': fitz.LINK_NONE}
+                    elif kind == fitz.LINK_URI:
+                        dest = {'kind': kind, 'uri': row.get('Uri', '')}
+                    elif kind == fitz.LINK_NAMED:
+                        name = row.get('NamedDest', '')
+                        if not name:
+                            raise ValueError('命名目标不能为空')
+                        dest = {'kind': fitz.LINK_NONE}
+                        override = f'<</S/GoTo/D{fitz.get_pdf_str(name)}>>'
+                    elif kind in (fitz.LINK_GOTO, fitz.LINK_GOTOR):
+                        target_page = int(row.get('TargetPage', page - 1) or (page - 1))
+                        dest = {'kind': kind, 'page': target_page,
+                                'zoom': float(row.get('Zoom', 0) or 0)}
+                        if kind == fitz.LINK_GOTOR:
+                            dest['file'] = row.get('File', '')
+                        else:
+                            dest['page'] = max(0, min(target_page, doc.page_count - 1))
+                        if kind == fitz.LINK_GOTOR and target_page < 0:
+                            name = row.get('NamedDest', '')
+                            if not name:
+                                raise ValueError('远程命名目标不能为空')
+                            target = fitz.get_pdf_str(name)
+                        else:
+                            dest['to'] = fitz.Point(float(row.get('ToX', 72) or 72),
+                                                    float(row.get('ToY', 36) or 36))
+                            if kind == fitz.LINK_GOTOR:
+                                target = f"[{target_page}/XYZ {dest['to'].x:g} {dest['to'].y:g} {dest['zoom']:g}]"
+                        if kind == fitz.LINK_GOTOR:
+                            filename = fitz.get_pdf_str(dest['file'])
+                            override = f'<</S/GoToR/F<</Type/Filespec/F{filename}/UF{filename}>>/D{target}>>'
+                            dest = {'kind': fitz.LINK_NONE}
+                    elif kind == fitz.LINK_LAUNCH:
+                        dest = {'kind': kind, 'file': row.get('File', '')}
+                    else:
+                        raise ValueError(f'不支持的书签类型: {kind}')
+                    new_toc.append([lvl, title, page, dest])
+                    new_window = None
+                    if kind in (fitz.LINK_GOTOR, fitz.LINK_LAUNCH):
+                        value = str(row.get('NewWindow', '') or '').lower()
+                        if value not in ('', 'true', 'false'):
+                            raise ValueError('NewWindow 必须为 true 或 false')
+                        new_window = value or None
+                    action_overrides.append((override, new_window))
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f'书签 CSV 第 {line} 行无效: {exc}') from exc
+        for index, entry in enumerate(new_toc):
+            entry[0] = 1 if index == 0 else min(entry[0], new_toc[index - 1][0] + 1)
+        doc.set_toc(new_toc)
+        for xref, overrides in zip(doc.get_outline_xrefs(), action_overrides):
+            if overrides is None:
                 continue
-
-    if new_toc:
-        for i in range(len(new_toc)):
-            if i == 0:
-                new_toc[i][0] = 1
-            else:
-                prev_lvl = new_toc[i - 1][0]
-                if new_toc[i][0] > prev_lvl + 1:
-                    new_toc[i][0] = prev_lvl + 1
-
-    doc.set_toc(new_toc)
-    doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
-    doc.close()
+            action, new_window = overrides
+            if action is not None:
+                doc.xref_set_key(xref, 'A', action)
+            if new_window is not None:
+                doc.xref_set_key(xref, 'A/NewWindow', new_window)
+        doc.save(output_path, garbage=2, deflate=True, use_objstms=1)
 
 
 # 导出与导入超链接 (JSON)
