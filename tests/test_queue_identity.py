@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import fitz
 from PySide6.QtWidgets import QApplication, QTreeWidget
 
 from ratools_pdf.controllers.main_controller import MainController
@@ -23,7 +24,9 @@ class QueueIdentityTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.source = self.root/'report.pdf'
-        self.source.write_bytes(b'synthetic PDF queue entry')
+        with fitz.open() as doc:
+            doc.new_page().insert_text((72, 72), 'synthetic PDF queue entry')
+            doc.save(self.source)
         self.tree = QTreeWidget()
         self.tree.setColumnCount(3)
         self.addCleanup(self.tree.close)
@@ -73,7 +76,9 @@ class QueueIdentityTests(unittest.TestCase):
         stage = self.root/f'stage{index}'
         stage.mkdir()
         work = stage/'result.pdf'
-        work.write_bytes(f'result {index}'.encode())
+        with fitz.open() as doc:
+            doc.new_page().insert_text((72, 72), f'result {index}')
+            doc.save(work)
         proc = Mock()
         proc.is_alive.return_value = False
         conn = Mock()
@@ -96,7 +101,8 @@ class QueueIdentityTests(unittest.TestCase):
         self.assertEqual(errors,[])
         self.assertEqual(len(events),2)
         for index,task in enumerate(tasks):
-            self.assertEqual(Path(task['out_path']).read_bytes(),f'result {index}'.encode())
+            with fitz.open(task['out_path']) as doc:
+                self.assertIn(f'result {index}', doc[0].get_text())
             task['proc'].join.assert_called()
             task['parent_conn'].close.assert_called_once()
 

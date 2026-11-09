@@ -1,10 +1,11 @@
 import os
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, QThread, Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
+from PySide6.QtWidgets import QDialog, QFileDialog, QTreeWidgetItem
 
 from ratools_pdf.common.status import status_semantic
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
@@ -24,6 +25,8 @@ from ratools_pdf.controllers.workers import ProcessWorker
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.services import system_shell
 from ratools_pdf.services.output_paths import path_key
+from ratools_pdf.services.processing_plan import configuration_matches_plan, timestamp
+from ratools_pdf.ui.dialogs.processing_plan import ProcessingPlanDialog
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
 
@@ -44,6 +47,9 @@ class MainController(QObject):
         self.processing_current_file = ""
         self.processing_parallel_mode = False
         self.processing_worker_count = 1
+        self.planning_in_progress = False
+        self.processing_evidence = None
+        self.processing_evidence_history = {}
         self._last_processing_hint = ""
         self.last_failed_files = []
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
@@ -146,6 +152,9 @@ class MainController(QObject):
         """
         if getattr(self, "_shutting_down", False):
             self.view.show_warning_message("⚠️ 正在退出", "正在等待后台任务结束，请稍候。")
+            return False
+        if getattr(self, 'planning_in_progress', False):
+            self.view.show_warning_message('正在生成计划', f'请等待处理计划关闭后再{action_label}。')
             return False
         if self.worker is not None:
             self.view.show_warning_message("⚠️ 正在处理中", f"请等待当前批量处理结束后再{action_label}。")
@@ -526,6 +535,21 @@ class MainController(QObject):
         # ownership or changing shared batch state.
         if not self.ensure_idle("开始处理"):
             return
+        compression_settings = self.view.get_compression_settings()
+        plan = self._preview_processing_plan(processing_files, selected_options, processing_mode,
+                                             compression_settings, common_base or common_base_dir(processing_files))
+        if plan is None:
+            return
+        if not self.ensure_idle('开始处理'):
+            MainController._finish_processing_evidence(self, 'not_started')
+            return
+        if not configuration_matches_plan(plan, self.view.get_selected_options(),
+                                          self.view.get_processing_mode(), self.view.get_compression_settings()):
+            MainController._finish_processing_evidence(self, 'stale_plan')
+            self.view.show_warning_message('处理计划已失效', '选项或配置在预览期间发生变化，请重新生成处理计划。')
+            return
+        self.processing_evidence['outcome'] = 'running'
+        self.processing_evidence['started_at'] = timestamp()
         self.processing_parallel_mode = max_workers > 1
         self.processing_worker_count = max_workers
         if out_dir:
@@ -580,7 +604,8 @@ class MainController(QObject):
                 overwrite_original,
                 max_workers=max_workers,
                 processing_mode=processing_mode,
-                compression_settings=self.view.get_compression_settings(),
+                compression_settings=compression_settings,
+                processing_plan=plan,
             )
             self.worker.progress.connect(self.update_progress)
             self.worker.structured_progress.connect(self.record_process_log_event)
@@ -599,6 +624,51 @@ class MainController(QObject):
         self.view.set_task_busy("processing", False)
         if worker is not None:
             worker.deleteLater()
+
+    def _preview_processing_plan(self, files, options, mode, settings, base):
+        self.planning_in_progress = True
+        self.view.set_task_busy('processing', True)
+        try:
+            dialog = ProcessingPlanDialog(files, options, mode, settings, base, self.view)
+            accepted = dialog.exec() == QDialog.Accepted
+            MainController._retain_processing_plan(self, dialog.plan, 'previewed' if accepted else 'cancelled')
+            if not accepted:
+                MainController._finish_processing_evidence(self, 'cancelled')
+                return None
+            return dialog.plan
+        finally:
+            self.planning_in_progress = False
+            self.view.set_task_busy('processing', False)
+
+    def _retain_processing_plan(self, plan, outcome):
+        evidence = {'schema_version': 'pd02.batch.v1', 'batch_id': plan['batch_id'],
+                    'created_at': plan['created_at'], 'started_at': None, 'ended_at': None,
+                    'outcome': outcome, 'plan': deepcopy(plan), 'events': [],
+                    'files': {item['file_id']: {
+                        'file_id': item['file_id'], 'relative_path': item['relative_path'],
+                        'outcome': 'planning_failed' if item['status'] == 'failed' else 'planned',
+                        'before': deepcopy(item['before']), 'after': None, 'verification': None,
+                        'engine_success': None, 'published': False,
+                    } for item in plan['files']}}
+        history = getattr(self, 'processing_evidence_history', {})
+        history[plan['batch_id']] = evidence
+        self.processing_evidence_history = history
+        self.processing_evidence = evidence
+
+    def _finish_processing_evidence(self, outcome):
+        evidence = getattr(self, 'processing_evidence', None)
+        if evidence is None:
+            return
+        evidence['ended_at'] = timestamp()
+        for item in evidence['files'].values():
+            if item['outcome'] in {'planned', None}:
+                item['outcome'] = 'not_started'
+        outcomes = {item['outcome'] for item in evidence['files'].values()}
+        if outcome == 'finished' and 'stopped' in outcomes:
+            outcome = 'stopped'
+        elif outcome == 'finished' and outcomes - {'succeeded', 'skipped'}:
+            outcome = 'finished_with_failures'
+        evidence['outcome'] = outcome
 
     def _prompt_skip_signed_files(self, processing_files):
         """处理前检测已签名文件，并询问用户如何处理。
@@ -698,6 +768,14 @@ class MainController(QObject):
     def record_process_log_event(self, event):
         if not isinstance(event, dict):
             return
+        evidence = getattr(self, 'processing_evidence_history', {}).get(event.get('batch_id'))
+        if evidence is not None and event.get('file_id') in evidence['files']:
+            keys = ('type', 'batch_id', 'file_id', 'time', 'started_at', 'ended_at', 'before', 'after',
+                    'verification', 'engine_success', 'published', 'outcome', 'rule_actual_changed')
+            fact = deepcopy({key: event[key] for key in keys if key in event})
+            evidence['events'].append(fact)
+            if event.get('type') == 'terminal':
+                evidence['files'][event['file_id']].update(fact)
         file_path = event.get("file_path", "")
         if not file_path:
             return
@@ -732,6 +810,11 @@ class MainController(QObject):
             lines.append("失败项：0 个")
         if worker_summary:
             lines.extend(["", worker_summary])
+        evidence = getattr(self, 'processing_evidence', None)
+        if evidence:
+            checks = [item.get('verification') or {} for item in evidence['files'].values()]
+            verified = sum(check.get('publish_allowed') is True for check in checks)
+            lines.append(f'保存重开与结构预期均通过：{verified} / {len(checks)}；规则级验证：not_verified')
         return "\n".join(lines)
 
     def _reset_processing_ui(self):
@@ -761,6 +844,7 @@ class MainController(QObject):
         self._last_processing_hint = ""
 
     def processing_finished(self, summary):
+        MainController._finish_processing_evidence(self, 'finished')
         batch_summary = self._build_batch_result_summary(summary)
         self.process_logs += f"\n{'=' * 56}\n批量处理结束\n{batch_summary}\n{'=' * 56}\n"
         # 处理会改变文件状态，上一轮预检结果随之失效
@@ -780,6 +864,7 @@ class MainController(QObject):
                     self._open_directory(self.last_output_dir)
 
     def processing_error(self, error_msg):
+        MainController._finish_processing_evidence(self, 'failed')
         self.process_logs += f"\n{'!' * 56}\n[致命错误] {error_msg}\n{'!' * 56}\n"
         self._mark_precheck_stale()
         self._reset_processing_ui()

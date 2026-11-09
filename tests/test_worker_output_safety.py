@@ -13,6 +13,12 @@ import fitz
 from ratools_pdf.controllers.workers import ProcessWorker
 
 
+def _write_pdf(path, text):
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), text)
+        doc.save(path)
+
+
 def _child_cleanup_probe(conn, directory):
     blocked = False
     try:
@@ -35,7 +41,8 @@ class WorkerOutputSafetyTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.source = self.root / 'source.pdf'
-        self.source.write_bytes(b'original document')
+        _write_pdf(self.source, 'original document')
+        self.original = self.source.read_bytes()
         self.output_dir = self.root / 'output'
         self.output_dir.mkdir()
         self.destination = self.output_dir / 'source.pdf'
@@ -86,10 +93,11 @@ class WorkerOutputSafetyTests(unittest.TestCase):
             task = self.worker._start_process_task(0, str(self.source), False)
         work_path = Path(process.call_args.kwargs['args'][1])
         self.assertNotEqual(work_path, self.destination, 'child writes directly to published result')
-        work_path.write_bytes(b'complete new document')
+        _write_pdf(work_path, 'complete new document')
+        staged = work_path.read_bytes()
         self.assertEqual(self.destination.read_bytes(), b'previous successful result')
         self.assertTrue(self.worker._finish_process_task(task, True, 'done'))
-        self.assertEqual(self.destination.read_bytes(), b'complete new document')
+        self.assertEqual(self.destination.read_bytes(), staged)
         self.assertEqual(self.events[-1]['out_path'], str(self.destination))
         self.assertFalse(work_path.parent.exists(), 'owned temporary directory was not recycled')
 
@@ -99,17 +107,17 @@ class WorkerOutputSafetyTests(unittest.TestCase):
                 patch('ratools_pdf.controllers.workers.mp.Pipe', return_value=(MagicMock(), MagicMock())):
             task = self.worker._start_process_task(0, str(self.source), False)
         work_path = Path(process.call_args.kwargs['args'][1])
-        work_path.write_bytes(b'new document')
+        _write_pdf(work_path, 'new document')
         with patch('ratools_pdf.controllers.workers.os.replace', side_effect=PermissionError('locked')):
             self.assertFalse(self.worker._finish_process_task(task, True, 'done'))
-        self.assertEqual(self.source.read_bytes(), b'original document')
+        self.assertEqual(self.source.read_bytes(), self.original)
         self.assertFalse(work_path.exists())
 
     def test_without_overwrite_an_input_output_alias_is_rejected(self):
         self.worker.output_dir = str(self.root)
         with self.assertRaises(ValueError):
             self.start_task()
-        self.assertEqual(self.source.read_bytes(), b'original document')
+        self.assertEqual(self.source.read_bytes(), self.original)
 
     def test_successful_overwrite_replaces_original_only_after_success(self):
         self.worker.overwrite_original = True
@@ -117,10 +125,11 @@ class WorkerOutputSafetyTests(unittest.TestCase):
                 patch('ratools_pdf.controllers.workers.mp.Pipe', return_value=(MagicMock(), MagicMock())):
             task = self.worker._start_process_task(0, str(self.source), False)
         work_path = Path(process.call_args.kwargs['args'][1])
-        work_path.write_bytes(b'complete new document')
-        self.assertEqual(self.source.read_bytes(), b'original document')
+        _write_pdf(work_path, 'complete new document')
+        staged = work_path.read_bytes()
+        self.assertEqual(self.source.read_bytes(), self.original)
         self.assertTrue(self.worker._finish_process_task(task, True, 'done'))
-        self.assertEqual(self.source.read_bytes(), b'complete new document')
+        self.assertEqual(self.source.read_bytes(), staged)
         self.assertEqual(self.events[-1]['out_path'], str(self.source))
 
     def test_spawn_failure_preserves_old_result_and_recycles_allocated_directory(self):

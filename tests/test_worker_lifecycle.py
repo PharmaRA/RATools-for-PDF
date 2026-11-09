@@ -14,6 +14,12 @@ from ratools_pdf.controllers.workers import ProcessWorker
 LARGE_RESULT = 'page result: checked content, annotations and navigation\n' * 25000
 
 
+def _write_pdf(path, text):
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), text)
+        doc.save(path)
+
+
 def large_result_child(file_path, out_path, options, mode, compression, conn):
     with fitz.open() as doc:
         doc.new_page().insert_text((72, 72), 'Completed large-result task')
@@ -34,7 +40,7 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.files = []
         for name in ('first.pdf', 'second.pdf'):
             source = self.root/name
-            source.write_bytes(b'original')
+            _write_pdf(source, 'original')
             (self.output/name).write_bytes(b'earlier output')
             self.files.append(str(source))
 
@@ -49,7 +55,7 @@ class WorkerLifecycleTests(unittest.TestCase):
     def task(self, index, alive=True):
         stage = Path(tempfile.mkdtemp(prefix=f'stage-{index}-', dir=self.root))
         work = stage/'result.pdf'
-        work.write_bytes(b'new complete output')
+        _write_pdf(work, 'new complete output')
         proc = Mock()
         proc.is_alive.return_value = alive
         proc.terminate.side_effect = lambda: setattr(proc.is_alive, 'return_value', False)
@@ -106,7 +112,8 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertEqual([event['status'] for event in events], ['处理完成', '处理失败'])
         for task in tasks:
             self.assert_reaped(task)
-        self.assertEqual(Path(tasks[0]['out_path']).read_bytes(), b'new complete output')
+        with fitz.open(tasks[0]['out_path']) as doc:
+            self.assertIn('new complete output', doc[0].get_text())
         self.assertEqual(len(errors), 1)
 
     def test_publish_failure_closes_connections_and_preserves_previous_outputs(self):

@@ -23,8 +23,8 @@
 
 | ID | 交付 | 软件状态 | 真实环境验收 | 提交 |
 |---|---|---|---|---|
-| PD-01 | PDF 资格矩阵与证据运行器 | 已完成 | 外部来源、成品和阅读器 pending | 见 PD-01 记录 |
-| PD-02 | 处理计划预览与处理后验证 | 待开始 | 依赖 PD-01 样本覆盖 | — |
+| PD-01 | PDF 资格矩阵与证据运行器 | 已完成 | 外部来源、成品和阅读器 pending | 8ce2d3d |
+| PD-02 | 处理计划预览与处理后验证 | 已完成 | 依赖 PD-01 真实样本覆盖 | 见 PD-02 记录 |
 | PD-03 | 可归档审计证据包 | 待开始 | 内部质量系统采纳待业务确认 | — |
 | PD-04 | 可版本化配置与导入导出 | 待开始 | 机构规则有效性待专家确认 | — |
 | PD-05 | 字体 provider 能力与复检 | 待开始 | Acrobat/CJK 字体环境待实测 | — |
@@ -160,3 +160,13 @@
 - Review：pd01_review，Spec PASS / Quality PASS，无阻断；只读核对路径安全/qpdf 直接依赖，无重复全量。
 - 提交主题：`feat: add versioned read-only PDF qualification evidence`；具体哈希见 Git 同主题记录及下一项更新。
 - 边界：未提供真实 Acrobat/Word/LibreOffice/扫描仪/打印驱动样本；Windows 成品及外部阅读器未执行。签名仅检查存在性，渲染哈希不证明跨阅读器一致。软件机制完成，外部资格保持开放。
+### PD-02：计划预览、输出验证与批次事实（2026-11-09）
+
+- 交付：后台只读计划预览、取消/忙碌守卫、输入与选项配置绑定、发布前结构快照/保存重开验证、批次及重试事实留存。[操作说明](../processing-verification.md)。
+- RED：初始 12 项验证与 8 项 UI 验收失败，真实复现引擎报告成功但坏 PDF 覆盖旧输出。review 再复现验证期间停止/跳过仍发布、动态批注合法清理被误判。
+- 修复轮：原两 P1 已解决；第二轮补动态批注标准空格/xref 去重和验证失败后 skip 请求不泄漏至下一文件。skip RED 测试初次有夹具 NameError，缺陷复现依据为 reviewer 内存探针；修正夹具后的两文件 GREEN 确认修复，不伪称初始日志有效复现。
+- 最终专项 22/22、UI 8/8、worker 21/21、queue 8/8、busy 13/13、dynamic 10/10。安全全量 448/448（80.408 秒），`backups/product-roadmap-20261109/PD02/full-suite-round2-final.log`。首轮 438/1 错误是窗口生命周期测试使用无效 PDF 字节，改为真 PDF 后通过；失败日志保留。
+- Review：pd02_review 原两 P1 和后续两项均 ADDRESSED，最终 Spec PASS / Quality PASS；报告证据措辞已修正。
+- 提交主题：`feat: preview processing plans and verify outputs before publication`。
+- 接口：`processing_evidence`、`processing_evidence_history[batch_id]` 保存实际结构化事件及文件前后快照；PD-03 直接消费，不解析本地化日志。重试单独 batch_id。
+- 边界：规则级实际 changed/verified 尚为 unknown/not_verified，PD-07 补齐；签名有效性/真实业务/外部阅读器未验证。生产公开 `(success, message)` 契约保留。

@@ -179,7 +179,9 @@ class WindowLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root/'input.pdf'
-            source.write_bytes(b'synthetic input')
+            with fitz.open() as doc:
+                doc.new_page().insert_text((72, 72), 'Synthetic input')
+                doc.save(source)
             started, release = mp.get_context('spawn').Event(), mp.get_context('spawn').Event()
             worker = ProcessWorker([str(source)], set(), str(root/'out'),
                                    compression_settings={'started':started, 'release':release})

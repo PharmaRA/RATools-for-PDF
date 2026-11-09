@@ -13,6 +13,7 @@ from ratools_pdf.controllers.detection_controller import DetectionController
 from ratools_pdf.controllers.io_controller import IOController
 from ratools_pdf.controllers.main_controller import MainController
 from ratools_pdf.controllers.precheck_controller import PrecheckController
+from ratools_pdf.services.processing_plan import build_processing_plan
 from ratools_pdf.ui.main_window import MainWindow
 
 
@@ -116,6 +117,12 @@ class IOBusyTests(unittest.TestCase):
         self.host._refresh_processing_hint = Mock()
         self.host.processing_timer = Mock()
         self.host.record_process_log_event = Mock()
+        def preview(_files, options, mode, settings, base):
+            # The real asynchronous modal is covered in test_processing_plan_ui.
+            plan = build_processing_plan([], options, mode, settings, base)
+            MainController._retain_processing_plan(self.host, plan, 'previewed')
+            return plan
+        self.host._preview_processing_plan = preview
         self.host.last_failed_files = []
         for method in ('_on_processing_thread_finished','_reset_processing_ui',
                        '_build_batch_result_summary','processing_finished','processing_error'):

@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import os
 import tempfile
+import uuid
 from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
@@ -16,6 +17,8 @@ from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.pdf.processor import PDFProcessor
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
 from ratools_pdf.services.output_paths import common_base_dir, path_key, relative_source_directory, validate_output_plan
+from ratools_pdf.services.pdf_facts import capture_pdf_snapshot, verify_output
+from ratools_pdf.services.processing_plan import configuration_matches_plan, input_matches_plan, source_file_id, timestamp
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
@@ -45,12 +48,15 @@ class ProcessWorker(QThread):
     finished_all = Signal(str)  # summary
     error = Signal(str)  # error_msg
 
-    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart", compression_settings=None):
+    def __init__(self, files, options, output_dir, common_base="", overwrite_original=False, max_workers=1, processing_mode="smart", compression_settings=None, processing_plan=None):
         super().__init__()
         self.files = list(files)
-        self.options = options
+        self.options = set(options)
         self.processing_mode = str(processing_mode or "smart").lower()
-        self.compression_settings = compression_settings
+        self.compression_settings = dict(compression_settings) if compression_settings is not None else None
+        self.processing_plan = processing_plan
+        self.batch_id = processing_plan['batch_id'] if processing_plan else uuid.uuid4().hex
+        self.file_plans = {item['file_id']: item for item in (processing_plan or {}).get('files', [])}
         self.output_dir = output_dir
         self.common_base = common_base or common_base_dir(self.files)
         self.overwrite_original = overwrite_original
@@ -60,12 +66,13 @@ class ProcessWorker(QThread):
         self._skip_requested_files = set()
         self._can_skip_current = False
         self._current_file_path = ""
+        self._verification_file_path = ""
 
     def request_stop(self):
         self._stop_requested = True
 
     def request_skip_current(self):
-        if self._can_skip_current:
+        if self._can_skip_current or self._verification_file_path:
             self._skip_requested = True
 
     def request_skip_file(self, file_path):
@@ -101,6 +108,22 @@ class ProcessWorker(QThread):
 
     def _start_process_task(self, index, file_path, rename_ectd):
         base_name, out_path = self._build_output_path(index, file_path, rename_ectd)
+        file_plan = self.file_plans.get(source_file_id(file_path))
+        task = {'index': index, 'file_path': file_path, 'base_name': base_name, 'out_path': out_path,
+                'file_plan': file_plan, 'started_at': timestamp()}
+        if self.processing_plan:
+            if not file_plan or file_plan['status'] != 'ready':
+                task.update(rejection='文件计划检查失败，未执行处理', outcome='planning_failed')
+                return task
+            task['before'] = file_plan['before']
+            if not configuration_matches_plan(self.processing_plan, self.options, self.processing_mode, self.compression_settings):
+                task.update(rejection='处理配置已变化，请重新生成计划', outcome='stale_plan')
+                return task
+            if not input_matches_plan(file_path, file_plan):
+                task.update(rejection='输入文件已变化，请重新预检并生成计划', outcome='stale_plan')
+                return task
+        else:
+            task['before'] = capture_pdf_snapshot(file_path)
         check_unlinked_path(file_path)
         check_unlinked_path(out_path)
         same_path = os.path.normcase(os.path.abspath(file_path)) == os.path.normcase(os.path.abspath(out_path))
@@ -116,26 +139,21 @@ class ProcessWorker(QThread):
             "time": now,
             "file_path": file_path,
             "out_path": out_path,
+            **self._task_facts(task),
         })
         self.progress.emit(
             file_path,
             "正在处理...",
             f"\n[{now}] 开始处理: {file_path}\n    输出文件: {out_path}\n    显示名称: {base_name}",
         )
-        task = {
-            "index": index,
-            "file_path": file_path,
-            "base_name": base_name,
-            "out_path": out_path,
-            "work_path": work_path,
-            "staging_dir": staging_dir,
-        }
+        task.update(work_path=work_path, staging_dir=staging_dir)
         parent_conn = child_conn = None
         try:
             parent_conn, child_conn = mp.Pipe(duplex=False)
             proc = mp.Process(
                 target=_process_document_task_pipe,
-                args=(file_path, work_path, self.options, self.processing_mode, self.compression_settings, child_conn),
+                args=(file_path, work_path, set(file_plan['effective_options']) if file_plan else self.options,
+                      'force' if file_plan else self.processing_mode, self.compression_settings, child_conn),
             )
             proc.start()
             task.update(parent_conn=parent_conn, proc=proc)
@@ -203,16 +221,64 @@ class ProcessWorker(QThread):
                 self._close_task_connection(task)
         self._finish_process_task(task, False, message)
 
+    def _task_facts(self, task):
+        return {'batch_id': self.batch_id, 'file_id': source_file_id(task['file_path']),
+                'started_at': task.get('started_at'), 'before': task.get('before'),
+                'after': task.get('after'), 'verification': task.get('verification'),
+                'engine_success': task.get('engine_success'), 'published': task.get('published', False),
+                'outcome': task.get('outcome'), 'rule_actual_changed': 'unknown'}
+
     def _finish_process_task(self, task, success, msg):
         out_path = task["out_path"]
+        task['engine_success'] = bool(success)
+        self._verification_file_path = task['file_path']
+        try:
+            if 'before' not in task:
+                task['before'] = capture_pdf_snapshot(task['file_path'])
+            if task.get('work_path') and os.path.isfile(task['work_path']):
+                task['after'] = capture_pdf_snapshot(task['work_path'])
+            task['verification'] = verify_output(task.get('before') or {}, task.get('after') or {},
+                                                 (task.get('file_plan') or {}).get('effective_options', self.options))
+        finally:
+            self._verification_file_path = ""
+        if success and not task['verification']['publish_allowed']:
+            success = False
+            task['outcome'] = 'verification_failed'
+            msg = '处理输出未通过验证，未发布；保存重开：{}；结构预期：{}'.format(
+                task['verification']['save_reopen'], task['verification']['structural_expectations'])
+        if success and task.get('file_plan') and not input_matches_plan(task['file_path'], task['file_plan']):
+            success = False
+            task['outcome'] = 'stale_plan'
+            msg = '处理期间输入文件发生变化，未发布；请重新生成计划'
+        # Stop/skip requests may arrive while structural facts are being read.
+        # Recheck immediately before os.replace so a verified stage cannot be
+        # published after the user has cancelled the current task.
+        current_key = path_key(task['file_path'])
+        skip_requested = self._skip_requested or current_key in self._skip_requested_files
+        if self._stop_requested:
+            success = False
+            task['outcome'] = 'stopped'
+            self._emit_stopped_task(task)
+            return False
+        if skip_requested:
+            success = False
+            task['outcome'] = 'skipped'
+            self._skip_requested = False
+            self._skip_requested_files.discard(current_key)
+            self._emit_skipped_task(task)
+            return False
         if success:
             try:
                 check_unlinked_path(out_path)
                 check_unlinked_path(task["work_path"])
                 os.replace(task["work_path"], out_path)
+                task['published'] = True
             except Exception as e:
                 success = False
                 msg = f"提交输出失败（原文件已保留）: {str(e)}"
+                task['outcome'] = 'publish_failed'
+
+        task.setdefault('outcome', 'succeeded' if success else 'processing_failed')
 
         status = "处理完成" if success else "处理失败"
         warning = self._recycle_task_output(task)
@@ -227,11 +293,14 @@ class ProcessWorker(QThread):
             "out_path": out_path,
             "status": status,
             "message": msg,
+            "ended_at": timestamp(),
+            **self._task_facts(task),
         })
         self.progress.emit(
             task["file_path"],
             status,
-            f"[{now}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}",
+            f"[{now}] {task['file_path']}\n    状态: {status}\n    输出文件: {out_path}\n    结果: {msg}"
+            f"\n    验证：保存重开 {task['verification']['save_reopen']}；结构预期 {task['verification']['structural_expectations']}；规则级 not_verified",
         )
         return success
 
@@ -246,6 +315,8 @@ class ProcessWorker(QThread):
             "out_path": task["out_path"],
             "status": "已停止",
             "message": reason,
+            "ended_at": timestamp(),
+            **self._task_facts(dict(task, outcome='stopped')),
         })
         self.progress.emit(
             task["file_path"],
@@ -265,6 +336,8 @@ class ProcessWorker(QThread):
             "out_path": task["out_path"],
             "status": "已跳过",
             "message": reason,
+            "ended_at": timestamp(),
+            **self._task_facts(dict(task, outcome='skipped')),
         })
         self.progress.emit(
             task["file_path"],
@@ -290,6 +363,10 @@ class ProcessWorker(QThread):
                 task = {"file_path": file_path, "out_path": ""}
                 task["out_path"] = self._build_output_path(i, file_path, rename_ectd)[1]
                 task = self._start_process_task(i, file_path, rename_ectd)
+                if task.get('rejection'):
+                    self._finish_process_task(task, False, task['rejection'])
+                    task = None
+                    continue
                 parent_conn = task["parent_conn"]
                 proc = task["proc"]
 
@@ -376,6 +453,11 @@ class ProcessWorker(QThread):
                     starting_task = {"file_path": file_path, "out_path": ""}
                     starting_task["out_path"] = self._build_output_path(next_index, file_path, rename_ectd)[1]
                     task = self._start_process_task(next_index, file_path, rename_ectd)
+                    if task.get('rejection'):
+                        self._finish_process_task(task, False, task['rejection'])
+                        starting_task = None
+                        next_index += 1
+                        continue
                     running[next_index] = task
                     starting_task = None
                     next_index += 1
