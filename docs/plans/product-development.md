@@ -27,8 +27,8 @@
 | PD-02 | 处理计划预览与处理后验证 | 已完成 | 依赖 PD-01 真实样本覆盖 | aa817d0 |
 | PD-03 | 可归档审计证据包 | 已完成 | 内部质量系统采纳待业务确认 | 30fa400 |
 | PD-04 | 可版本化配置与导入导出 | 已完成 | 机构规则有效性待专家确认 | 3154a17 |
-| PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 见 PD-05 记录 |
-| PD-06 | 超时、取消、进程树与资源限额 | 待开始 | 网络盘/设备故障待实测 | — |
+| PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 9428b39 |
+| PD-06 | 超时、取消、进程树与资源限额 | 已完成 | 网络盘/设备故障待实测 | 见 PD-06 记录 |
 | PD-07 | 统一规则执行契约与结果 | 待开始 | 不自动扩大规则覆盖声明 | — |
 | PD-08 | 分层测试与版本化样本回归 | 待开始 | 外部样本覆盖沿用 PD-01 | — |
 | PD-09 | 能力矩阵与文档一致性 | 待开始 | 只描述已有证据 | — |
@@ -196,3 +196,11 @@
 - Review：pd05_review 初轮1项P1，修复后 ADDRESSED，Spec PASS / Quality PASS；检查不可用返回未知计数并关闭文件，不泄露底层私人路径。
 - 提交主题：`feat: expose font provider capabilities and verify manual repairs`。
 - 边界：手动交接与软件复检完成；自动修复blocked、真实Acrobat/CJK/字体/视觉/监管资格pending。timeout仅分类底层异常，未增加本地解析器硬终止。复检通过仅代表既有三类结构风险未发现。
+### PD-06：超时、取消、进程树与资源限额（2026-11-09）
+
+- 交付：每文件超时设置、串并行 deadline、停止/跳过协作取消、Windows Job Object 原子进程归属、资源/低磁盘检查及审计 `file_timeout` 原因。[操作说明](../processing-control.md)。
+- RED：初始 13 项中 11 项失败，复现后代残留、时限越过验证仍发布和设置/资源入口缺失；review 还复现了创建与 Job 分配窗口及快照循环未接取消谓词。修复轮 RED 21/4，覆盖 owner 刚返回退出与三阶段取消。
+- GREEN：processing 51/51、workers 21/21、qpdf 25/25、busy 13/13；最终安全全量 527/527（156.676 秒，exit0），`backups/product-roadmap-20261109/PD06/full-suite.log`。
+- Review：pd06_review fix round 1 两项 P2 ADDRESSED，Spec PASS / Quality PASS。原子 `STARTUPINFOEX` JobList/HandleList 创建后 owner 立即退出无残留；快照、计划哈希、输出快照接收 stop/skip/deadline，单次 OS/fitz 调用不能硬中断的边界已披露。
+- 提交主题：`feat: control processing deadlines and owned child processes`。
+- 边界：Job 归属与受控故障已实测；网络盘、移动设备、外部受限 Job 宿主和非 Windows owner 崩溃仍 pending。资源上限为保守估计，不等同任意 PDF 内存峰值保证。

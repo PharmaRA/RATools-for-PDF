@@ -23,6 +23,7 @@ from ratools_pdf.controllers.precheck_controller import PrecheckController
 from ratools_pdf.controllers.tree_actions_controller import TreeActionsController
 from ratools_pdf.controllers.update_controller import UpdateController
 from ratools_pdf.controllers.workers import ProcessWorker
+from ratools_pdf.services.process_control import normalize_file_timeout
 from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.services import system_shell
 from ratools_pdf.services.output_paths import path_key
@@ -190,6 +191,10 @@ class MainController(QObject):
         except Exception:
             max_workers = worker_count
         return min(worker_count, max_workers)
+
+    def _get_file_timeout_seconds(self):
+        control = getattr(self.view.settings_dialog, 'spin_file_timeout', None)
+        return normalize_file_timeout(control.value() if control is not None else 0)
 
     def check_updates_on_startup(self):
         self.updates.check_updates_on_startup()
@@ -615,6 +620,7 @@ class MainController(QObject):
                 processing_mode=processing_mode,
                 compression_settings=compression_settings,
                 processing_plan=plan,
+                file_timeout_seconds=self._get_file_timeout_seconds(),
             )
             self.worker.progress.connect(self.update_progress)
             self.worker.structured_progress.connect(self.record_process_log_event)

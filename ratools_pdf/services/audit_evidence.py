@@ -30,7 +30,8 @@ _OUTCOME_REASONS = {'processing_failed': 'engine_failure',
                     'verification_failed': 'verification_failed',
                     'planning_failed': 'planning_failed', 'stale_plan': 'stale_plan',
                     'publish_failed': 'publish_failed', 'stopped': 'stop_requested',
-                    'skipped': 'skip_requested', 'not_started': 'not_started'}
+                    'skipped': 'skip_requested', 'not_started': 'not_started',
+                    'timed_out': 'file_timeout', 'resource_preflight_failed': 'resource_preflight_failed'}
 _METRICS = ('sha256', 'bytes', 'page_count', 'pages', 'bookmarks', 'links',
             'annotations', 'attachments', 'forms', 'signature_fields',
             'signature_present', 'pdf_version', 'reopen', 'errors')

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ratools_pdf.config.paths import get_resource_path
 from ratools_pdf.services.file_safety import recycle_owned_path
+from ratools_pdf.services.process_control import run_owned_command
 
 
 @dataclass
@@ -76,13 +77,9 @@ def run_qpdf_command(args: List[str], timeout: Optional[int] = None) -> QpdfResu
         raise FileNotFoundError(f"未找到 qpdf 工具！\n请确保已安装或设置 QPDF_PATH: {qpdf_exe}")
 
     cmd = [qpdf_exe] + args
-    result = subprocess.run(
+    result = run_owned_command(
         cmd,
         startupinfo=_make_startupinfo(),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         timeout=timeout,
     )
     return QpdfResult(

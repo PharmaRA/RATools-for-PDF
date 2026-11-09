@@ -59,9 +59,9 @@ def configuration_matches_plan(plan, options, processing_mode, compression_setti
         return False
 
 
-def input_matches_plan(path, file_plan):
+def input_matches_plan(path, file_plan, cancelled=None):
     try:
-        actual = fingerprint(path)
+        actual = fingerprint(path, cancelled)
         return all(actual[key] == file_plan['before'].get(key) for key in ('sha256', 'bytes'))
     except (OSError, KeyError):
         return False

@@ -1,4 +1,5 @@
 import os
+from ratools_pdf.services.process_control import normalize_file_timeout
 from copy import deepcopy
 from pathlib import Path
 
@@ -125,6 +126,7 @@ class MainWindow(QMainWindow):
 
         self.settings_dialog.cb_parallel_processing.toggled.connect(lambda _checked: self.persist_parallel_settings())
         self.settings_dialog.spin_parallel_workers.valueChanged.connect(lambda _value: self.persist_parallel_settings())
+        self.settings_dialog.spin_file_timeout.valueChanged.connect(lambda _value: self.persist_parallel_settings())
         self.radio_smart_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
         self.radio_force_processing.toggled.connect(lambda _checked: self.persist_processing_mode())
 
@@ -684,6 +686,11 @@ class MainWindow(QMainWindow):
         self.settings_dialog.spin_parallel_workers.setValue(parallel_workers)
         self.settings_dialog.cb_parallel_processing.setChecked(parallel_enabled)
         self.settings_dialog.set_parallel_worker_controls_enabled(parallel_enabled)
+        try:
+            file_timeout = normalize_file_timeout(self.app_settings.value("Settings/FileTimeoutSeconds", 0))
+        except ValueError:
+            file_timeout = 0
+        self.settings_dialog.spin_file_timeout.setValue(int(file_timeout))
 
         processing_mode = str(self.app_settings.value("Settings/ProcessingMode", "smart") or "smart").lower()
         self.radio_force_processing.setChecked(processing_mode == "force")
@@ -753,12 +760,14 @@ class MainWindow(QMainWindow):
         self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
         self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
         self.app_settings.setValue("Settings/ProcessingMode", self.get_processing_mode())
+        self.app_settings.setValue("Settings/FileTimeoutSeconds", self.settings_dialog.spin_file_timeout.value())
 
     def persist_parallel_settings(self):
-        if not hasattr(self, "app_settings"):
+        if not hasattr(self, "app_settings") or self.is_applying_preset:
             return
         self.app_settings.setValue("Settings/ParallelProcessingEnabled", self.settings_dialog.cb_parallel_processing.isChecked())
         self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
+        self.app_settings.setValue("Settings/FileTimeoutSeconds", self.settings_dialog.spin_file_timeout.value())
 
     def persist_processing_mode(self):
         if not hasattr(self, "app_settings"):

@@ -114,6 +114,7 @@ class IOBusyTests(unittest.TestCase):
         self.view.get_compression_settings = lambda: None
         self.host._prompt_skip_signed_files = lambda files: files
         self.host._get_processing_worker_count = lambda: 1
+        self.host._get_file_timeout_seconds = MethodType(MainController._get_file_timeout_seconds, self.host)
         self.host._refresh_processing_hint = Mock()
         self.host.processing_timer = Mock()
         self.host.record_process_log_event = Mock()

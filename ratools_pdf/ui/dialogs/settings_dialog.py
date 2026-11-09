@@ -153,7 +153,7 @@ class SettingsDialog(FramelessDraggableDialog):
         parallel_layout.setContentsMargins(12, 12, 12, 12)
         parallel_layout.setSpacing(10)
 
-        parallel_hint = QLabel("并行处理会同时处理多个 PDF。建议从 2 个任务开始，异常文件可在队列中选中后单独终止。")
+        parallel_hint = QLabel("并行数量为用户上限，将按可用内存和输入大小保守下调。资源信息不可用时逐个处理；异常文件可在队列中选中后单独终止。")
         parallel_hint.setWordWrap(True)
         parallel_hint.setObjectName("settingsPathHint")
         parallel_layout.addWidget(parallel_hint)
@@ -174,6 +174,19 @@ class SettingsDialog(FramelessDraggableDialog):
         worker_row.addLayout(worker_spin_layout)
         worker_row.addStretch()
         parallel_layout.addLayout(worker_row)
+
+        timeout_row = QHBoxLayout()
+        timeout_row.setSpacing(8)
+        timeout_row.addWidget(QLabel("每文件超时"))
+        self.spin_file_timeout = QSpinBox()
+        self.spin_file_timeout.setRange(0, 86400)
+        self.spin_file_timeout.setValue(0)
+        self.spin_file_timeout.setSuffix(" 秒")
+        self.spin_file_timeout.setSpecialValueText("关闭")
+        self.spin_file_timeout.setToolTip("0 为关闭。超时文件保留既有输出，可调整设置后重试；计时包含处理和发布前验证。")
+        timeout_row.addWidget(self.spin_file_timeout)
+        timeout_row.addStretch()
+        parallel_layout.addLayout(timeout_row)
 
         self.content_layout.addWidget(parallel_card)
 
