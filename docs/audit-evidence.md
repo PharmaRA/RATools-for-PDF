@@ -42,7 +42,7 @@ SHA-256 清单和完整标识**不是数字签名或来源认证**。能修改�
 
 `processing_runtime` 复制批次建立时实际留存的应用和 PyMuPDF 版本；升级前建立、没有版本留存的历史批次保留 `unknown`。qpdf 执行版本及应用构建提交未在 PD02 留存，明确为 `unknown`。`runtime` 是导出时当前应用/PyMuPDF 的观测值，并明确标为 `export_time_not_processing_time`；不能作为旧批次的执行版本。GUI 不会为探测 qpdf 版本启动慢外部命令。
 
-处理和验证分开：`engine_success` 只说明处理引擎报告结果，`published` 是最终发布事实；`save_reopen`、`structural_expectations`、`rule_verification` 独立保留。规则实际变化保持 `unknown`，规则验证/签名有效性保持 `not_verified`，由 PD-07 或相应资格流程补充，不能依据中文日志推断。
+处理和验证分开：`engine_success` 只说明处理引擎报告结果，`published` 是最终发布事实；`save_reopen`、`structural_expectations`、`rule_verification` 独立保留。当前 PD-07 已将实际 `rule_results` / `rule_events` 和有限独立检查传入批次与审计包，范围见[规则结果说明](rule-results.md)。历史批次或缺少观测/检查的规则仍保留 `unknown/null` / `not_verified`；签名有效性保持 `not_verified`，不能依据中文日志推断。
 
 `reason_codes` 直接映射实际终态：如 `processing_failed → engine_failure`、`verification_failed → verification_failed`、`stale_plan → stale_plan`、`stopped → stop_requested`。不会把配置变化与输入变化都细化成已确认的输入变化；源证据没有更细分类时保留原有粒度。非成功文件以 `engine_diagnostic:not_recorded` 标出缺失的详细引擎诊断。`reasons`/`warnings` 来自实际计划中的错误代码、预检决定理由和结构风险。PD02 没有留存完整引擎警告或失败文本，包用 `engine_warnings_not_recorded_by_pd02` 明确限制，不能把不存在的警告记录解释为没有警告。导出不包含正文、元数据、密码、凭据、绝对路径、进程命令行或本地化日志正文。
 

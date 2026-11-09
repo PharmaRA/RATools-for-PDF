@@ -30,8 +30,8 @@
 | PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 9428b39 |
 | PD-06 | 超时、取消、进程树与资源限额 | 已完成 | 网络盘/设备故障待实测 | 7e32bb3 |
 | PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 0d1d10f |
-| PD-08 | 分层测试与版本化样本回归 | 已完成 | 外部样本/人工批准仍 pending | 见 PD-08 记录 |
-| PD-09 | 能力矩阵与文档一致性 | 待开始 | 只描述已有证据 | — |
+| PD-08 | 分层测试与版本化样本回归 | 已完成 | 外部样本/人工批准仍 pending | 2cfff13 |
+| PD-09 | 能力矩阵与文档一致性 | 已完成 | 只描述已有证据 | 见 PD-09 记录 |
 | PD-10 | 可追溯发布与双变体验收 | 待开始 | 正式代码签名证书待提供 | — |
 
 ## Task 1: PD-01 PDF 资格矩阵与证据运行器
@@ -221,3 +221,10 @@
 - Review：pd08_review状态聚合P1 ADDRESSED，SpecQuality PASS；原failed/blocked保留，approval不得升级失败。ErrorHolder单列suite_errors、未执行pending。
 - 提交主题：`test: add explicit layers and versioned sample qualification`。
 - 边界：CI只本地配置检查，未远程运行；外部样本、阅读器、成品资格与人工批准未完成。
+### PD-09：能力矩阵与用户文档一致性（2026-11-10）
+
+- 交付：[能力矩阵](../capabilities.md)、README/FAQ/Unreleased与文档导航，及三份旧操作说明的最小一致性修正。真实入口/稳定状态/软件证据/成品证据/外部资格分列。
+- 验收：63处本地链接、0失效；六项当前能力表述检查通过，diff --check通过。不存在的旧SECURITY.md导航已移除；未新建政策或改写旧版本历史。
+- Review：pd09_review Spec PASS / Quality PASS，无阻断；核对隐藏工作台无开关、已知密码安全中心、自动字体blocked、有限规则事实、签名外观非密码学有效性及构建边界。
+- 提交主题：`docs: align capability matrix and desktop workflows`。
+- 范围：纯文档，未重跑代码测试/构建；556历史测试数注明引用。PD10成品证据将在实际构建后刷新，外部资格不自动通过。
