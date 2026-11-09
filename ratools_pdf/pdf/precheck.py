@@ -199,8 +199,11 @@ def _collect_font_precheck_findings(doc):
     for page_index, page in enumerate(doc, start=1):
         try:
             page_fonts = page.get_fonts(full=True)
-        except Exception:
-            continue
+        except Exception as exc:
+            # A partial enumeration cannot certify a document as risk free.
+            # The file-level collector marks inspection unavailable and closes
+            # the document when this propagates.
+            raise RuntimeError("无法完整枚举页面字体，字体预检不可用") from exc
 
         for font_tuple in page_fonts:
             original_name = str(_font_tuple_value(font_tuple, 3) or "").strip()

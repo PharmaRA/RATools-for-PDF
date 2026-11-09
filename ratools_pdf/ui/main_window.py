@@ -147,8 +147,11 @@ class MainWindow(QMainWindow):
     def show_error_message(self, title, message):
         CustomMessageBox(title, message, msg_type="error", parent=self).exec()
 
-    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback):
-        dlg = ManualFontEmbeddingDialog(pdf_paths, open_callback, parent=self)
+    def show_manual_font_embedding_dialog(self, pdf_paths, open_callback, *, capability_text="", recheck_callback=None):
+        dlg = ManualFontEmbeddingDialog(
+            pdf_paths, open_callback, parent=self,
+            capability_text=capability_text, recheck_callback=recheck_callback,
+        )
         dlg.exec()
 
     def show_confirm_message(self, title, message):

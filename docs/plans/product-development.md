@@ -26,8 +26,8 @@
 | PD-01 | PDF 资格矩阵与证据运行器 | 已完成 | 外部来源、成品和阅读器 pending | 8ce2d3d |
 | PD-02 | 处理计划预览与处理后验证 | 已完成 | 依赖 PD-01 真实样本覆盖 | aa817d0 |
 | PD-03 | 可归档审计证据包 | 已完成 | 内部质量系统采纳待业务确认 | 30fa400 |
-| PD-04 | 可版本化配置与导入导出 | 已完成 | 机构规则有效性待专家确认 | 见 PD-04 记录 |
-| PD-05 | 字体 provider 能力与复检 | 待开始 | Acrobat/CJK 字体环境待实测 | — |
+| PD-04 | 可版本化配置与导入导出 | 已完成 | 机构规则有效性待专家确认 | 3154a17 |
+| PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 见 PD-05 记录 |
 | PD-06 | 超时、取消、进程树与资源限额 | 待开始 | 网络盘/设备故障待实测 | — |
 | PD-07 | 统一规则执行契约与结果 | 待开始 | 不自动扩大规则覆盖声明 | — |
 | PD-08 | 分层测试与版本化样本回归 | 待开始 | 外部样本覆盖沿用 PD-01 | — |
@@ -79,12 +79,12 @@
 
 ## Task 5: PD-05 字体 provider 能力与复检
 
-交付：统一 provider 接口/能力模型，现有 Acrobat 后端适配，UI 可理解的可用性与限制。
+交付：统一 provider 接口/能力模型、现有 Acrobat 手动交接适配、UI 能力状态与修复后复检。实际源码和字体探索记录已明确停用不可靠的 COM/OLE 自动修复；保留该产品决定，自动修复标为 blocked，不因安装 Acrobat 推定支持。
 
 - 返回平台、provider/版本、可用性、支持操作与不可用原因；不通过安装存在就推定 COM/Profile 可调用。
 - 统一 inspect/capability/repair/recheck 结果，provider 返回成功后仍须重新预检三类字体风险（未嵌入、替代、未知）。
 - provider 不可用、超时、修复失败、复检失败分别处理，保留原件/既有输出，禁止自动整页栅格化作为成功兜底。
-- 只接入已有 Acrobat provider，不承诺自行修复所有 CJK；测试 provider 只存在于测试工具中。
+- 只适配已有 Acrobat 手动交接；自动 repair 返回明确不可用原因，不重新启用未验证 COM fixup，不承诺自行修复所有 CJK。统一自动结果复检契约可用测试 provider 验证，测试 provider 只存在于测试工具中。
 - 验收：缺依赖/不支持平台、provider 假成功仍有风险、真实可解析 PDF 复检、异常回收。真实 Acrobat/字体文件单列外部验收。
 
 ## Task 6: PD-06 取消、超时和资源约束
@@ -187,3 +187,12 @@
 - Review：pd04_review Spec PASS / Quality PASS；核对 schema、压缩/别名精确映射、取消零修改、规则/参数变化清身份、内置集合与冻结摘要绑定，无阻断。
 - 提交主题：`feat: version processing profiles and add desktop import export`。
 - 边界：只支持 structural，不能表示的压缩子组合明确拒绝；custom 版本不自动递增但摘要区分内容；重启普通选择为 custom，应用常用后恢复身份。内置机构预设并非官方认证。
+### PD-05：字体能力、手动交接与 fresh 复检（2026-11-09）
+
+- 交付：统一 provider/capability/inspect/repair/recheck 契约、Acrobat 手动适配、后台三风险复检与关闭保护。[使用说明](../font-providers.md)。
+- 计划校正依据：现有 `acrobat-font-embedding-automation-notes.md` 与 controller 明确 COM/OLE 自动 fixup 已退役。本项保留手动模式，不复活不可靠自动链路。自动 repair 返回 blocked，安装存在不证明 Pro/Profile 可用。
+- RED：初始 20 项缺API/入口失败；探测异常边界增加后 24 中 1 失败；review 再实证字体枚举异常被跳过造成假通过，新增真实 PDF 边界回归 RED25中1，最小异常传播修复。
+- GREEN：字体专项25/25、直接预检42/42；最终安全全量506/506（128.643秒，exit0），日志 `backups/product-roadmap-20261109/PD05/full-suite.log`。此前505结果另存，不混作修复后证据。
+- Review：pd05_review 初轮1项P1，修复后 ADDRESSED，Spec PASS / Quality PASS；检查不可用返回未知计数并关闭文件，不泄露底层私人路径。
+- 提交主题：`feat: expose font provider capabilities and verify manual repairs`。
+- 边界：手动交接与软件复检完成；自动修复blocked、真实Acrobat/CJK/字体/视觉/监管资格pending。timeout仅分类底层异常，未增加本地解析器硬终止。复检通过仅代表既有三类结构风险未发现。

@@ -18,3 +18,7 @@ pdf_has_signature = precheck._pdf_has_signature
 # 只读检测（文档检测模块）
 collect_annotation_findings_for_path = precheck._collect_annotation_findings_for_path
 collect_broken_reference_findings_for_path = precheck._collect_broken_reference_findings_for_path
+
+# 字体风险检查与修复后复检共享既有预检口径。
+collect_font_precheck_for_path = precheck._collect_font_precheck_for_path
+font_precheck_has_embedding_risk = precheck._font_precheck_has_embedding_risk
