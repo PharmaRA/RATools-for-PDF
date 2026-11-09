@@ -1,0 +1,226 @@
+{
+  "schema_version": "1.0",
+  "matrix_version": "pd-01-2026-11-09",
+  "samples_root": "samples",
+  "samples": [
+    {
+      "id": "synthetic-minimal",
+      "path": "synthetic-minimal.pdf",
+      "source": {
+        "type": "synthetic",
+        "tool": "PyMuPDF",
+        "version": "1.28.2"
+      },
+      "authorization": "Synthetic fixture only; contains no private document content.",
+      "sha256": "13c4f99763d764fab61c6e0b9eeab54ec24a170c2311082dae6b91e22a0dc79f",
+      "features": [
+        "CJK",
+        "render"
+      ],
+      "processing_options": {
+        "mode": "read-only",
+        "qpdf": "check"
+      },
+      "expected": {
+        "page_count": 1,
+        "render_pages": [
+          1
+        ]
+      }
+    },
+    {
+      "id": "external-acrobat",
+      "path": null,
+      "source": {
+        "type": "real",
+        "tool": "Adobe Acrobat",
+        "version": "pending"
+      },
+      "authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+      "sha256": null,
+      "features": [
+        "CJK",
+        "transparent_image",
+        "forms",
+        "signature",
+        "incremental_save"
+      ],
+      "processing_options": {
+        "mode": "record when supplied"
+      },
+      "expected": {}
+    },
+    {
+      "id": "external-word",
+      "path": null,
+      "source": {
+        "type": "real",
+        "tool": "Microsoft Word",
+        "version": "pending"
+      },
+      "authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+      "sha256": null,
+      "features": [
+        "CJK",
+        "forms",
+        "naming",
+        "remote_target"
+      ],
+      "processing_options": {
+        "mode": "record when supplied"
+      },
+      "expected": {}
+    },
+    {
+      "id": "external-libreoffice",
+      "path": null,
+      "source": {
+        "type": "real",
+        "tool": "LibreOffice",
+        "version": "pending"
+      },
+      "authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+      "sha256": null,
+      "features": [
+        "CJK",
+        "transparent_image",
+        "incremental_save"
+      ],
+      "processing_options": {
+        "mode": "record when supplied"
+      },
+      "expected": {}
+    },
+    {
+      "id": "external-scanner",
+      "path": null,
+      "source": {
+        "type": "real",
+        "tool": "Scanner",
+        "version": "pending"
+      },
+      "authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+      "sha256": null,
+      "features": [
+        "scanned",
+        "oversized",
+        "corruption"
+      ],
+      "processing_options": {
+        "mode": "record when supplied"
+      },
+      "expected": {}
+    },
+    {
+      "id": "external-pdf-print-driver",
+      "path": null,
+      "source": {
+        "type": "real",
+        "tool": "PDF print driver",
+        "version": "pending"
+      },
+      "authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+      "sha256": null,
+      "features": [
+        "CJK",
+        "naming",
+        "remote_target",
+        "encryption"
+      ],
+      "processing_options": {
+        "mode": "record when supplied"
+      },
+      "expected": {}
+    }
+  ],
+  "matrix": [
+    {
+      "id": "auto-synthetic",
+      "evidence_level": "automated_regression",
+      "sample_ids": [
+        "synthetic-minimal"
+      ],
+      "feature_requirement": "real structure, hash, render and qpdf check",
+      "status": "pending"
+    },
+    {
+      "id": "source-acrobat",
+      "evidence_level": "real_business_sample",
+      "sample_ids": [
+        "external-acrobat"
+      ],
+      "source_requirement": "Acrobat-created PDF",
+      "feature_requirement": "CJK; transparent image; form; signature; incremental save",
+      "status": "pending"
+    },
+    {
+      "id": "source-word",
+      "evidence_level": "real_business_sample",
+      "sample_ids": [
+        "external-word"
+      ],
+      "source_requirement": "Word-exported PDF",
+      "feature_requirement": "CJK; form; naming and remote target",
+      "status": "pending"
+    },
+    {
+      "id": "source-libreoffice",
+      "evidence_level": "real_business_sample",
+      "sample_ids": [
+        "external-libreoffice"
+      ],
+      "source_requirement": "LibreOffice-exported PDF",
+      "feature_requirement": "CJK; transparent image; incremental save",
+      "status": "pending"
+    },
+    {
+      "id": "source-scanner",
+      "evidence_level": "real_business_sample",
+      "sample_ids": [
+        "external-scanner"
+      ],
+      "source_requirement": "Scanner-produced PDF",
+      "feature_requirement": "scan; oversized file; damaged-file case",
+      "status": "pending"
+    },
+    {
+      "id": "source-print-driver",
+      "evidence_level": "real_business_sample",
+      "sample_ids": [
+        "external-pdf-print-driver"
+      ],
+      "source_requirement": "PDF print-driver output",
+      "feature_requirement": "CJK; naming and remote target; encryption",
+      "status": "pending"
+    },
+    {
+      "id": "windows-release",
+      "evidence_level": "windows_release",
+      "sample_ids": [
+        "synthetic-minimal"
+      ],
+      "source_requirement": "Run the Windows packaged release and record its build hash and independent evidence",
+      "status": "pending"
+    },
+    {
+      "id": "reader-acrobat",
+      "evidence_level": "external_reader",
+      "sample_ids": [
+        "external-acrobat"
+      ],
+      "reader": "Acrobat Reader",
+      "source_requirement": "Manual open, page navigation, visual comparison and warnings",
+      "status": "pending"
+    },
+    {
+      "id": "reader-browser",
+      "evidence_level": "external_reader",
+      "sample_ids": [
+        "external-acrobat"
+      ],
+      "reader": "Supported browser PDF viewer",
+      "source_requirement": "Manual open, page navigation, visual comparison and warnings",
+      "status": "pending"
+    }
+  ]
+}

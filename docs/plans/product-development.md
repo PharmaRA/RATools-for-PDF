@@ -23,7 +23,7 @@
 
 | ID | 交付 | 软件状态 | 真实环境验收 | 提交 |
 |---|---|---|---|---|
-| PD-01 | PDF 资格矩阵与证据运行器 | 待开始 | 外部来源样本/阅读器待提供或实测 | — |
+| PD-01 | PDF 资格矩阵与证据运行器 | 已完成 | 外部来源、成品和阅读器 pending | 见 PD-01 记录 |
 | PD-02 | 处理计划预览与处理后验证 | 待开始 | 依赖 PD-01 样本覆盖 | — |
 | PD-03 | 可归档审计证据包 | 待开始 | 内部质量系统采纳待业务确认 | — |
 | PD-04 | 可版本化配置与导入导出 | 待开始 | 机构规则有效性待专家确认 | — |
@@ -149,3 +149,14 @@
 - Ruling：PD-02 先定义可序列化的文件级事实，PD-07 再统一规则级实际事件，避免提前把 planned 当 changed。
 
 后续每项记录 RED/GREEN 命令、全量结果、review 结论、提交哈希、用户可用入口和尚未完成的资格验收。
+
+### PD-01：资格矩阵与只读证据运行器（2026-11-09）
+
+- 交付：版本化清单、只读验证服务、CLI、公开合成 CJK PDF、手工阅读器模板。入口见 [资格验收说明](../qualification/README.md)。
+- RED：服务不存在的明确断言失败；补充边界暴露缺少预期指标/引擎版本仍通过，修复后专项 17/17（5.140 秒）。
+- GREEN：安全全量 418/418（65.569 秒），日志 `backups/product-roadmap-20261109/PD01/full-suite.log`；现存 fitz 弃用提示保留记录。
+- 实际 CLI 使用随附 manifest 和 PDF，qpdf 12.3.2 clean，输入前后哈希一致。样本 1 passed / 5 pending；矩阵 1 passed / 8 pending，退出码 2 正确表示未完成全部资格。
+- 证据：`backups/product-roadmap-20261109/PD01/evidence-20261109-v1/qualification-report.json`。
+- Review：pd01_review，Spec PASS / Quality PASS，无阻断；只读核对路径安全/qpdf 直接依赖，无重复全量。
+- 提交主题：`feat: add versioned read-only PDF qualification evidence`；具体哈希见 Git 同主题记录及下一项更新。
+- 边界：未提供真实 Acrobat/Word/LibreOffice/扫描仪/打印驱动样本；Windows 成品及外部阅读器未执行。签名仅检查存在性，渲染哈希不证明跨阅读器一致。软件机制完成，外部资格保持开放。

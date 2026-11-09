@@ -7,3 +7,5 @@
 - [Acrobat 字体嵌入自动化说明](acrobat-font-embedding-automation-notes.md)
 
 审查报告记录问题及原始证据；质量计划记录当前修复进度。历史基线测试通过不代表当前版本已完成验收。
+
+- [PDF 资格矩阵、样本清单与只读验收入口](qualification/README.md)
