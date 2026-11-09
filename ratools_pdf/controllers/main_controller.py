@@ -544,8 +544,16 @@ class MainController(QObject):
         if not self.ensure_idle('开始处理'):
             MainController._finish_processing_evidence(self, 'not_started')
             return
-        if not configuration_matches_plan(plan, self.view.get_selected_options(),
-                                          self.view.get_processing_mode(), self.view.get_compression_settings()):
+        try:
+            current_profile = self.view.get_processing_profile() if hasattr(self.view, 'get_processing_profile') else None
+        except ValueError:
+            current_profile = None
+            profile_invalid = True
+        else:
+            profile_invalid = False
+        if profile_invalid or not configuration_matches_plan(plan, self.view.get_selected_options(),
+                                          self.view.get_processing_mode(), self.view.get_compression_settings(),
+                                          profile=current_profile):
             MainController._finish_processing_evidence(self, 'stale_plan')
             self.view.show_warning_message('处理计划已失效', '选项或配置在预览期间发生变化，请重新生成处理计划。')
             return
@@ -630,7 +638,12 @@ class MainController(QObject):
         self.planning_in_progress = True
         self.view.set_task_busy('processing', True)
         try:
-            dialog = ProcessingPlanDialog(files, options, mode, settings, base, self.view)
+            try:
+                profile = self.view.get_processing_profile() if hasattr(self.view, 'get_processing_profile') else None
+                dialog = ProcessingPlanDialog(files, options, mode, settings, base, self.view, profile=profile)
+            except ValueError:
+                self.view.show_warning_message('配置无效', '当前规则或参数存在冲突，请调整配置后重新生成处理计划。')
+                return None
             accepted = dialog.exec() == QDialog.Accepted
             MainController._retain_processing_plan(self, dialog.plan, 'previewed' if accepted else 'cancelled')
             if not accepted:

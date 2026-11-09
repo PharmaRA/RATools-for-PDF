@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ratools_pdf.pdf import precheck
 from ratools_pdf.services.pdf_facts import InspectionCancelled, capture_pdf_snapshot, fingerprint
+from ratools_pdf.services import profiles
 
 
 CONFIG_VERSION = 'pd02.engine.v1'
@@ -23,20 +24,39 @@ def source_file_id(path):
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:24]
 
 
-def configuration(options, processing_mode, compression_settings):
+def configuration(options, processing_mode, compression_settings, profile=None):
     settings = compression_settings or {}
-    return {'version': CONFIG_VERSION, 'options': sorted(set(options or [])),
+    result = {'version': CONFIG_VERSION, 'options': sorted(set(options or [])),
             'processing_mode': 'force' if processing_mode == 'force' else 'smart',
             'compression_settings': {key: settings[key] for key in ('dpi', 'quality') if key in settings}}
+    if profile is not None:
+        validated = profiles.validate_profile(profile)
+        if set(validated['enabled_rules']) != set(result['options']) & set(profiles.rules_catalog.OPTION_TITLES):
+            raise ValueError('Profile rules do not match processing options')
+        expected = validated['rule_parameters'].get('compress_images', {})
+        actual = result['compression_settings']
+        if expected and expected != actual:
+            raise ValueError('Profile parameters do not match processing settings')
+        result['profile'] = validated
+        result['profile_digest'] = profiles.profile_digest(validated)
+    return result
 
 
 def _configuration_digest(config):
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode('utf-8')).hexdigest()
 
 
-def configuration_matches_plan(plan, options, processing_mode, compression_settings):
-    return plan.get('configuration_digest') == _configuration_digest(
-        configuration(options, processing_mode, compression_settings))
+def configuration_matches_plan(plan, options, processing_mode, compression_settings, profile=None):
+    # Workers consume the frozen snapshot; UI callers pass their current identity explicitly.
+    if profile is None:
+        profile = plan.get('configuration', {}).get('profile')
+    try:
+        current = configuration(options, processing_mode, compression_settings, profile)
+        if profile is not None and plan.get('configuration', {}).get('profile_digest') != current['profile_digest']:
+            return False
+        return plan.get('configuration_digest') == _configuration_digest(current)
+    except ValueError:
+        return False
 
 
 def input_matches_plan(path, file_plan):
@@ -48,8 +68,8 @@ def input_matches_plan(path, file_plan):
 
 
 def build_processing_plan(files, options, processing_mode='smart', compression_settings=None,
-                          common_base='', cancelled=None, progress=None):
-    config = configuration(options, processing_mode, compression_settings)
+                          common_base='', cancelled=None, progress=None, profile=None):
+    config = configuration(options, processing_mode, compression_settings, profile)
     selected = set(config['options'])
     plan = {'schema_version': 'pd02.plan.v1', 'batch_id': uuid.uuid4().hex,
             'created_at': timestamp(), 'configuration': config,

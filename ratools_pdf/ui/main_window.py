@@ -1,4 +1,6 @@
 import os
+from copy import deepcopy
+from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QIcon
@@ -14,6 +16,8 @@ from ratools_pdf.config.compression import (
     DEFAULT_JPEG_QUALITY,
     MAX_IMAGE_DPI,
     MIN_IMAGE_DPI,
+    MIN_JPEG_QUALITY,
+    MAX_JPEG_QUALITY,
 )
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
 from ratools_pdf.config.paths import get_app_dir, get_resource_path
@@ -36,6 +40,7 @@ from ratools_pdf.ui.theme import (
     ThemeManager,
 )
 from ratools_pdf.ui.widgets import DropZoneLabel, ElidedLabel
+from ratools_pdf.services import profiles
 
 
 class MainWindow(QMainWindow):
@@ -51,6 +56,7 @@ class MainWindow(QMainWindow):
         self.custom_selection_before_preset = set()
         self.active_preset_key = None
         self.is_applying_preset = False
+        self.active_processing_profile = None
         self.setWindowTitle("RATools for PDF")
 
         # === 添加原生窗口图标 ===
@@ -573,6 +579,13 @@ class MainWindow(QMainWindow):
         preset_layout.addStretch()
         preset_layout.addWidget(self.btn_save_favorite_preset)
         preset_layout.addWidget(self.btn_clear_selected_options)
+        self.btn_import_profile = QPushButton("导入配置")
+        self.btn_export_profile = QPushButton("导出配置")
+        for button in (self.btn_import_profile, self.btn_export_profile):
+            button.setObjectName("actionBtn")
+            preset_layout.addWidget(button)
+        self.btn_import_profile.clicked.connect(self.import_processing_profile)
+        self.btn_export_profile.clicked.connect(self.export_processing_profile)
         main_layout.addWidget(preset_bar)
 
 
@@ -710,6 +723,12 @@ class MainWindow(QMainWindow):
                 self.spin_image_dpi.setValue(saved_dpi)
                 if hasattr(self, "row_custom_widget"):
                     self.row_custom_widget.setVisible(True)
+        if hasattr(self, "spin_image_quality"):
+            try:
+                quality = int(self.app_settings.value("Compression/ImageQuality", DEFAULT_JPEG_QUALITY))
+            except (TypeError, ValueError):
+                quality = DEFAULT_JPEG_QUALITY
+            self.spin_image_quality.setValue(quality)
 
     def closeEvent(self, event):
         close_guard = getattr(self, "close_guard", None)
@@ -799,13 +818,22 @@ class MainWindow(QMainWindow):
         ]
 
     def get_favorite_preset_options(self):
+        saved = self.app_settings.value("Presets/FavoriteProfile", "")
+        if saved:
+            return profiles.loads_profile(saved)["enabled_rules"]
         value = self.app_settings.value("Presets/FavoriteOptions", [])
         if isinstance(value, str):
             return [item for item in value.split(",") if item]
         return list(value or [])
 
     def save_favorite_preset(self):
+        try:
+            profile = self.get_processing_profile()
+        except ValueError as exc:
+            self.show_warning_message("配置未保存", str(exc))
+            return
         favorite_options = self.get_processing_options()
+        self.app_settings.setValue("Presets/FavoriteProfile", profiles.dumps_profile(profile))
         self.app_settings.setValue("Presets/FavoriteOptions", favorite_options)
         self.active_preset_key = "favorite"
         self._set_preset_button_state("favorite")
@@ -849,6 +877,7 @@ class MainWindow(QMainWindow):
 
     def restore_custom_selection(self):
         self._set_rule_selection(self.custom_selection_before_preset)
+        self.active_processing_profile = None
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.persist_all_settings()
@@ -871,6 +900,7 @@ class MainWindow(QMainWindow):
 
     def clear_selected_options(self):
         self._set_rule_selection(set())
+        self.active_processing_profile = None
         self.active_preset_key = None
         self._set_preset_button_state(None)
         self.custom_selection_before_preset = set()
@@ -879,7 +909,18 @@ class MainWindow(QMainWindow):
 
     def apply_preset(self, preset_key, persist=True):
         if preset_key == "favorite":
-            target_options = set(self.get_favorite_preset_options())
+            try:
+                saved = self.app_settings.value("Presets/FavoriteProfile", "")
+                profile = profiles.loads_profile(saved) if saved else profiles.migrate_favorite(
+                    self.app_settings.value("Presets/FavoriteOptions", []), self.get_compression_settings())
+                self.apply_processing_profile(profile, persist=persist)
+            except ValueError as exc:
+                self.show_warning_message("常用配置无效", str(exc))
+                return
+            self.active_preset_key = preset_key
+            self._set_preset_button_state(preset_key)
+            self.refresh_selection_summary()
+            return
         else:
             preset = self.PRESET_OPTIONS.get(preset_key)
             if not preset:
@@ -890,16 +931,116 @@ class MainWindow(QMainWindow):
             return
 
         self._set_rule_selection(target_options)
+        self.active_processing_profile = profiles.builtin_profile(preset_key)
         self.active_preset_key = preset_key
         self._set_preset_button_state(preset_key)
         self.persist_all_settings()
         self.refresh_selection_summary()
+
+    def get_processing_profile(self):
+        rules = sorted(self.get_processing_options())
+        current = self.active_processing_profile
+        parameters = {"compress_images": self.get_compression_settings()} if "compress_images" in rules else {}
+        if current and current["enabled_rules"] == rules and current["rule_parameters"] == parameters:
+            return deepcopy(current)
+        self.active_processing_profile = None
+        return profiles.custom_profile(rules, self.get_compression_settings())
+
+    def _validate_profile_selection(self, profile):
+        """Reject aliases and radio combinations the desktop cannot represent exactly."""
+        target = set(profile["enabled_rules"])
+        expanded = set()
+        for group in self._rule_checkbox_groups().values():
+            if target & group["keys"]:
+                expanded.update(group["keys"])
+        if expanded != target:
+            raise ValueError("此配置包含界面无法精确表示的规则或别名组合")
+        lossless = target & {"compress_standard", "compress_aggressive", "generate_object_streams", "realloc_flate"}
+        if lossless not in (set(), {"compress_standard", "generate_object_streams", "realloc_flate"},
+                            {"compress_aggressive", "generate_object_streams", "realloc_flate"}):
+            raise ValueError("压缩规则必须与界面的完整无损压缩级别一致，未自动增减规则")
+
+    def apply_processing_profile(self, payload, persist=True):
+        profile = profiles.validate_profile(payload)
+        self._validate_profile_selection(profile)
+        # All validation precedes widget changes; handlers suppress persistence during application.
+        previous = self.get_processing_options()
+        previous_parameters = self.get_compression_settings()
+        previous_identity = self.active_processing_profile
+        try:
+            self._set_rule_selection(set(profile["enabled_rules"]))
+            self.is_applying_preset = True
+            params = profile["rule_parameters"].get("compress_images", previous_parameters)
+            self._set_profile_image_parameters(params)
+            actual = sorted(self.get_processing_options())
+            actual_parameters = {"compress_images": self.get_compression_settings()} if "compress_images" in actual else {}
+            if actual != profile["enabled_rules"] or actual_parameters != profile["rule_parameters"]:
+                raise ValueError("界面实际配置与导入配置不一致，已取消应用")
+        except Exception:
+            self._set_rule_selection(set(previous))
+            self.is_applying_preset = True
+            self._set_profile_image_parameters(previous_parameters)
+            self.active_processing_profile = previous_identity
+            raise
+        finally:
+            self.is_applying_preset = False
+        self.active_processing_profile = deepcopy(profile)
+        self.active_preset_key = None
+        self._set_preset_button_state(None)
+        if persist:
+            self.persist_all_settings()
+            self.app_settings.setValue("Compression/ImageDPI", params["dpi"])
+            self.app_settings.setValue("Compression/ImageQuality", params["quality"])
+        self.refresh_selection_summary()
+        return True
+
+    def _set_profile_image_parameters(self, params):
+        index = self.combo_image_dpi.findData(params["dpi"])
+        self.combo_image_dpi.setCurrentIndex(index if index >= 0 else self.combo_image_dpi.findData(-1))
+        self.spin_image_dpi.setValue(params["dpi"])
+        self.spin_image_quality.setValue(params["quality"])
+
+    def import_processing_profile(self):
+        path, _filter = QFileDialog.getOpenFileName(self, "导入处理配置", "", "JSON 配置 (*.json)")
+        if not path:
+            return
+        try:
+            profile = profiles.loads_profile(Path(path).read_text(encoding="utf-8-sig"))
+            self._validate_profile_selection(profile)
+            diff = profiles.diff_profiles(self.get_processing_profile(), profile)
+            added = ", ".join(diff["added_rules"]) or "无"
+            removed = ", ".join(diff["removed_rules"]) or "无"
+            changes = "\n".join(f"{key}: {values['before']} → {values['after']}"
+                                for key, values in diff["parameter_changes"].items()) or "无"
+            message = (f"配置：{profile['profile_id']} / {profile['profile_version']}\n"
+                       f"机构/地区：{profile['agency_or_region']}（不代表官方认证）\n"
+                       f"增加规则：{added}\n移除规则：{removed}\n参数变化：\n{changes}\n"
+                       f"验证级别：{profile['validation_level']}\n确认应用？")
+            if self.show_confirm_message("配置差异预览", message):
+                self.apply_processing_profile(profile)
+        except (OSError, ValueError, UnicodeError):
+            self.show_warning_message("导入失败", "配置文件无效、包含不支持的规则组合或无法读取；未应用配置。")
+
+    def export_processing_profile(self):
+        try:
+            text = profiles.dumps_profile(self.get_processing_profile())
+            path, _filter = QFileDialog.getSaveFileName(self, "导出处理配置", "processing-profile.json", "JSON 配置 (*.json)")
+            if not path:
+                return
+            # Exclusive creation preserves any existing file even when the native dialog permits overwrite.
+            with open(path, "x", encoding="utf-8") as stream:
+                stream.write(text)
+            self.show_success_message("配置已导出", "仅导出处理规则、参数与版本，不包含输出目录或个人设置。")
+        except (OSError, ValueError):
+            self.show_warning_message("导出失败", "当前配置无效或目标已存在/不可写，请选择新文件名。")
 
     def on_checkbox_toggled(self, _checked):
         if self.is_applying_preset:
             return
 
         sender_cb = self.sender()
+        if sender_cb not in [self.all_checkboxes.get(key) for key in self.GENERAL_SETTING_OPTIONS]:
+            self.active_processing_profile = None
         if isinstance(sender_cb, QCheckBox):
             self.persist_current_checkbox(sender_cb)
 
@@ -951,7 +1092,7 @@ class MainWindow(QMainWindow):
 
         return {
             "dpi": dpi,
-            "quality": DEFAULT_JPEG_QUALITY,
+            "quality": self.spin_image_quality.value() if hasattr(self, "spin_image_quality") else DEFAULT_JPEG_QUALITY,
         }
 
     def clear_tree_ui(self):
@@ -1250,6 +1391,15 @@ class MainWindow(QMainWindow):
         self.row_custom_widget.setVisible(False)
         v_dpi.addWidget(self.row_custom_widget)
 
+        quality_row = QHBoxLayout()
+        quality_row.addWidget(QLabel("JPEG 质量："))
+        self.spin_image_quality = QSpinBox()
+        self.spin_image_quality.setRange(MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
+        self.spin_image_quality.setValue(DEFAULT_JPEG_QUALITY)
+        quality_row.addWidget(self.spin_image_quality)
+        v_dpi.addLayout(quality_row)
+        self.spin_image_quality.valueChanged.connect(self._on_image_quality_changed)
+
         self.dpi_container.setVisible(False)
         v_card.addWidget(self.dpi_container)
 
@@ -1282,6 +1432,7 @@ class MainWindow(QMainWindow):
             self.cb_realloc_flate.setChecked(True)
 
         if not self.is_applying_preset:
+            self.active_processing_profile = None
             self.active_preset_key = None
             self._set_preset_button_state(None)
             self.persist_all_settings()
@@ -1297,13 +1448,20 @@ class MainWindow(QMainWindow):
             if hasattr(self, "row_custom_widget"):
                 self.row_custom_widget.setVisible(False)
             dpi = val
-        if hasattr(self, "app_settings"):
+        if hasattr(self, "app_settings") and not self.is_applying_preset:
+            self.active_processing_profile = None
             self.app_settings.setValue("Compression/ImageDPI", dpi)
 
     def _on_image_dpi_spin_changed(self, value):
         if self.combo_image_dpi.currentData() == -1:
-            if hasattr(self, "app_settings"):
+            if hasattr(self, "app_settings") and not self.is_applying_preset:
+                self.active_processing_profile = None
                 self.app_settings.setValue("Compression/ImageDPI", value)
+
+    def _on_image_quality_changed(self, value):
+        if hasattr(self, "app_settings") and not self.is_applying_preset:
+            self.active_processing_profile = None
+            self.app_settings.setValue("Compression/ImageQuality", value)
 
     def _on_compress_images_toggled(self, checked):
         pass

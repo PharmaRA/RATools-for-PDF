@@ -1,5 +1,7 @@
 """Read-only, cancellable batch preview; the dialog owns its reader thread."""
 
+from copy import deepcopy
+
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem
 
@@ -12,21 +14,22 @@ class PlanReader(QThread):
     ready = Signal(object)
     progress = Signal(int, int)
 
-    def __init__(self, files, options, mode, settings, base, parent=None):
+    def __init__(self, files, options, mode, settings, base, parent=None, profile=None):
         super().__init__(parent)
         self.arguments = (list(files), set(options), mode, dict(settings) if settings else None, base)
+        self.profile = deepcopy(profile)
 
     def run(self):
         self.ready.emit(build_processing_plan(
             *self.arguments, cancelled=self.isInterruptionRequested,
-            progress=lambda done, total, _item: self.progress.emit(done, total)))
+            progress=lambda done, total, _item: self.progress.emit(done, total), profile=self.profile))
 
 
 class ProcessingPlanDialog(FramelessDraggableDialog):
-    def __init__(self, files, options, mode='smart', settings=None, common_base='', parent=None):
+    def __init__(self, files, options, mode='smart', settings=None, common_base='', parent=None, profile=None):
         super().__init__('处理计划预览', parent)
         self.resize(900, 580)
-        self.plan = build_processing_plan([], options, mode, settings, common_base)
+        self.plan = build_processing_plan([], options, mode, settings, common_base, profile=profile)
         self._cancel_requested = False
         self.lbl_status = QLabel('正在只读检查输入与规则，请稍候；可随时取消。')
         self.lbl_status.setWordWrap(True)
@@ -48,7 +51,7 @@ class ProcessingPlanDialog(FramelessDraggableDialog):
         buttons.addWidget(self.btn_cancel)
         buttons.addWidget(self.btn_confirm)
         self.content_layout.addLayout(buttons)
-        self.worker = PlanReader(files, options, mode, settings, common_base, self)
+        self.worker = PlanReader(files, options, mode, settings, common_base, self, profile=profile)
         self.worker.ready.connect(self._receive_plan)
         self.worker.progress.connect(lambda done, total: self.lbl_status.setText(f'正在生成只读计划：{done} / {total}'))
         self.worker.finished.connect(self._reader_finished)

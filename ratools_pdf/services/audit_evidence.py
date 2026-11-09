@@ -135,6 +135,13 @@ def _build_document(evidence):
     configuration['compression_settings'] = {key: config.get('compression_settings', {}).get(key)
                                               for key in ('dpi', 'quality')
                                               if key in config.get('compression_settings', {})}
+    if 'profile' in config or 'profile_digest' in config:
+        from ratools_pdf.services.processing_plan import configuration_matches_plan
+        if not configuration_matches_plan(plan, config.get('options'), config.get('processing_mode'),
+                                          config.get('compression_settings'), profile=config.get('profile')):
+            raise ValueError('Invalid profile snapshot or configuration digest')
+        configuration['profile'] = deepcopy(config['profile'])
+        configuration['profile_digest'] = config['profile_digest']
     files, plans = [], []
     for source in plan.get('files', []):
         file_id = _identifier(source.get('file_id'))
@@ -298,6 +305,13 @@ def _validate_document(document):
     _schema(document.get('plan'), 'pd02.plan.v1')
     if document.get('configuration', {}).get('version') != 'pd02.engine.v1':
         raise ValueError('Unsupported configuration schema')
+    config = document['configuration']
+    if 'profile' in config or 'profile_digest' in config:
+        from ratools_pdf.services.processing_plan import configuration_matches_plan
+        binding = {'configuration': config, 'configuration_digest': document['plan'].get('configuration_digest')}
+        if not configuration_matches_plan(binding, config.get('options'), config.get('processing_mode'),
+                                          config.get('compression_settings'), profile=config.get('profile')):
+            raise ValueError('Invalid profile snapshot or configuration digest')
     batch = document['batch']
     _identifier(batch['batch_id'])
     if not batch.get('ended_at') or batch.get('outcome') in {'running', 'previewed'}:
