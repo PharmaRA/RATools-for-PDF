@@ -10,3 +10,4 @@
 
 - [PDF 资格矩阵、样本清单与只读验收入口](qualification/README.md)
 - [处理计划预览与输出验证](processing-verification.md)
+- [可归档审计证据包与核验](audit-evidence.md)

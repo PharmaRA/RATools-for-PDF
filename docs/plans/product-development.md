@@ -24,8 +24,8 @@
 | ID | 交付 | 软件状态 | 真实环境验收 | 提交 |
 |---|---|---|---|---|
 | PD-01 | PDF 资格矩阵与证据运行器 | 已完成 | 外部来源、成品和阅读器 pending | 8ce2d3d |
-| PD-02 | 处理计划预览与处理后验证 | 已完成 | 依赖 PD-01 真实样本覆盖 | 见 PD-02 记录 |
-| PD-03 | 可归档审计证据包 | 待开始 | 内部质量系统采纳待业务确认 | — |
+| PD-02 | 处理计划预览与处理后验证 | 已完成 | 依赖 PD-01 真实样本覆盖 | aa817d0 |
+| PD-03 | 可归档审计证据包 | 已完成 | 内部质量系统采纳待业务确认 | 见 PD-03 记录 |
 | PD-04 | 可版本化配置与导入导出 | 待开始 | 机构规则有效性待专家确认 | — |
 | PD-05 | 字体 provider 能力与复检 | 待开始 | Acrobat/CJK 字体环境待实测 | — |
 | PD-06 | 超时、取消、进程树与资源限额 | 待开始 | 网络盘/设备故障待实测 | — |
@@ -170,3 +170,12 @@
 - 提交主题：`feat: preview processing plans and verify outputs before publication`。
 - 接口：`processing_evidence`、`processing_evidence_history[batch_id]` 保存实际结构化事件及文件前后快照；PD-03 直接消费，不解析本地化日志。重试单独 batch_id。
 - 边界：规则级实际 changed/verified 尚为 unknown/not_verified，PD-07 补齐；签名有效性/真实业务/外部阅读器未验证。生产公开 `(success, message)` 契约保留。
+### PD-03：可归档审计证据包（2026-11-09）
+
+- 交付：日志窗口“导出最近批次审计包”、版本化 `evidence.json`/`summary.csv`/`integrity.json`/`COMPLETE.json`、核验 CLI 和[使用说明](../audit-evidence.md)。消费 PD-02 结构化事实，不解析本地化日志。
+- RED：初始 17 项、19 个失败子场景；稳定原因码补充另有 5 个子场景 RED。最终专项 20/20（8.049 秒）。
+- 全量：468/468、84.470 秒、退出码 0。可核对摘录见 `backups/product-roadmap-20261109/PD03/full-final-evidence.log`；该文件明确是执行会话结果尾部转录摘录，不是完整原始重定向日志，未重跑测试。
+- Review：pd03_review 首轮及最终增量均 Spec PASS / Quality PASS，无阻断。runtime 缺失提示已按实际条件修正；`reason_codes` 从结构化 outcome 映射，非成功项标记 `engine_diagnostic:not_recorded`。
+- 提交主题：`feat: export verifiable audit evidence packages`。
+- 接口：导出最近终态批次；新批次留存应用/PyMuPDF 版本，旧批次、qpdf/build 缺失项保持 unknown；输出相对路径、字段白名单和哈希完整性核验，哈希不提供签名认证。
+- 边界：当前无历史批次选择器；不包含 PDF 正文；规则实际变化和签名有效性 not_verified；内部质量系统采纳、真实业务/Acrobat/监管资格仍 pending。

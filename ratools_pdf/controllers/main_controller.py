@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QTreeWidgetItem
 
 from ratools_pdf.common.status import status_semantic
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
+from ratools_pdf.config.version import APP_VERSION_STR
 from ratools_pdf.controllers.io_actions import (
     _collect_ectd_rename_plan,
     common_base_dir,
@@ -641,9 +642,23 @@ class MainController(QObject):
             self.view.set_task_busy('processing', False)
 
     def _retain_processing_plan(self, plan, outcome):
+        try:
+            import pymupdf
+            execution_runtime = {
+                'application': {'version': APP_VERSION_STR, 'source_build': 'unknown'},
+                'pymupdf': {'version': str(pymupdf.VersionBind)},
+                'qpdf': {'version': 'unknown', 'reason': 'not_recorded_by_pd02'},
+            }
+        except Exception:
+            execution_runtime = {
+                'application': {'version': 'unknown', 'source_build': 'unknown'},
+                'pymupdf': {'version': 'unknown'},
+                'qpdf': {'version': 'unknown', 'reason': 'not_recorded_by_pd02'},
+            }
         evidence = {'schema_version': 'pd02.batch.v1', 'batch_id': plan['batch_id'],
                     'created_at': plan['created_at'], 'started_at': None, 'ended_at': None,
                     'outcome': outcome, 'plan': deepcopy(plan), 'events': [],
+                    'execution_runtime': execution_runtime,
                     'files': {item['file_id']: {
                         'file_id': item['file_id'], 'relative_path': item['relative_path'],
                         'outcome': 'planning_failed' if item['status'] == 'failed' else 'planned',
@@ -771,7 +786,8 @@ class MainController(QObject):
         evidence = getattr(self, 'processing_evidence_history', {}).get(event.get('batch_id'))
         if evidence is not None and event.get('file_id') in evidence['files']:
             keys = ('type', 'batch_id', 'file_id', 'time', 'started_at', 'ended_at', 'before', 'after',
-                    'verification', 'engine_success', 'published', 'outcome', 'rule_actual_changed')
+                    'verification', 'engine_success', 'published', 'outcome', 'rule_actual_changed',
+                    'output_relative_path')
             fact = deepcopy({key: event[key] for key in keys if key in event})
             evidence['events'].append(fact)
             if event.get('type') == 'terminal':

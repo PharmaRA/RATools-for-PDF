@@ -222,7 +222,17 @@ class ProcessWorker(QThread):
         self._finish_process_task(task, False, message)
 
     def _task_facts(self, task):
+        output_relative_path = None
+        if task.get('out_path'):
+            base = self.common_base if self.overwrite_original else self.output_dir
+            try:
+                relative = os.path.relpath(task['out_path'], base)
+                if relative != '..' and not relative.startswith('..' + os.sep) and not os.path.isabs(relative):
+                    output_relative_path = relative.replace(os.sep, '/')
+            except ValueError:
+                pass
         return {'batch_id': self.batch_id, 'file_id': source_file_id(task['file_path']),
+                'output_relative_path': output_relative_path,
                 'started_at': task.get('started_at'), 'before': task.get('before'),
                 'after': task.get('after'), 'verification': task.get('verification'),
                 'engine_success': task.get('engine_success'), 'published': task.get('published', False),

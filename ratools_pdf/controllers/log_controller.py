@@ -2,7 +2,10 @@
 
 import csv
 import os
+from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
+import uuid
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QFileDialog
@@ -10,6 +13,7 @@ from PySide6.QtWidgets import QFileDialog
 from ratools_pdf.controllers.io_actions import common_base_dir
 from ratools_pdf.controllers.log_export import _select_log_rows_for_export
 from ratools_pdf.ui.dialogs import LogDialog
+from ratools_pdf.services.audit_evidence import export_evidence_package
 
 
 class LogController(QObject):
@@ -25,6 +29,7 @@ class LogController(QObject):
             self.log_dialog = LogDialog(self.view)
             self.log_dialog.btn_export.clicked.connect(self.export_logs)
             self.log_dialog.btn_export_precheck.clicked.connect(self.export_precheck_results)
+            self.log_dialog.btn_export_audit.clicked.connect(self.export_audit_evidence)
 
         self.log_dialog.set_log_data(
             host.process_logs if host.process_logs else "暂无处理日志...",
@@ -34,9 +39,36 @@ class LogController(QObject):
         self.log_dialog.btn_export_precheck.setToolTip(
             "导出最近一次批量预检结果" if host.last_precheck_results else "请先执行一次批量预检"
         )
+        self.log_dialog.btn_export_audit.setEnabled(bool(getattr(host, 'processing_evidence', None)))
         self.log_dialog.show()
         self.log_dialog.raise_()
         self.log_dialog.activateWindow()
+
+    def export_audit_evidence(self):
+        evidence = getattr(self.host, 'processing_evidence', None)
+        if not evidence or not evidence.get('ended_at') or evidence.get('outcome') in {'running', 'previewed'}:
+            self.view.show_warning_message("⚠️ 提示", "请等待最近批次结束后再导出审计包。")
+            return
+        # A native modal dialog permits event-loop reentry; freeze facts first.
+        snapshot = deepcopy(evidence)
+        batch_id = snapshot.get('batch_id')
+        parent = QFileDialog.getExistingDirectory(
+            self.view, "选择审计包保存位置（将在其中创建新目录）",
+            self._default_export_dir(prefer_last_output=True))
+        if not parent:
+            return
+        current = getattr(self.host, 'processing_evidence', None)
+        if (current is not evidence or not current or current.get('batch_id') != batch_id
+                or not current.get('ended_at') or current.get('outcome') in {'running', 'previewed'}):
+            self.view.show_warning_message("⚠️ 提示", "最近批次已变化，请重新导出审计包。")
+            return
+        target = Path(parent) / ('RATools_Audit_' + datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:10])
+        try:
+            export_evidence_package(snapshot, target)
+        except Exception:
+            self.view.show_error_message("❌ 导出失败", "审计包未完成。若新目录已创建，请保留排查；缺少有效完整标识的目录不能归档。")
+            return
+        self.view.show_success_message("✅ 导出成功", f"最近批次审计包已保存：\n{target.name}\n可使用核验命令检查完整性。")
 
     def _default_export_dir(self, prefer_last_output=True):
         host = self.host
