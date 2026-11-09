@@ -208,6 +208,75 @@ class ProcessingControlTests(unittest.TestCase):
         self.assertEqual(events[-1]['outcome'], 'skipped')
         self.assertEqual(self.destination.read_bytes(), b'previous successful output')
 
+    def test_skip_current_during_final_fingerprint_preserves_output_and_next_file(self):
+        from ratools_pdf.services import processing_plan
+        next_source = self.root / 'next.pdf'
+        write_pdf(next_source, 'next original')
+        worker, events, errors = self.worker()
+        worker.file_timeout_seconds = 0
+        worker.files.append(str(next_source))
+        worker.processing_plan = build_processing_plan(worker.files, set(), common_base=str(self.root))
+        worker.file_plans = {item['file_id']: item for item in worker.processing_plan['files']}
+        source_fingerprints = []
+        real_fingerprint = processing_plan.fingerprint
+
+        def fingerprint(path, cancelled=None):
+            if Path(path) == self.source:
+                source_fingerprints.append(path)
+                if len(source_fingerprints) == 2:
+                    worker.request_skip_current()
+            return real_fingerprint(path, cancelled)
+
+        def request_after_terminal(event):
+            if event['type'] == 'terminal' and event['file_path'] == str(self.source):
+                worker.request_skip_current()
+
+        worker.structured_progress.connect(request_after_terminal)
+        with patch.object(processing_plan, 'fingerprint', side_effect=fingerprint):
+            worker.run()
+        terminals = [event for event in events if event['type'] == 'terminal']
+        self.assertEqual(errors, [])
+        self.assertEqual(len(source_fingerprints), 2)
+        self.assertEqual([event['outcome'] for event in terminals], ['skipped', 'succeeded'])
+        self.assertFalse(terminals[0]['published'])
+        self.assertEqual(self.destination.read_bytes(), b'previous successful output')
+        self.assertTrue(terminals[1]['published'])
+        with fitz.open(self.output / 'next.pdf') as doc:
+            self.assertIn('next original', doc[0].get_text())
+
+    def test_skip_current_during_final_path_check_preserves_output_and_next_file(self):
+        from ratools_pdf.controllers.workers import check_unlinked_path
+        next_source = self.root / 'next.pdf'
+        write_pdf(next_source, 'next original')
+        worker, events, errors = self.worker()
+        worker.file_timeout_seconds = 0
+        worker.files.append(str(next_source))
+        requests = []
+
+        def check(path):
+            result = check_unlinked_path(path)
+            if Path(path).name == 'result.pdf' and not requests:
+                requests.append(path)
+                worker.request_skip_current()
+            return result
+
+        def request_after_terminal(event):
+            if event['type'] == 'terminal' and event['file_path'] == str(self.source):
+                worker.request_skip_current()
+
+        worker.structured_progress.connect(request_after_terminal)
+        with patch('ratools_pdf.controllers.workers.check_unlinked_path', side_effect=check):
+            worker.run()
+        terminals = [event for event in events if event['type'] == 'terminal']
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests), 1)
+        self.assertEqual([event['outcome'] for event in terminals], ['skipped', 'succeeded'])
+        self.assertFalse(terminals[0]['published'])
+        self.assertEqual(self.destination.read_bytes(), b'previous successful output')
+        self.assertTrue(terminals[1]['published'])
+        with fitz.open(self.output / 'next.pdf') as doc:
+            self.assertIn('next original', doc[0].get_text())
+
     def test_disabled_deadline_allows_successful_real_pdf(self):
         worker, events, errors = self.worker()
         worker.file_timeout_seconds = 0

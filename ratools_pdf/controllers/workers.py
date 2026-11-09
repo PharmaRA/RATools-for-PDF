@@ -89,6 +89,13 @@ class ProcessWorker(QThread):
             if file_path:
                 self._skip_requested_files.add(path_key(file_path))
 
+    def _clear_current_skip_state(self):
+        with self._control_lock:
+            self._can_skip_current = False
+            self._current_file_path = ""
+            self._verification_file_path = ""
+            self._skip_requested = False
+
     def run(self):
         try:
             rename_ectd = "filename_ectd_format" in self.options
@@ -294,6 +301,7 @@ class ProcessWorker(QThread):
                 path_key(task['file_path']) in self._skip_requested_files or self._task_expired(task))
 
     def _emit_timed_out_task(self, task):
+        self._clear_current_skip_state()
         task['outcome'] = 'timed_out'
         task['published'] = False
         warning = self._recycle_task_output(task)
@@ -331,7 +339,7 @@ class ProcessWorker(QThread):
         with self._control_lock:
             if self._finish_interrupted_task(task):
                 return False
-        self._verification_file_path = task['file_path']
+            self._verification_file_path = task['file_path']
         cancelled = lambda: self._task_cancelled(task)
         try:
             if 'before' not in task:
@@ -345,8 +353,6 @@ class ProcessWorker(QThread):
                 if self._finish_interrupted_task(task):
                     return False
             raise
-        finally:
-            self._verification_file_path = ""
         if success and not task['verification']['publish_allowed']:
             success = False
             task['outcome'] = 'verification_failed'
@@ -370,6 +376,8 @@ class ProcessWorker(QThread):
         with self._control_lock:
             if self._finish_interrupted_task(task):
                 return False
+            if not success:
+                self._clear_current_skip_state()
         if success:
             try:
                 check_unlinked_path(out_path)
@@ -381,7 +389,12 @@ class ProcessWorker(QThread):
                         return False
                     os.replace(task["work_path"], out_path)
                     task['published'] = True
+                    self._clear_current_skip_state()
             except Exception as e:
+                with self._control_lock:
+                    if self._finish_interrupted_task(task):
+                        return False
+                    self._clear_current_skip_state()
                 success = False
                 msg = f"提交输出失败（原文件已保留）: {str(e)}"
                 task['outcome'] = 'publish_failed'
@@ -413,6 +426,7 @@ class ProcessWorker(QThread):
         return success
 
     def _emit_stopped_task(self, task):
+        self._clear_current_skip_state()
         warning = self._recycle_task_output(task)
         reason = "用户手动停止处理" + (f"；{warning}" if warning else "")
         now = datetime.now().strftime('%H:%M:%S')
@@ -433,6 +447,7 @@ class ProcessWorker(QThread):
         )
 
     def _emit_skipped_task(self, task, reason="已跳过当前文件"):
+        self._clear_current_skip_state()
         warning = self._recycle_task_output(task)
         if warning:
             reason = f"{reason}；{warning}"
@@ -481,8 +496,9 @@ class ProcessWorker(QThread):
                 success, msg = False, "处理中断"
                 skipped_current = False
                 timed_out = False
-                self._can_skip_current = True
-                self._current_file_path = file_path
+                with self._control_lock:
+                    self._can_skip_current = True
+                    self._current_file_path = file_path
                 while proc.is_alive():
                     if self._stop_requested:
                         stopped = True
@@ -503,9 +519,6 @@ class ProcessWorker(QThread):
 
                     if parent_conn.poll(0.1):
                         break
-
-                self._can_skip_current = False
-                self._current_file_path = ""
 
                 if stopped:
                     self._emit_stopped_task(task)
@@ -541,8 +554,7 @@ class ProcessWorker(QThread):
         except Exception as exc:
             failure = str(exc)
         finally:
-            self._can_skip_current = False
-            self._current_file_path = ""
+            self._clear_current_skip_state()
             if task is not None:
                 self._fail_process_task(task, f"批处理异常: {failure or '处理中断'}")
 
