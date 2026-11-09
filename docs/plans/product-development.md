@@ -32,7 +32,7 @@
 | PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 0d1d10f |
 | PD-08 | 分层测试与版本化样本回归 | 已完成 | 外部样本/人工批准仍 pending | 2cfff13 |
 | PD-09 | 能力矩阵与文档一致性 | 已完成 | 只描述已有证据 | 5f96a04 |
-| PD-10 | 可追溯发布与双变体验收 | 实现与真实构建验收中 | 正式代码签名证书待提供 | — |
+| PD-10 | 可追溯发布与双变体验收 | 已完成 | unsigned；外部资格仍 pending | 见 PD-10 记录 |
 
 ## Task 1: PD-01 PDF 资格矩阵与证据运行器
 
@@ -235,3 +235,22 @@
 - RED：控制专项23项中新增2项失败；GREEN23/23（30.705秒）、验证22/22、worker21/21。联合冻结全量570/570（186.759秒）包含此修复，随后仅发布构建工具仍有调整，不能据此声明PD10最终全部通过。
 - Review：final_integration_review限定复审Spec PASS / Quality PASS，原P1关闭，无新增阻断；源代码其余跨项契约已核对，PD10独立审查与真实成品仍待最后证据。
 - 提交主题：`fix: honor serial skip requests until output publication`。
+### PD-10：可追溯发布与双变体成品验收（2026-11-10）
+
+- 交付：14包Windows CPython3.11 AMD64精确wheel锁、哈希/RECORD/实际导入来源校验、受保护fresh-child构建、完整Analysis归属、SBOM/许可证/成品哈希、显式签名入口、统一源码/EXE自检。[构建与成品证据说明](../build-verification.md)。
+- 最终专项17/17；完整安全回归575/575（180.985秒），unit11+integration564，qualification未执行。日志 `backups/product-roadmap-20261109/PD10/full-release-final.log`，此前562/570结果保留为独立历史快照。
+- 最终严格双构建exit0：`dist/f313fcee487b49a480d389fc1fafc5ca`；14包校验、主/分析子进程清理保护通过。两个EXE均隐藏运行--verify-release，exit0、ok=true，GUI/core PDF/qpdf/images/update boundary五项passed。
+- 每变体885个实际Analysis输入完整归属、11个SBOM组件、24个许可证文件；加入验收证据后296文件哈希核验通过，EXE字节未变。最终机器摘要 `backups/product-roadmap-20261109/PD10/release-evidence-summary.json`。
+- 源码与产物：构建使用55ceb0c加当时PD10和用户主题未提交字节，逐源文件哈希记录且与源码自检一致；提交后的程序源码不再变更。用户主题未纳入提交，但其字节确实包含于成品并记录来源。
+- Review：pd10_review全部已确认完整性/来源/签名状态问题关闭，最终代码增量及成品证据/文档SpecQuality PASS；final_integration_review跨项唯一串行skip问题已独立55ceb0c修复并复审PASS。
+- 验收过程中真实发现并修复：RECORD缺失放行、ambient构建导入、未知Analysis静默遗漏、签名状态/目标链接门禁、隐藏子进程日志、Pythonwin锁定来源、生成归档共享引用与精确常量类型比较、第二变体Analysis编号。失败日志和旧候选产物保留，不冒充最终成功。
+- 提交主题：`build: produce traceable locked releases with verified variants`。
+- 边界：本次全部unsigned；没有正式签名、时间戳、远程推送/发布。Smoke为合成软件检查，不替代全GUI/逐规则或真实业务/阅读器/Acrobat/监管资格；Python socket观察不代表所有OS网络路径。锁仅当前平台，不宣称位级可复现。
+
+## 本轮交付结论（2026-11-10）
+
+十项计划均有软件机制或文档交付、对应验收与独立只读review；各项独立提交。PD-05按当前产品决定完成手动交接/复检，自动修复仍blocked；真实样本与人工批准、Acrobat/字体/阅读器、设备与监管资格、正式代码签名继续作为明确开放项，不能把本轮软件完成理解为全部业务资格完成。
+
+最终可运行目录：标准版 `dist/f313fcee487b49a480d389fc1fafc5ca/RATools-for-PDF/`；无更新版 `dist/f313fcee487b49a480d389fc1fafc5ca/RATools-for-PDF-NoUpdate/`。分发须保留完整目录及_internal/release，不单独复制EXE。
+
+实现期间保留用户 `ratools_pdf/ui/theme.py` 和 `.playwright-mcp/`；备份、失败/成功日志及资格缺口证据保留在 `backups/product-roadmap-20261109/`。未远程推送。

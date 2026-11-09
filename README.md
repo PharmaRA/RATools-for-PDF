@@ -308,7 +308,7 @@ python main_no_update.py
 
 ## Windows 构建与成品验证
 
-当前有清理保护的本机构建入口、依赖准备、代理和成品压缩检查统一见 [Windows 构建说明](docs/build-verification.md)。先在当前 Python 安装 `requirements.txt` 的应用依赖，再从项目根目录运行：
+当前有清理保护的本机构建入口、Windows CPython 3.11 精确 wheel 锁、代理、来源/SBOM/许可证/文件哈希和统一成品自检见 [Windows 构建说明](docs/build-verification.md)。从项目根目录运行，应用与构建依赖会按锁安装到本次独立 target：
 
 ```powershell
 python -B scripts/build_pyinstaller_safely.py --install-dependency
@@ -316,7 +316,7 @@ python -B scripts/build_pyinstaller_safely.py --install-dependency
 
 `build_pyinstaller.bat` 委托同一入口，默认生成更新版与 NoUpdate 版；构建开始前必须出现 `BUILD_GUARD parent=blocked isolated_child=blocked`。每次构建使用独立的 `build_pyinstaller/<任务ID>/` 与 `dist/<任务ID>/`，以最终 `BUILD_OUTPUT=` 和其中的 `build.json` 定位产物，不再依赖旧的固定版本目录示例。
 
-历史版本中的 Nuitka 发布记录保留在 CHANGELOG；当前操作以以上有保护的路径为准。PD09 只更新文档，没有重新构建或验收当前成品。PD10 尚未实施；待其实际构建后再更新版本能力清单，源码能力不能直接当作已发布 EXE 的验收结论。
+历史版本中的 Nuitka 发布记录保留在 CHANGELOG；当前操作以以上有保护的路径为准。PD10 的源码与实际正常版/NoUpdate EXE 使用同一 `--verify-release NEWDIR` 接口，隔离设置并检查 GUI 初始化/关闭、合成核心 PDF、真实 qpdf、实际图片压缩和更新边界。该 smoke 不覆盖全部 GUI/规则、实时在线更新或真实业务/外部阅读器资格；当前本机成品证据见构建说明，历史下载包不会自动包含本轮源码改动。可选签名入口默认 unsigned；未提供证书时不声称已签名。锁定 wheel 也不代表本地 Windows 构建完全隔离或位级可复现。
 
 ## qpdf 说明
 

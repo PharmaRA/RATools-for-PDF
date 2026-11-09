@@ -44,6 +44,8 @@
       "test_qpdf_runner.py",
       "test_qpdf_security_and_overlay.py",
       "test_queue_identity.py",
+      "test_release_metadata.py",
+      "test_release_verification.py",
       "test_rule_results.py",
       "test_rules_catalog.py",
       "test_signature_baker.py",

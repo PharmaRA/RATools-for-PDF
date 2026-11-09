@@ -8,9 +8,12 @@ import argparse
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from io import StringIO
 import json
+import importlib
 import os
 from pathlib import Path
+import site
 import shutil
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -21,6 +24,26 @@ sys.path.insert(0,str(ROOT))
 sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
+from scripts.release_metadata import (bundle_evidence, load_lock, pip_requirements,
+    sha256, source_provenance, verify_environment, verify_import_origins)
+
+
+def run_locked_child(command):
+    return subprocess.run(command,stdout=sys.stdout,stderr=sys.stderr,
+                          creationflags=subprocess.CREATE_NO_WINDOW).returncode
+
+
+def locked_python_paths(bootstrap,dependencies,root):
+    dependencies=Path(dependencies)
+    return [str(path) for path in (bootstrap,dependencies,dependencies/'win32',
+        dependencies/'win32/lib',dependencies/'Pythonwin',dependencies/'pywin32_system32',root)]
+
+
+def resolve_analysis_toc(directory):
+    paths=list(Path(directory).glob('Analysis-*.toc'))
+    if len(paths)!=1:
+        raise ValueError('Expected exactly one actual Analysis output in the variant directory')
+    return paths[0]
 
 
 def build():
@@ -29,23 +52,36 @@ def build():
     parser.add_argument('--variant',choices=('normal','no-update','both'),default='both')
     parser.add_argument('--proxy', help='Optional dependency-download proxy URL')
     parser.add_argument('--dependency-path', help='Reuse an existing isolated PyInstaller dependency directory')
+    parser.add_argument('--lock',type=Path,default=ROOT/'requirements-release-win311.lock.json')
+    parser.add_argument('--locked-child',action='store_true',help=argparse.SUPPRESS)
     args=parser.parse_args()
     if os.name != 'nt':
         parser.error('This recycling build runner currently requires Windows')
-    run_id=uuid.uuid4().hex
-    work=check_unlinked_path(ROOT/'build_pyinstaller'/run_id)
-    dist=check_unlinked_path(ROOT/'dist'/run_id)
-    work.mkdir(parents=True,exist_ok=False)
-    dist.mkdir(parents=True,exist_ok=False)
+    lock=load_lock(args.lock)
+    if not args.install_dependency and not args.dependency_path:
+        parser.error('Use --install-dependency or a previously locked --dependency-path')
+    provenance=source_provenance(ROOT)
+    if args.locked_child:
+        from scripts.build_cleanup_guard import install_from_environment
+        install_from_environment()
+        work=check_unlinked_path(os.environ['RATOOLS_BUILD_WORK'])
+        dist=check_unlinked_path(os.environ['RATOOLS_BUILD_DIST'])
+        run_id=work.name
+    else:
+        run_id=uuid.uuid4().hex
+        work=check_unlinked_path(ROOT/'build_pyinstaller'/run_id)
+        dist=check_unlinked_path(ROOT/'dist'/run_id)
+        work.mkdir(parents=True,exist_ok=False)
+        dist.mkdir(parents=True,exist_ok=False)
     temp=work/'tmp'
-    temp.mkdir()
+    temp.mkdir(exist_ok=args.locked_child)
     tempfile.tempdir=str(temp)
     os.environ['TEMP']=os.environ['TMP']=str(temp)
     os.environ['PYINSTALLER_CONFIG_DIR']=str(work/'cache')
     os.environ['RATOOLS_BUILD_WORK']=str(work)
     os.environ['RATOOLS_BUILD_DIST']=str(dist)
     bootstrap=work/'bootstrap'
-    bootstrap.mkdir()
+    bootstrap.mkdir(exist_ok=args.locked_child)
     # Python normally logs and ignores sitecustomize errors. Exit immediately
     # instead so a failed guard cannot leave an unprotected analysis process.
     (bootstrap/'sitecustomize.py').write_text(
@@ -57,7 +93,6 @@ def build():
         if not dependencies.is_relative_to((ROOT/'build_pyinstaller').resolve()) or not dependencies.is_dir():
             raise ValueError('Dependency directory must belong to a previous isolated build')
         python_paths.append(str(dependencies))
-        sys.path.insert(0,str(dependencies))
     os.environ['PYTHONPATH']=os.pathsep.join(python_paths)
     def recycle(path,*_args,**_kwargs):
         candidate=Path(os.fsdecode(path)).absolute()
@@ -78,11 +113,14 @@ def build():
         if args.install_dependency:
             from pip._internal.cli.main import main as pip_main
             dependencies=work/'dependencies'
+            requirements=work/'locked-requirements.txt'
+            requirements.write_text(pip_requirements(lock),encoding='utf-8')
             # Keep installer diagnostics private; dependency fetching uses the
             # explicit public index, with no user-configured credential output.
             install_args=['--isolated','install','--index-url','https://pypi.org/simple',
                           '--no-cache-dir','--no-compile','--only-binary=:all:',
-                          '--target',str(dependencies),'PyInstaller>=6,<7']
+                          '--no-deps','--require-hashes',
+                          '--target',str(dependencies),'-r',str(requirements)]
             if args.proxy:
                 install_args += ['--proxy', args.proxy]
             output, errors = StringIO(), StringIO()
@@ -95,13 +133,33 @@ def build():
                               'Connection', 'Timeout', 'FileNotFoundError', 'TypeError')
                               if label.lower() in diagnostic.lower()]
                 raise RuntimeError(f'PyInstaller dependency installation failed (exit {status}; categories: {categories})')
-            sys.path.insert(0,str(dependencies))
             python_paths.append(str(dependencies))
-            os.environ['PYTHONPATH']=os.pathsep.join(python_paths)
+            (dependencies/'ratools-lock-sha256.txt').write_text(sha256(args.lock),encoding='ascii')
+        if (dependencies/'ratools-lock-sha256.txt').read_text(encoding='ascii') != sha256(args.lock):
+            raise ValueError('Dependency target was not installed from the selected lock')
+        site.addsitedir(str(dependencies))
+        for folder in reversed([Path(path) for path in locked_python_paths(bootstrap,dependencies,ROOT)[1:-1]]):
+            if folder.is_dir():
+                sys.path.insert(0,str(folder))
+                python_paths.append(str(folder))
+        importlib.invalidate_caches()
+        # Fresh interpreter: locked paths precede all ambient site packages
+        # before packaging, PyInstaller, native runtimes or metadata are imported.
+        python_paths=locked_python_paths(bootstrap,dependencies,ROOT)
+        os.environ['PYTHONPATH']=os.pathsep.join(python_paths)
+        if not args.locked_child:
+            command=[sys.executable,'-X','utf8','-B',str(Path(__file__).resolve()),
+                     '--locked-child','--dependency-path',str(dependencies),'--variant',args.variant,
+                     '--lock',str(args.lock.resolve())]
+            status=run_locked_child(command)
+            raise SystemExit(status)
+        environment=verify_environment(lock,dependencies,verify_records=True)
+        print('LOCK_VERIFIED packages='+str(len(environment)),flush=True)
         import PyInstaller
         from PyInstaller.__main__ import run
         from PyInstaller import isolated
         from scripts.build_cleanup_guard import deletion_is_blocked
+        origins=verify_import_origins(dependencies)
         if not deletion_is_blocked() or not isolated.call(deletion_is_blocked):
             raise RuntimeError('Build cleanup guard did not reach the analysis subprocess')
         print('BUILD_GUARD parent=blocked isolated_child=blocked',flush=True)
@@ -125,6 +183,9 @@ def build():
                 options += ['--exclude-module',module]
             if kind=='no-update':
                 options += ['--exclude-module','ratools_pdf.services.update_checker']
+            for package in lock['packages']:
+                if package['role']=='runtime':
+                    options += ['--copy-metadata',package['name']]
             for resource,target in (('LICENSE','.'),('THIRD_PARTY_NOTICES.md','.'),('icon.ico','.'),('plugins','plugins')):
                 options += ['--add-data',f'{ROOT/resource};{target}']
             run(options)
@@ -133,9 +194,12 @@ def build():
             plugin=dist/name/'_internal/PySide6/plugins/tls/qopensslbackend.dll'
             if plugin.exists():
                 recycle(plugin)
+            bundle_evidence(executable.parent,resolve_analysis_toc(work/kind/name),lock,provenance,kind)
+            verify_import_origins(dependencies)
             outputs.append(str(executable))
         (dist/'build.json').write_text(json.dumps({'version':APP_VERSION_STR,'pyinstaller':PyInstaller.__version__,
-                                                  'executables':outputs},indent=2),encoding='utf-8')
+            'lock_sha256':sha256(args.lock),'source':provenance,'environment':environment,'initial_import_origins':origins,
+            'signing':{'status':'unsigned','signature_verified':False},'executables':outputs},indent=2),encoding='utf-8')
         print('BUILD_OUTPUT='+str(dist),flush=True)
 
 

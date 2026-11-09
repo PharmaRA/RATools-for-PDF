@@ -52,7 +52,7 @@ class MainWindow(QMainWindow):
     # 通用设置类勾选框：不参与预设/清空/规则统计（key 同时是显示文案）
     GENERAL_SETTING_OPTIONS = ("处理完成后自动打开输出文件夹", "覆盖原始文件 (不推荐)")
 
-    def __init__(self):
+    def __init__(self, settings_path=None):
         super().__init__()
         self.custom_selection_before_preset = set()
         self.active_preset_key = None
@@ -72,8 +72,7 @@ class MainWindow(QMainWindow):
         self.current_file_count = 0
 
         # ================= 初始化 QSettings 与主题管理 =================
-        current_dir = get_app_dir()
-        ini_path = os.path.join(current_dir, "settings.ini")
+        ini_path = settings_path if settings_path is not None else os.path.join(get_app_dir(), "settings.ini")
         self.app_settings = QSettings(ini_path, QSettings.IniFormat)
 
         # 主题必须先应用到 QApplication，再让窗口级 apply_stylesheet() 做兼容回退；

@@ -6,8 +6,6 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from ratools_pdf.config.features import ENABLE_UPDATE_CHECK
-from ratools_pdf.controllers.main_controller import MainController
-from ratools_pdf.ui.main_window import MainWindow
 
 
 def detach_console_if_needed():
@@ -35,12 +33,20 @@ def configure_runtime():
 def run():
     configure_runtime()
 
+    if len(sys.argv) > 1 and sys.argv[1] == '--verify-release':
+        if len(sys.argv) != 3:
+            raise SystemExit('Usage: --verify-release NEW_OUTPUT_DIRECTORY')
+        from ratools_pdf.services.release_check import verify_release
+        raise SystemExit(verify_release(sys.argv[2]))
+
     if len(sys.argv) > 1 and sys.argv[1] == '--verify-image-compression':
         if len(sys.argv) != 3:
             raise SystemExit('Usage: --verify-image-compression NEW_OUTPUT_DIRECTORY')
         from ratools_pdf.services.compression_check import verify_image_compression
         raise SystemExit(verify_image_compression(sys.argv[2]))
 
+    from ratools_pdf.controllers.main_controller import MainController
+    from ratools_pdf.ui.main_window import MainWindow
     app = QApplication(sys.argv)
     view = MainWindow()
     controller = MainController(view)
