@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "instructions": "Copy one record into the manifest sample_history.records, fill authorized non-sensitive values, preserve previous records, and bump versions. This template is pending and is not approval evidence.",
+  "record": {
+    "sample_id": "sample-id",
+    "sample_version": "next-version",
+    "expected_metrics_version": "next-metrics-version",
+    "sha256": null,
+    "expected": {},
+    "reason": "pending reason for addition or change",
+    "source_authorization": "pending source and authorization declaration",
+    "approval": {
+      "status": "pending",
+      "reference": null
+    }
+  }
+}

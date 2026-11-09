@@ -5,9 +5,18 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_qualification:
+        description: "Run explicit PD01 sample qualification (missing materials remain nonzero/pending)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
-  test:
+  regression:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -21,5 +30,30 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Run full ordinary regression with recycle-only cleanup
+        run: python -X utf8 -X faulthandler -B scripts/run_tests_safely.py
+
+  qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_qualification
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run declared PD01 samples and keep pending conditions nonzero
+        run: python -X utf8 -X faulthandler -B scripts/run_tests_safely.py --layer qualification --qualification-output backups/qualification-ci-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Preserve qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-evidence
+          path: backups/qualification-ci-*/qualification-report.json

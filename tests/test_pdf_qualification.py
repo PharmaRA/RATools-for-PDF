@@ -62,6 +62,90 @@ class PdfQualificationTests(unittest.TestCase):
             "expected": {"page_count": 1, "render_pages": [1]},
         }
 
+    def _versioned_manifest(self, root):
+        (root / "samples").mkdir()
+        digest = self._make_pdf(root / "samples/minimal.pdf")
+        path = self._write_manifest(root, self._sample("minimal.pdf", digest))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        sample = data["samples"][0]
+        sample.update(sample_version="1", expected_metrics_version="1")
+        data["sample_history"] = {"schema_version": "1.0", "records": [{
+            "sample_id": sample["id"], "sample_version": "1", "expected_metrics_version": "1",
+            "sha256": digest, "expected": {"page_count": 1, "render_pages": [1]},
+            "reason": "Initial synthetic fixture; not external acceptance",
+            "source_authorization": sample["authorization"],
+            "approval": {"status": "pending", "reference": None}}]}
+        return path, data
+
+    def test_versioned_hash_or_metric_edits_without_matching_history_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, original = self._versioned_manifest(root)
+            for field, value in (("sha256", "0" * 64), ("expected", {"page_count": 2}),
+                    ("expected_metrics_version", "2"), ("authorization", "changed source")):
+                with self.subTest(field=field):
+                    data = json.loads(json.dumps(original))
+                    data["samples"][0][field] = value
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        run_qualification(path, root / ("evidence-" + field))
+                    self.assertFalse((root / ("evidence-" + field)).exists())
+
+    def test_duplicate_history_and_reused_metrics_version_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, data = self._versioned_manifest(root)
+            record = data["sample_history"]["records"][0]
+            data["sample_history"]["records"].append(dict(record))
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                run_qualification(path, root / "duplicate-evidence")
+            record = data["sample_history"]["records"][-1]
+            record.update(sample_version="2", expected={"page_count": 2})
+            data["samples"][0].update(sample_version="2", expected={"page_count": 2})
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                run_qualification(path, root / "evidence")
+
+    def test_versioned_sample_preserves_pending_approval_after_pdf_checks_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, data = self._versioned_manifest(root)
+            path.write_text(json.dumps(data), encoding="utf-8")
+            report = run_qualification(path, root / "evidence")
+            sample = report["results"][0]
+            self.assertEqual(sample["checks"]["structure"]["status"], "passed")
+            self.assertIn("approval", sample["checks"])
+            self.assertEqual(sample["checks"]["approval"]["status"], "pending")
+            self.assertEqual(sample["sample_version"], "1")
+            self.assertEqual(sample["expected_metrics_version"], "1")
+            self.assertEqual(report["status"], "pending")
+
+    def test_versioned_pending_approval_does_not_hide_path_containment_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, data = self._versioned_manifest(root)
+            data["samples"][0]["path"] = "../outside.pdf"
+            for status in ("pending", "approved"):
+                with self.subTest(approval=status):
+                    data["sample_history"]["records"][0]["approval"] = {
+                        "status": status, "reference": "independent-test-record" if status == "approved" else None}
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    report = run_qualification(path, root / ("evidence-" + status))
+                    self.assertEqual(report["results"][0]["status"], "failed")
+                    self.assertEqual(report["status"], "failed")
+
+    def test_duplicate_manifest_json_keys_rejected_before_creating_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_manifest(root, self._sample("missing.pdf"))
+            text = path.read_text(encoding="utf-8")
+            path.write_text(text.replace('"schema_version": "1.0"',
+                '"schema_version": "9.0", "schema_version": "1.0"'), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                run_qualification(path, root / "evidence")
+            self.assertFalse((root / "evidence").exists())
+
     def test_verifies_hash_structure_render_and_qpdf_for_synthetic_sample(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

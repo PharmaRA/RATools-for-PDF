@@ -26,7 +26,9 @@
         "render_pages": [
           1
         ]
-      }
+      },
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     },
     {
       "id": "external-acrobat",
@@ -48,7 +50,9 @@
       "processing_options": {
         "mode": "record when supplied"
       },
-      "expected": {}
+      "expected": {},
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     },
     {
       "id": "external-word",
@@ -69,7 +73,9 @@
       "processing_options": {
         "mode": "record when supplied"
       },
-      "expected": {}
+      "expected": {},
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     },
     {
       "id": "external-libreoffice",
@@ -89,7 +95,9 @@
       "processing_options": {
         "mode": "record when supplied"
       },
-      "expected": {}
+      "expected": {},
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     },
     {
       "id": "external-scanner",
@@ -109,7 +117,9 @@
       "processing_options": {
         "mode": "record when supplied"
       },
-      "expected": {}
+      "expected": {},
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     },
     {
       "id": "external-pdf-print-driver",
@@ -130,7 +140,9 @@
       "processing_options": {
         "mode": "record when supplied"
       },
-      "expected": {}
+      "expected": {},
+      "sample_version": "1",
+      "expected_metrics_version": "1"
     }
   ],
   "matrix": [
@@ -222,5 +234,93 @@
       "source_requirement": "Manual open, page navigation, visual comparison and warnings",
       "status": "pending"
     }
-  ]
+  ],
+  "sample_history": {
+    "schema_version": "1.0",
+    "records": [
+      {
+        "sample_id": "synthetic-minimal",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": "13c4f99763d764fab61c6e0b9eeab54ec24a170c2311082dae6b91e22a0dc79f",
+        "expected": {
+          "page_count": 1,
+          "render_pages": [
+            1
+          ]
+        },
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "Synthetic fixture only; contains no private document content.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      },
+      {
+        "sample_id": "external-acrobat",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": null,
+        "expected": {},
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      },
+      {
+        "sample_id": "external-word",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": null,
+        "expected": {},
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      },
+      {
+        "sample_id": "external-libreoffice",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": null,
+        "expected": {},
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      },
+      {
+        "sample_id": "external-scanner",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": null,
+        "expected": {},
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      },
+      {
+        "sample_id": "external-pdf-print-driver",
+        "sample_version": "1",
+        "expected_metrics_version": "1",
+        "sha256": null,
+        "expected": {},
+        "reason": "PD08 initial versioned baseline; existing PD01 declaration; external material and human approval remain pending.",
+        "source_authorization": "External sample ID/source requirement only; supply an authorized non-sensitive PDF before running.",
+        "approval": {
+          "status": "pending",
+          "reference": null
+        }
+      }
+    ]
+  }
 }

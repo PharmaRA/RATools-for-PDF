@@ -29,8 +29,8 @@
 | PD-04 | 可版本化配置与导入导出 | 已完成 | 机构规则有效性待专家确认 | 3154a17 |
 | PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 9428b39 |
 | PD-06 | 超时、取消、进程树与资源限额 | 已完成 | 网络盘/设备故障待实测 | 7e32bb3 |
-| PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 见 PD-07 记录 |
-| PD-08 | 分层测试与版本化样本回归 | 待开始 | 外部样本覆盖沿用 PD-01 | — |
+| PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 0d1d10f |
+| PD-08 | 分层测试与版本化样本回归 | 已完成 | 外部样本/人工批准仍 pending | 见 PD-08 记录 |
 | PD-09 | 能力矩阵与文档一致性 | 待开始 | 只描述已有证据 | — |
 | PD-10 | 可追溯发布与双变体验收 | 待开始 | 正式代码签名证书待提供 | — |
 
@@ -212,3 +212,12 @@
 - Review：pd07_review原P1/P2均ADDRESSED，Spec PASS / Quality PASS。URI-only真实PDF、invalid枚举边界模拟均明确标注，合并保留superseded/pipeline_aborted与冻结smart跳过原因。
 - 提交主题：`feat: record structured rule execution and verification results`。
 - 边界：标题/纸型/基本URI/批注/附件支持有限独立后置检查；复杂书签/样式/qpdf等无直接观测时changed=null、verified未知，不由选中规则或中文日志推断。实际操作发生不等于最终published；原子发布与取消守卫保留。
+### PD-08：分层测试与版本化样本回归（2026-11-10）
+
+- 交付：安全入口分层选择、显式模块分类、准确唯一TestCase计数、样本历史/指标版本/批准记录校验、独立CI资格入口。[使用说明](../testing.md)。
+- RED：旧CLI把--layer当pattern，0tests却exit0；版本历史被忽略；setup ErrorHolder摘要崩溃；review复现approval覆盖原路径failed。分别有行为回归，未选模块不导入，零选择/分类错误明确拒绝。
+- GREEN：runner8/8、资格机制22/22；unit11/11，integration545/545（201.669秒）；默认全量556/556（182.849秒，exit0），`backups/product-roadmap-20261109/PD08/full-suite.log`。不同执行不重复累计为独立测试总数。
+- 资格入口实际exit2：6个样本pending、9行矩阵pending，初始人工批准均pending。来源/批准未伪造，样本与矩阵分列计数。
+- Review：pd08_review状态聚合P1 ADDRESSED，SpecQuality PASS；原failed/blocked保留，approval不得升级失败。ErrorHolder单列suite_errors、未执行pending。
+- 提交主题：`test: add explicit layers and versioned sample qualification`。
+- 边界：CI只本地配置检查，未远程运行；外部样本、阅读器、成品资格与人工批准未完成。

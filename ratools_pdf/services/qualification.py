@@ -37,8 +37,63 @@ def _status(statuses):
     return "passed" if values else "pending"
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate qualification JSON key")
+        result[key] = value
+    return result
+
+
+def _validate_sample_history(manifest):
+    history = manifest.get("sample_history")
+    if history is None:
+        if any("sample_version" in sample or "expected_metrics_version" in sample for sample in manifest["samples"]):
+            raise ValueError("Versioned samples require sample_history")
+        return
+    if not isinstance(history, dict) or history.get("schema_version") != "1.0":
+        raise ValueError("Unsupported sample history version")
+    records = history.get("records")
+    if not isinstance(records, list) or not records:
+        raise ValueError("Sample history records required")
+    samples = {sample["id"]: sample for sample in manifest["samples"]}
+    revisions, metrics = {}, {}
+    for record in records:
+        if not isinstance(record, dict) or record.get("sample_id") not in samples:
+            raise ValueError("History must reference declared sample IDs")
+        for field in ("sample_version", "expected_metrics_version", "reason", "source_authorization"):
+            if not isinstance(record.get(field), str) or not record[field].strip():
+                raise ValueError("History versions, reason and source authorization required")
+        digest = record.get("sha256")
+        if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError("History requires a SHA256 or null for an unavailable sample")
+        if not isinstance(record.get("expected"), dict):
+            raise ValueError("History requires an expected metrics snapshot")
+        key = (record["sample_id"], record["sample_version"])
+        if key in revisions:
+            raise ValueError("Duplicate sample history revision")
+        revisions[key] = record
+        metric_key = (record["sample_id"], record["expected_metrics_version"])
+        if metric_key in metrics and metrics[metric_key] != record["expected"]:
+            raise ValueError("Changed metrics require a new expected_metrics_version")
+        metrics[metric_key] = record["expected"]
+        approval = record.get("approval")
+        if not isinstance(approval, dict) or approval.get("status") not in {"pending", "approved", "rejected"}:
+            raise ValueError("Explicit human approval status required")
+        if approval["status"] != "pending" and (not isinstance(approval.get("reference"), str) or not approval["reference"].strip()):
+            raise ValueError("Human approval/rejection requires an independent record reference")
+    for sample in samples.values():
+        if not isinstance(sample.get("sample_version"), str) or not isinstance(sample.get("expected_metrics_version"), str):
+            raise ValueError("Each sample requires explicit sample and metric versions")
+        current = revisions.get((sample["id"], sample["sample_version"]))
+        if current is None or any(current.get(field) != sample.get(field) for field in
+                ("sha256", "expected", "expected_metrics_version")) or current["source_authorization"] != sample["authorization"]:
+            raise ValueError("Current sample hash, metrics or authorization differ from history")
+
+
 def _load_manifest(path):
-    manifest = json.loads(check_unlinked_path(path).read_text(encoding="utf-8"))
+    manifest = json.loads(check_unlinked_path(path).read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
     if not isinstance(manifest, dict) or manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
         raise ValueError("Unsupported qualification manifest schema_version")
     if not isinstance(manifest.get("matrix_version"), str) or not manifest["matrix_version"]:
@@ -79,6 +134,7 @@ def _load_manifest(path):
             raise ValueError("Unknown evidence level")
         if not isinstance(row.get("sample_ids"), list) or not row["sample_ids"] or any(s not in ids for s in row["sample_ids"]):
             raise ValueError("Matrix must reference declared samples")
+    _validate_sample_history(manifest)
     return manifest
 
 
@@ -156,6 +212,7 @@ def _verify_sample(sample, sample_root, qpdf_enabled):
         path = _sample_path(sample_root, sample["path"])
     except (ValueError, OSError):
         result.update(status="failed", path=None)
+        checks["availability"] = {"status": "failed", "reason": "sample_path_containment_or_link"}
         result["failures"].append("sample_path_containment_or_link")
         return result
     if not path.is_file():
@@ -234,6 +291,18 @@ def run_qualification(manifest_path, output_directory, *, samples_root=None, qpd
         except Exception as exc:
             engines["qpdf"] = {"status": "blocked", "reason": "engine_unavailable", "error_type": type(exc).__name__}
     results = [_verify_sample(sample, sample_root, qpdf_enabled) for sample in manifest["samples"]]
+    if "sample_history" in manifest:
+        history = {(record["sample_id"], record["sample_version"]): record
+            for record in manifest["sample_history"]["records"]}
+        for sample, result in zip(manifest["samples"], results):
+            record = history[(sample["id"], sample["sample_version"])]
+            approval = record["approval"]["status"]
+            result.update(sample_version=sample["sample_version"], expected_metrics_version=sample["expected_metrics_version"])
+            result["checks"]["approval"] = {"status": {"pending": "pending", "approved": "passed", "rejected": "failed"}[approval],
+                "reason": "independent_sample_change_approval", "approval_status": approval}
+            result["status"] = _status([result["status"]] + [check["status"] for check in result["checks"].values()])
+            if approval == "rejected":
+                result["failures"].append("approval")
     by_id = {result["id"]: result for result in results}
     rows = []
     for row in manifest["matrix"]:
@@ -248,6 +317,7 @@ def run_qualification(manifest_path, output_directory, *, samples_root=None, qpd
         rows.append(item)
     report = {"schema_version": REPORT_SCHEMA_VERSION, "manifest_schema_version": manifest["schema_version"],
         "matrix_version": manifest["matrix_version"], "manifest_sha256": _sha256(manifest_path),
+        "sample_history_schema_version": manifest.get("sample_history", {}).get("schema_version"),
         "generated_at": datetime.now(timezone.utc).isoformat(), "engines": engines,
         "status": _status([result["status"] for result in results] + [row["status"] for row in rows] + [engines["qpdf"]["status"]]),
         "summary": {status: sum(result["status"] == status for result in results) for status in STATUSES},

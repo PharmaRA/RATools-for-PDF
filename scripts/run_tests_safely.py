@@ -1,9 +1,11 @@
 """Run unittest with temporary files isolated and cleanup sent to the recycle bin.
 
-Usage: python -B scripts/run_tests_safely.py [test_filename_pattern]
+Usage: python -B scripts/run_tests_safely.py [test_filename_pattern] [--layer LAYER]
 The audit hook rejects any physical Python deletion that bypasses the adapters.
 """
 
+import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +20,10 @@ sys.path.insert(0, str(ROOT))
 sys.dont_write_bytecode = True
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from ratools_pdf.services.file_safety import recycle_owned_path
+from scripts.test_layers import (
+    LayerResult, empty_summary, finish_summary, install_unit_guard,
+    load_classification, select_suite, summarize_tests,
+)
 
 
 def install_cleanup_guard(run_dir):
@@ -55,7 +61,18 @@ def install_cleanup_guard(run_dir):
     return stack, failures, recycle
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('pattern', nargs='?', default='test_*.py')
+    parser.add_argument('--layer', choices=('all', 'unit', 'integration', 'qualification'), default='all',
+        help='all runs the full ordinary unit/integration regression; qualification is explicit')
+    parser.add_argument('--tests-dir', type=Path, default=ROOT / 'tests')
+    parser.add_argument('--classification', type=Path, default=ROOT / 'tests/test-layers-v1.json')
+    parser.add_argument('--qualification-manifest', type=Path, default=ROOT / 'docs/qualification/pd01-manifest-v1.json')
+    parser.add_argument('--qualification-output', type=Path, help='New evidence directory; required for qualification')
+    parser.add_argument('--samples-root', type=Path)
+    parser.add_argument('--skip-qpdf', action='store_true')
+    args = parser.parse_args(argv)
     if os.name != 'nt':
         raise SystemExit('This safety runner currently requires Windows recycle-bin support.')
     run_dir = ROOT / 'backups' / 'test-runs' / uuid.uuid4().hex
@@ -64,18 +81,43 @@ def main():
     # Windows spawn re-executes this script as __mp_main__; install guards there too.
     os.environ['RATOOLS_SAFE_TEST_ROOT'] = str(run_dir.resolve())
     stack, failures, recycle = install_cleanup_guard(run_dir)
-    result = None
+    code = 2
+    summary = empty_summary()
     try:
         with stack:
-            suite = unittest.defaultTestLoader.discover(
-                str(ROOT / 'tests'), pattern=sys.argv[1] if len(sys.argv) > 1 else 'test_*.py',
-            )
-            result = unittest.TextTestRunner(verbosity=2).run(suite)
+            try:
+                assignments = load_classification(args.classification, args.tests_dir)
+                if args.layer == 'qualification':
+                    if args.qualification_output is None:
+                        raise ValueError('qualification requires --qualification-output (new directory)')
+                    from ratools_pdf.services.qualification import run_qualification
+                    report = run_qualification(args.qualification_manifest, args.qualification_output,
+                        samples_root=args.samples_root, qpdf_enabled=not args.skip_qpdf)
+                    item = summary['layers']['qualification']
+                    item.update(status=report['status'], **report['summary'])
+                    # Blocked samples are missing prerequisites; matrix rows are not added again.
+                    item['pending'] += item.pop('blocked', 0)
+                    item['matrix_statuses'] = {status: sum(row['status'] == status for row in report['matrix'])
+                        for status in ('passed', 'failed', 'pending', 'blocked')}
+                    finish_summary(summary)
+                    code = 0 if report['status'] == 'passed' else 1 if report['status'] == 'failed' else 2
+                else:
+                    selected = ('unit', 'integration') if args.layer == 'all' else (args.layer,)
+                    if args.layer == 'unit':
+                        install_unit_guard()
+                    suite, test_layers = select_suite(args.tests_dir, assignments, args.pattern, selected)
+                    result = unittest.TextTestRunner(verbosity=2, resultclass=LayerResult).run(suite)
+                    summarize_tests(summary, result, test_layers, selected)
+                    code = 0 if result.wasSuccessful() else 1
+            except (ValueError, OSError, json.JSONDecodeError) as exc:
+                print(f'Classification/selection/qualification error: {exc}', file=sys.stderr)
+                code = 2
     finally:
         tempfile.tempdir = previous_temp
         os.environ.pop('RATOOLS_SAFE_TEST_ROOT', None)
         recycle(run_dir)
-    return 0 if result and result.wasSuccessful() and not failures else 1
+    print('LAYER_SUMMARY ' + json.dumps(summary, sort_keys=True))
+    return 1 if failures else code
 
 
 if __name__ == '__main__':
