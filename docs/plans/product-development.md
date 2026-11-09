@@ -32,7 +32,7 @@
 | PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 0d1d10f |
 | PD-08 | 分层测试与版本化样本回归 | 已完成 | 外部样本/人工批准仍 pending | 2cfff13 |
 | PD-09 | 能力矩阵与文档一致性 | 已完成 | 只描述已有证据 | 5f96a04 |
-| PD-10 | 可追溯发布与双变体验收 | 已完成 | unsigned；外部资格仍 pending | 见 PD-10 记录 |
+| PD-10 | 可追溯发布与双变体验收 | 已完成 | unsigned；外部资格仍 pending | afcdc0c |
 
 ## Task 1: PD-01 PDF 资格矩阵与证据运行器
 
@@ -254,3 +254,4 @@
 最终可运行目录：标准版 `dist/f313fcee487b49a480d389fc1fafc5ca/RATools-for-PDF/`；无更新版 `dist/f313fcee487b49a480d389fc1fafc5ca/RATools-for-PDF-NoUpdate/`。分发须保留完整目录及_internal/release，不单独复制EXE。
 
 实现期间保留用户 `ratools_pdf/ui/theme.py` 和 `.playwright-mcp/`；备份、失败/成功日志及资格缺口证据保留在 `backups/product-roadmap-20261109/`。未远程推送。
+最终记录：PD-10 提交 afcdc0c；串行跳过集成修复 55ceb0c。运行期源码与最终 EXE 已核对，本记录补充只涉及文档。详细实施/审查过程归档到 backups/product-roadmap-20261109/execution-records/，安全测试临时目录已由运行器回收；构建产物和资格证据作为交付保留。
