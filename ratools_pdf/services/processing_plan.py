@@ -10,6 +10,8 @@ from pathlib import Path
 from ratools_pdf.pdf import precheck
 from ratools_pdf.services.pdf_facts import InspectionCancelled, capture_pdf_snapshot, fingerprint
 from ratools_pdf.services import profiles
+from ratools_pdf.services.rule_results import plan_rule_results
+from ratools_pdf.config.rules_catalog import equivalent_rule_ids
 
 
 CONFIG_VERSION = 'pd02.engine.v1'
@@ -96,10 +98,7 @@ def build_processing_plan(files, options, processing_mode='smart', compression_s
             suggestions = {key for key, value in report.get('suggestions', {}).items()
                            if not value.get('report_only')}
             for option in sorted(selected):
-                equivalent = {option}
-                for canonical, aliases in precheck.PRECHECK_OPTION_ALIASES.items():
-                    if option == canonical or option in aliases:
-                        equivalent.update({canonical} | aliases)
+                equivalent = equivalent_rule_ids(option)
                 supported = bool(equivalent & precheck.PRECHECK_DETECTABLE_OPTIONS)
                 hit = bool(equivalent & suggestions)
                 detection = ('hit' if hit else 'miss') if supported else 'unsupported'
@@ -121,6 +120,10 @@ def build_processing_plan(files, options, processing_mode='smart', compression_s
                                       'reason': reason, 'actual_changed': None, 'verified': 'not_verified'})
                 if decision == 'execute':
                     item['effective_options'].append(option)
+            item['rule_results'] = plan_rule_results(selected, {
+                'options': item['effective_options'], 'suggested': suggestions,
+                'precheck_available': report.get('available') if config['processing_mode'] == 'smart' else None,
+            }, precheck.PRECHECK_DETECTABLE_OPTIONS)
             for metric, risk in (('signature_present', 'signature_present'), ('forms', 'forms_present'),
                                  ('attachments', 'attachments_present')):
                 if before.get(metric):

@@ -85,10 +85,7 @@ PRECHECK_DETECTABLE_OPTIONS = {
 # 勾选决定，预检无法可靠检测"是否需要压缩"，故不在可检测集合内（smart 模式下
 # 已勾选即执行）；预检报告仅按文件大小给出建议供参考。
 
-PRECHECK_OPTION_ALIASES = {
-    "cleanup_remove_external_uri": {"cleanup_remove_external_uri_and_text_black"},
-    "cleanup_remove_invalid_links": {"cleanup_remove_invalid_links_and_text_black"},
-}
+PRECHECK_OPTION_ALIASES = rules_catalog.PRECHECK_OPTION_ALIASES
 
 NON_PROCESSING_OPTIONS = {"filename_ectd_format", "embed_nonstandard_fonts"}
 

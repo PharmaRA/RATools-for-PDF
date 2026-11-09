@@ -9,6 +9,7 @@ import fitz
 from ratools_pdf.config.compression import normalize_compression_settings
 from ratools_pdf.pdf import bookmarks_links, hyperlink_styles, page_layout, precheck, qpdf
 from ratools_pdf.pdf.dynamic_content import remove_dynamic_content
+from ratools_pdf.services.rule_results import FINAL_RULES, STEP_RULES, RuleResultCollector
 
 
 class _PhaseProfiler:
@@ -99,7 +100,7 @@ def _format_change_summary(change_counts, ordered_labels):
 class _PipelineContext:
     """process_document 各 step 之间共享的可变状态。"""
 
-    def __init__(self, doc, options, input_path, prof, compression_settings=None):
+    def __init__(self, doc, options, input_path, prof, compression_settings=None, rule_collector=None):
         self.doc = doc
         self.options = options
         self.input_path = input_path
@@ -111,6 +112,7 @@ class _PipelineContext:
         # 不计入 applied_changes 的补充说明（如"跳过 N 张"），仅追加到结果消息
         self.notes = []
         self.catalog_xref = doc.pdf_catalog()
+        self.rule_collector = rule_collector
 
         link_file_kind = getattr(fitz, "LINK_FILE", None)
         self.file_like_link_kinds = {fitz.LINK_GOTOR}
@@ -123,6 +125,10 @@ class _PipelineContext:
         _mark_change(self.applied_changes, label)
         if count:
             _increase_change_count(self.change_counts, label, count)
+
+    def observe(self, rule_id, changed):
+        if self.rule_collector is not None:
+            self.rule_collector.observe(rule_id, changed)
 
 
 # ============================================================================
@@ -137,10 +143,12 @@ def _step_document_title(ctx):
     if "title_from_filename" in options:
         base_name = Path(ctx.input_path).stem
         meta = doc.metadata
+        ctx.observe('title_from_filename', False)
         if meta.get("title") != base_name:
             meta["title"] = base_name
             doc.set_metadata(meta)
             ctx.mark("标题同步为文件名")
+            ctx.observe('title_from_filename', True)
     elif "fast_web_view" in options:
         base_name = Path(ctx.input_path).stem
         meta = doc.metadata
@@ -148,6 +156,7 @@ def _step_document_title(ctx):
             meta["title"] = base_name
             doc.set_metadata(meta)
             ctx.mark("标题补全为文件名")
+            ctx.observe('fast_web_view', True)
 
 
 def _step_open_action(ctx):
@@ -218,6 +227,7 @@ def _step_page_size(ctx):
     target_rect = page_layout._paper_rect_exact(size_name)
     with ctx.prof.phase("页面尺寸标准化"):
         resized_pages = page_layout._resize_pages_with_padding(ctx.doc, target_rect)
+    ctx.observe('page_size_a4' if size_name == 'a4' else 'page_size_letter', resized_pages > 0)
     if resized_pages > 0:
         ctx.mark("页面尺寸标准化", count=resized_pages)
 
@@ -582,7 +592,7 @@ _EXTERNAL_URI_OPTS = {"cleanup_remove_external_uri", "cleanup_remove_external_ur
 _LINK_ANNOT_TYPE = getattr(fitz, "PDF_ANNOT_LINK", 1)  # PDF 注释类型编号：Link (1)
 
 
-def _decolor_rects_to_black(ctx, page, rects):
+def _decolor_rects_to_black(ctx, page, rects, rule_id):
     """把指定区域内的蓝色文字改回黑色（内容流级）。"""
     if not rects:
         return
@@ -590,6 +600,7 @@ def _decolor_rects_to_black(ctx, page, rects):
         ctx.doc, page, rects, (0.0, 0.0, 0.0), only_if_blue=True,
     ):
         ctx.mark("已将链接文本恢复为黑色")
+        ctx.observe(rule_id, True)
 
 
 def _cleanup_external_uri_fast_path(ctx):
@@ -612,11 +623,14 @@ def _cleanup_external_uri_fast_path(ctx):
                 if bookmarks_links.delete_page_link(page, link):
                     removed_count += 1
                     ctx.mark("已删除外部URI链接", count=1)
+                    for rule in _EXTERNAL_URI_OPTS & options:
+                        ctx.observe(rule, True)
             except Exception:
                 pass
 
         if decolor:
-            _decolor_rects_to_black(ctx, page, decolor_rects)
+            _decolor_rects_to_black(ctx, page, decolor_rects,
+                                   'cleanup_remove_external_uri_and_text_black')
 
         # 兼容兜底：若仍有 URI 链接残留，针对底层链接结构进行二次清洗
         residual_uris = [l for l in page.get_links() if l.get("kind", fitz.LINK_NONE) == fitz.LINK_URI]
@@ -625,6 +639,8 @@ def _cleanup_external_uri_fast_path(ctx):
                 if bookmarks_links.delete_page_link(page, l):
                     removed_count += 1
                     ctx.mark("已删除外部URI链接", count=1)
+                    for rule in _EXTERNAL_URI_OPTS & options:
+                        ctx.observe(rule, True)
             except Exception:
                 pass
 
@@ -673,7 +689,8 @@ def _cleanup_links_general_path(ctx):
     options = ctx.options
     for page in ctx.doc:
         page_state = hyperlink_styles._collect_page_state(page)
-        decolor_rects = []
+        decolor_rects = {'cleanup_remove_external_uri_and_text_black': [],
+                         'cleanup_remove_invalid_links_and_text_black': []}
 
         for link in page_state["links"]:
             kind = link.get("kind", fitz.LINK_NONE)
@@ -694,15 +711,25 @@ def _cleanup_links_general_path(ctx):
 
             if kind == fitz.LINK_URI and "cleanup_remove_external_uri_and_text_black" in options:
                 try:
-                    decolor_rects.append(fitz.Rect(link.get("from")))
+                    decolor_rects['cleanup_remove_external_uri_and_text_black'].append(fitz.Rect(link.get("from")))
                 except Exception:
                     pass
             if kind == fitz.LINK_NONE and "cleanup_remove_invalid_links_and_text_black" in options:
                 try:
-                    decolor_rects.append(fitz.Rect(link.get("from")))
+                    decolor_rects['cleanup_remove_invalid_links_and_text_black'].append(fitz.Rect(link.get("from")))
                 except Exception:
                     pass
             if bookmarks_links.delete_page_link(page, link):
+                if kind == fitz.LINK_URI:
+                    observed = _EXTERNAL_URI_OPTS & options
+                elif kind == fitz.LINK_NONE:
+                    observed = {'cleanup_remove_invalid_links', 'cleanup_remove_invalid_links_and_text_black'} & options
+                else:
+                    observed = set()
+                if kind not in (fitz.LINK_GOTO, fitz.LINK_GOTOR, fitz.LINK_LAUNCH):
+                    observed |= {'cleanup_remove_unknown_action_links'} & options
+                for rule in observed:
+                    ctx.observe(rule, True)
                 if kind == fitz.LINK_URI:
                     ctx.mark("已删除外部URI链接", count=1)
                 elif kind == fitz.LINK_NONE:
@@ -710,11 +737,8 @@ def _cleanup_links_general_path(ctx):
                 else:
                     ctx.mark("已删除未知动作链接", count=1)
 
-        if (
-            "cleanup_remove_external_uri_and_text_black" in options
-            or "cleanup_remove_invalid_links_and_text_black" in options
-        ):
-            _decolor_rects_to_black(ctx, page, decolor_rects)
+        for rule_id, rects in decolor_rects.items():
+            _decolor_rects_to_black(ctx, page, rects, rule_id)
 
 
 def _step_cleanup(ctx):
@@ -724,6 +748,14 @@ def _step_cleanup(ctx):
     if not selected_cleanup_opts:
         return
     doc = ctx.doc
+
+    # Successful mutations below report their own rule IDs. Never parse labels.
+    observed_rules = selected_cleanup_opts & (
+        _EXTERNAL_URI_OPTS | {'cleanup_remove_invalid_links', 'cleanup_remove_invalid_links_and_text_black',
+                             'cleanup_remove_unknown_action_links', 'cleanup_remove_annotations',
+                             'cleanup_remove_attachments', 'cleanup_remove_dynamic_content'})
+    for rule in observed_rules:
+        ctx.observe(rule, False)
 
     with ctx.prof.phase("清理遍历"):
         if selected_cleanup_opts.issubset(_EXTERNAL_URI_OPTS):
@@ -741,6 +773,7 @@ def _step_cleanup(ctx):
                     try:
                         page.delete_annot(annot)
                         ctx.mark("已删除PDF注释", count=1)
+                        ctx.observe('cleanup_remove_annotations', True)
                     except Exception:
                         pass
 
@@ -748,11 +781,13 @@ def _step_cleanup(ctx):
         removed = remove_dynamic_content(doc)
         if removed:
             ctx.mark("已删除动态内容/JavaScript", count=removed)
+            ctx.observe('cleanup_remove_dynamic_content', True)
     if "cleanup_remove_attachments" in options:
         if doc.embfile_count() > 0:
             attachment_count = doc.embfile_count()
             for emb in doc.embfile_names():
                 doc.embfile_del(emb)
+                ctx.observe('cleanup_remove_attachments', True)
             ctx.mark("已删除文档附件", count=attachment_count)
     if "cleanup_remove_tags" in options:
         doc.xref_set_key(ctx.catalog_xref, "StructTreeRoot", "null")
@@ -1090,7 +1125,8 @@ def _finalize_output(ctx, input_path, output_path):
             shutil.copy2(input_path, output_path)
 
 
-def process_document(input_path, output_path, options, processing_mode="smart", compression_settings=None):
+def _process_document(input_path, output_path, options, processing_mode="smart", compression_settings=None,
+                      collector_holder=None):
     """处理单个 PDF：解析选项 → 依序执行规则步骤 → 保存输出。
 
     compression_settings 为图像压缩参数（{"dpi": int, "quality": int}），
@@ -1101,6 +1137,9 @@ def process_document(input_path, output_path, options, processing_mode="smart", 
     try:
         with prof.phase("预检/选项解析"):
             mode_resolution = precheck.resolve_processing_options(input_path, options, processing_mode)
+        collector = RuleResultCollector(options, mode_resolution, precheck.PRECHECK_DETECTABLE_OPTIONS)
+        if collector_holder is not None:
+            collector_holder.append(collector)
         options = set(mode_resolution["options"])
         mode_log = mode_resolution.get("log", "")
 
@@ -1115,12 +1154,19 @@ def process_document(input_path, output_path, options, processing_mode="smart", 
         # _finalize_output 各分支都会关闭 doc；步骤抛异常时也必须关闭，
         # 否则句柄泄漏会一直锁住输入文件（Windows 下尤为致命）
         try:
-            ctx = _PipelineContext(doc, options, input_path, prof, compression_settings=compression_settings)
-            for step in _PIPELINE_STEPS:
+            ctx = _PipelineContext(doc, options, input_path, prof, compression_settings=compression_settings,
+                                   rule_collector=collector)
+            for index, step in enumerate(_PIPELINE_STEPS):
+                collector.begin(STEP_RULES[index])
                 step(ctx)
+                collector.end()
 
+            collector.begin(FINAL_RULES)
             _finalize_output(ctx, input_path, output_path)
-        except Exception:
+            collector.end()
+            collector.verify(output_path, input_path)
+        except Exception as error:
+            collector.fail(error)
             doc.close()
             raise
 
@@ -1145,6 +1191,29 @@ def process_document(input_path, output_path, options, processing_mode="smart", 
         return False, f"❌ 处理失败: {str(e)}"
 
 
+def process_document_detailed(input_path, output_path, options, processing_mode="smart", compression_settings=None):
+    """Return PD07 facts as well as the legacy user-facing success/message pair."""
+    collectors = []
+    success, message = _process_document(input_path, output_path, options, processing_mode,
+                                         compression_settings, collectors)
+    if collectors:
+        if not success:
+            collectors[0].fail(RuntimeError('processing_failed'))
+        results, events = collectors[0].finish()
+    else:
+        resolution = {'options': set(options or ()), 'precheck_available': False}
+        collector = RuleResultCollector(options, resolution, precheck.PRECHECK_DETECTABLE_OPTIONS)
+        collector.fail(RuntimeError('inspection_failed'))
+        results, events = collector.finish()
+    return {'schema_version': 'pd07.processing.v1', 'success': success, 'message': message,
+            'rule_results': results, 'rule_events': events}
+
+
+def process_document(input_path, output_path, options, processing_mode="smart", compression_settings=None):
+    result = process_document_detailed(input_path, output_path, options, processing_mode, compression_settings)
+    return result['success'], result['message']
+
+
 class PDFProcessor:
     """pdf 层对外入口（controllers 只应使用本类的公开方法）。
 
@@ -1154,6 +1223,7 @@ class PDFProcessor:
 
     # --- 批量处理主入口 ---
     process_document = staticmethod(process_document)
+    process_document_detailed = staticmethod(process_document_detailed)
 
     # --- 预检 ---
     build_precheck_report = staticmethod(precheck.build_precheck_report)

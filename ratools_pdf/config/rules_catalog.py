@@ -150,3 +150,28 @@ OPTION_TITLES = {
 def option_title(option_id):
     """返回规则的显示标题；未知 id 原样返回（与历史行为一致）。"""
     return OPTION_TITLES.get(option_id, option_id)
+
+
+# Stable execution metadata also covers engine-only and external-workflow IDs.
+# The UI continues to use MODULES; adding metadata never adds a checkbox.
+PRECHECK_OPTION_ALIASES = {
+    'cleanup_remove_external_uri': {'cleanup_remove_external_uri_and_text_black'},
+    'cleanup_remove_invalid_links': {'cleanup_remove_invalid_links_and_text_black'},
+}
+
+RULE_METADATA = {
+    opt['id']: dict(opt) for module in MODULES for opt in module['options']
+}
+RULE_METADATA.update({
+    'remove_pdf_restrictions': {'id': 'remove_pdf_restrictions', 'title': '解除PDF权限限制'},
+    'embed_nonstandard_fonts': {'id': 'embed_nonstandard_fonts', 'title': '嵌入非标准字体'},
+})
+
+
+def equivalent_rule_ids(rule_id):
+    """Precheck aliases keep the selected execution ID and share detection only."""
+    equivalent = {rule_id}
+    for canonical, aliases in PRECHECK_OPTION_ALIASES.items():
+        if rule_id == canonical or rule_id in aliases:
+            equivalent.update({canonical} | aliases)
+    return equivalent

@@ -216,7 +216,8 @@ class ProcessingVerificationTests(unittest.TestCase):
         self.assertEqual(terminal['before']['annotations'], 1)
         self.assertEqual(terminal['after']['annotations'], 0)
         self.assertEqual(terminal['verification']['changes']['annotations'], 'expected_change')
-        self.assertEqual(terminal['rule_actual_changed'], 'unknown')
+        self.assertIs(terminal['rule_actual_changed'], True)
+        self.assertTrue(terminal['rule_results'][0]['changed'])
         with fitz.open(self.root/'out'/'source.pdf') as doc:
             self.assertEqual(sum(1 for _ in doc[0].annots() or []), 0)
         with fitz.open(self.source) as doc:

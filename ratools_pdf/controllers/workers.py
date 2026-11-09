@@ -22,6 +22,7 @@ from ratools_pdf.services.output_paths import common_base_dir, path_key, relativ
 from ratools_pdf.services.pdf_facts import InspectionCancelled, capture_pdf_snapshot, verify_output
 from ratools_pdf.services.processing_plan import configuration_matches_plan, input_matches_plan, source_file_id, timestamp
 from ratools_pdf.services import process_control
+from ratools_pdf.services.rule_results import actual_changed, merge_execution
 
 if ENABLE_UPDATE_CHECK:
     from ratools_pdf.services import update_checker
@@ -31,7 +32,7 @@ else:
 
 def _process_document_task_pipe(file_path, out_path, options, processing_mode, compression_settings, conn):
     try:
-        conn.send(PDFProcessor.process_document(
+        conn.send(PDFProcessor.process_document_detailed(
             file_path, out_path, options,
             processing_mode=processing_mode,
             compression_settings=compression_settings,
@@ -271,7 +272,19 @@ class ProcessWorker(QThread):
                 'started_at': task.get('started_at'), 'before': task.get('before'),
                 'after': task.get('after'), 'verification': task.get('verification'),
                 'engine_success': task.get('engine_success'), 'published': task.get('published', False),
-                'outcome': task.get('outcome'), 'rule_actual_changed': 'unknown'}
+                'outcome': task.get('outcome'),
+                'rule_actual_changed': actual_changed(task.get('rule_results', [])),
+                'rule_results': task.get('rule_results', []),
+                'rule_events': task.get('rule_events', [])}
+
+    def _consume_engine_result(self, task, payload):
+        if not isinstance(payload, dict):
+            return payload
+        results, events = merge_execution(
+            (task.get('file_plan') or {}).get('rule_results', []),
+            payload.get('rule_results', []), payload.get('rule_events', []))
+        task.update(rule_results=results, rule_events=events)
+        return bool(payload.get('success')), payload.get('message', '')
 
     def _task_expired(self, task):
         return task.get('deadline') is not None and time.monotonic() >= task['deadline']
@@ -515,7 +528,7 @@ class ProcessWorker(QThread):
                 # Drain the pipe before joining: send() may still be blocked on
                 # a result larger than the OS pipe buffer even after poll().
                 if parent_conn.poll():
-                    success, msg = parent_conn.recv()
+                    success, msg = self._consume_engine_result(task, parent_conn.recv())
                 else:
                     success, msg = False, "处理进程无返回结果"
                 self._join_process_task(task)
@@ -600,7 +613,7 @@ class ProcessWorker(QThread):
                         running.pop(key, None)
                         continue
                     if parent_conn.poll():
-                        success, msg = parent_conn.recv()
+                        success, msg = self._consume_engine_result(task, parent_conn.recv())
                     elif not proc.is_alive():
                         success, msg = False, "处理进程无返回结果"
                     else:

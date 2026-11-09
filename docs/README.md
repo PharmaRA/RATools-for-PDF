@@ -14,3 +14,4 @@
 - [版本化配置、导入导出与常用迁移](profiles.md)
 - [字体 provider 能力、手动交接与复检](font-providers.md)
 - [处理时限、取消、进程树与资源控制](processing-control.md)
+- [规则执行结果、修改观测与验证范围](rule-results.md)

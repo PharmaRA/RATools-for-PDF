@@ -89,6 +89,23 @@ def _verification(value):
     return result
 
 
+def _rule_facts(value, events=False):
+    """Optional PD07 facts; older PD02 batches remain exportable."""
+    fields = ('rule_id', 'matched', 'planned', 'executed', 'changed', 'verified',
+              'verification', 'skipped_reason', 'warning', 'status')
+    result = []
+    for source in value or []:
+        _identifier(source.get('rule_id'))
+        item = {key: deepcopy(source.get(key)) for key in fields}
+        if events:
+            phase = source.get('phase')
+            if phase not in {'inspect', 'plan', 'execute', 'verify', 'error', 'result'}:
+                raise ValueError('Invalid rule event phase')
+            item['phase'] = phase
+        result.append(item)
+    return result
+
+
 def _runtime_metadata():
     import pymupdf
     return {
@@ -156,6 +173,13 @@ def _build_document(evidence):
         rules = [{key: deepcopy(rule.get(key)) for key in
                   ('option_id', 'precheck', 'decision', 'reason', 'actual_changed', 'verified')}
                  for rule in source.get('rules', [])]
+        rule_results = _rule_facts(fact.get('rule_results'))
+        actual = {item['rule_id']: item for item in rule_results}
+        for rule in rules:
+            observed = actual.get(rule['option_id'])
+            if observed is not None:
+                rule['actual_changed'] = observed['changed']
+                rule['verified'] = observed.get('verification', 'not_verified')
         for rule in rules:
             _identifier(rule['option_id'])
         rules_plan = {'file_id': file_id, 'relative_path': relative,
@@ -193,6 +217,8 @@ def _build_document(evidence):
             'published': published, 'rule_actual_changed': fact.get('rule_actual_changed', 'unknown'),
             'started_at': fact.get('started_at'), 'ended_at': fact.get('ended_at'),
             'rules': rules, 'reason_codes': reason_codes, 'reasons': reasons,
+            'rule_results': rule_results,
+            'rule_events': _rule_facts(fact.get('rule_events'), events=True),
             'warnings': list(source.get('risks', [])),
             'missing_evidence': missing,
         })
@@ -207,12 +233,20 @@ def _build_document(evidence):
                   'engine_success', 'published', 'outcome', 'rule_actual_changed') if key in event}
         entry.update(before=_snapshot(event.get('before')), after=_snapshot(event.get('after')),
                      verification=_verification(event.get('verification')))
+        if 'rule_results' in event:
+            entry['rule_results'] = _rule_facts(event['rule_results'])
+        if 'rule_events' in event:
+            entry['rule_events'] = _rule_facts(event['rule_events'], events=True)
         if event.get('output_relative_path') is not None:
             entry['output_relative_path'] = _identity(event['output_relative_path'])
         events.append(entry)
-    limitations = ['hashes_are_not_signatures', 'rule_changes_unknown_until_pd07',
+    limitations = ['hashes_are_not_signatures',
                    'signature_validity_not_verified', 'pdf_payloads_not_included',
                    'engine_warnings_not_recorded_by_pd02']
+    if not any(item['rule_results'] for item in files):
+        limitations.append('rule_changes_unknown_until_pd07')
+    elif any(rule.get('verified') is None for item in files for rule in item['rule_results']):
+        limitations.append('some_rule_postconditions_not_verified')
     if not isinstance(evidence.get('execution_runtime'), dict):
         limitations.append('processing_runtime_not_recorded')
     else:

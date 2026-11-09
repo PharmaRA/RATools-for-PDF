@@ -806,7 +806,7 @@ class MainController(QObject):
         if evidence is not None and event.get('file_id') in evidence['files']:
             keys = ('type', 'batch_id', 'file_id', 'time', 'started_at', 'ended_at', 'before', 'after',
                     'verification', 'engine_success', 'published', 'outcome', 'rule_actual_changed',
-                    'output_relative_path')
+                    'output_relative_path', 'rule_results', 'rule_events')
             fact = deepcopy({key: event[key] for key in keys if key in event})
             evidence['events'].append(fact)
             if event.get('type') == 'terminal':

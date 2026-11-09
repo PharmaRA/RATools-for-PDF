@@ -28,8 +28,8 @@
 | PD-03 | 可归档审计证据包 | 已完成 | 内部质量系统采纳待业务确认 | 30fa400 |
 | PD-04 | 可版本化配置与导入导出 | 已完成 | 机构规则有效性待专家确认 | 3154a17 |
 | PD-05 | 字体 provider 能力与复检 | 手动交接/复检已完成 | 自动修复 blocked；Acrobat/CJK pending | 9428b39 |
-| PD-06 | 超时、取消、进程树与资源限额 | 已完成 | 网络盘/设备故障待实测 | 见 PD-06 记录 |
-| PD-07 | 统一规则执行契约与结果 | 待开始 | 不自动扩大规则覆盖声明 | — |
+| PD-06 | 超时、取消、进程树与资源限额 | 已完成 | 网络盘/设备故障待实测 | 7e32bb3 |
+| PD-07 | 统一规则执行契约与结果 | 已完成 | 复杂规则观测/独立验证仍有限 | 见 PD-07 记录 |
 | PD-08 | 分层测试与版本化样本回归 | 待开始 | 外部样本覆盖沿用 PD-01 | — |
 | PD-09 | 能力矩阵与文档一致性 | 待开始 | 只描述已有证据 | — |
 | PD-10 | 可追溯发布与双变体验收 | 待开始 | 正式代码签名证书待提供 | — |
@@ -204,3 +204,11 @@
 - Review：pd06_review fix round 1 两项 P2 ADDRESSED，Spec PASS / Quality PASS。原子 `STARTUPINFOEX` JobList/HandleList 创建后 owner 立即退出无残留；快照、计划哈希、输出快照接收 stop/skip/deadline，单次 OS/fitz 调用不能硬中断的边界已披露。
 - 提交主题：`feat: control processing deadlines and owned child processes`。
 - 边界：Job 归属与受控故障已实测；网络盘、移动设备、外部受限 Job 宿主和非 Windows owner 崩溃仍 pending。资源上限为保守估计，不等同任意 PDF 内存峰值保证。
+### PD-07：统一规则计划、执行与验证结果（2026-11-09）
+
+- 交付：同源规则元数据/预检别名、详细管线API、真实规则修改观察、有限独立后置检查、worker/批次/审计/日志消费，旧tuple入口保持兼容。[字段与能力说明](../rule-results.md)。
+- RED：核心8项、消费者2项、打开前失败与纸型优先2项分别复现；review发现复合去色误归属和执行期skip原因被计划空值覆盖，4条回归RED后最小修复。
+- GREEN：专项16/16（5.879秒）、audit20/20；最终全量543/543（156.270秒），日志 `backups/product-roadmap-20261109/PD07/full-suite.log`。初轮539/1旧unknown断言失败日志另存。
+- Review：pd07_review原P1/P2均ADDRESSED，Spec PASS / Quality PASS。URI-only真实PDF、invalid枚举边界模拟均明确标注，合并保留superseded/pipeline_aborted与冻结smart跳过原因。
+- 提交主题：`feat: record structured rule execution and verification results`。
+- 边界：标题/纸型/基本URI/批注/附件支持有限独立后置检查；复杂书签/样式/qpdf等无直接观测时changed=null、verified未知，不由选中规则或中文日志推断。实际操作发生不等于最终published；原子发布与取消守卫保留。

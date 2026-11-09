@@ -113,7 +113,11 @@ def _structured_log_row_from_event(event, start_events=None):
 
     result_text = event.get("message", "")
     changes = ""
-    if "修改项：" in result_text:
+    if 'rule_results' in event:
+        from ratools_pdf.config.rules_catalog import option_title
+        changes = '、'.join(option_title(item['rule_id']) for item in event['rule_results']
+                          if item.get('changed') is True)
+    elif "修改项：" in result_text:
         changes = result_text.split("修改项：", 1)[1].strip()
 
     row = {
