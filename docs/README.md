@@ -1,5 +1,6 @@
 # 项目文档
 
+- [功能与开发质量实施计划：十项交付、验收与提交记录](plans/product-development.md)
 - [2026-11-08 代码审查：18 项发现与证据](reviews/2026-11-08-code-review.md)
 - [质量改进执行计划：修复顺序、验收与提交记录](plans/quality-improvement.md)
 - [Windows 构建与发布成品压缩能力验收](build-verification.md)
