@@ -1,11 +1,13 @@
 """Release boundaries: tampering, incomplete locks and unrecorded dirty sources."""
 
 import copy
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import sys
@@ -25,37 +27,97 @@ class ReleaseMetadataTests(unittest.TestCase):
         from scripts import release_metadata
         return release_metadata
 
-    def test_lock_rejects_invalid_digest_and_missing_transitive_dependency(self):
+    @contextmanager
+    def release_target(self):
+        from packaging.tags import compatible_tags, cpython_tags
+
         api = self.api()
-        lock = api.load_lock(ROOT / 'requirements-release-win311.lock.json')
-        broken = copy.deepcopy(lock)
-        broken['packages'][0]['sha256'] = 'bad'
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'lock.json'
-            path.write_text(json.dumps(broken), encoding='utf-8')
-            with self.assertRaises(ValueError):
-                api.load_lock(path)
-        incomplete = copy.deepcopy(lock)
-        incomplete['packages'] = [p for p in lock['packages'] if p['name'] != 'shiboken6']
-        with self.assertRaisesRegex(ValueError, 'shiboken6'):
-            api.validate_dependency_closure(incomplete)
+        tags = frozenset([
+            *cpython_tags(python_version=(3, 11), abis=['cp311'], platforms=['win_amd64']),
+            *compatible_tags(python_version=(3, 11), interpreter='cp311', platforms=['win_amd64']),
+        ])
+        target_sys = SimpleNamespace(version_info=(3, 11, 0), platform='win32')
+        with patch.object(api, 'sys', target_sys), \
+                patch.object(api.platform, 'machine', return_value='AMD64'), \
+                patch.object(api.platform, 'python_version', return_value='3.11.0'), \
+                patch.object(api.platform, 'python_version_tuple', return_value=('3', '11', '0')), \
+                patch.object(api, 'sys_tags', return_value=tags):
+            yield api
+
+    def test_lock_rejects_invalid_digest_and_missing_transitive_dependency(self):
+        with self.release_target() as api:
+            lock = api.load_lock(ROOT / 'requirements-release-win311.lock.json')
+            broken = copy.deepcopy(lock)
+            broken['packages'][0]['sha256'] = 'bad'
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'lock.json'
+                path.write_text(json.dumps(broken), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'wheel digest'):
+                    api.load_lock(path)
+            incomplete = copy.deepcopy(lock)
+            incomplete['packages'] = [p for p in lock['packages'] if p['name'] != 'shiboken6']
+            with self.assertRaisesRegex(ValueError, 'shiboken6'):
+                api.validate_dependency_closure(incomplete)
+
+    def test_lock_rejects_unsupported_release_environment(self):
+        with self.release_target() as api:
+            for version in ((3, 10, 0), (3, 12, 0)):
+                with self.subTest(version=version), patch.object(api.sys, 'version_info', version):
+                    with self.assertRaisesRegex(ValueError, 'CPython 3.11 Windows AMD64'):
+                        api.load_lock(ROOT / 'requirements-release-win311.lock.json')
+            with self.subTest(platform='linux'), patch.object(api.sys, 'platform', 'linux'):
+                with self.assertRaisesRegex(ValueError, 'CPython 3.11 Windows AMD64'):
+                    api.load_lock(ROOT / 'requirements-release-win311.lock.json')
+            with self.subTest(machine='ARM64'), patch.object(api.platform, 'machine', return_value='ARM64'):
+                with self.assertRaisesRegex(ValueError, 'CPython 3.11 Windows AMD64'):
+                    api.load_lock(ROOT / 'requirements-release-win311.lock.json')
 
     def test_installed_version_mismatch_fails_closed(self):
         api = self.api()
-        lock = api.load_lock(ROOT / 'requirements-release-win311.lock.json')
+        lock = json.loads((ROOT / 'requirements-release-win311.lock.json').read_text(encoding='utf-8'))
         lock['packages'] = [p for p in lock['packages'] if p['name'] == 'Pillow']
+        installed_version = lock['packages'][0]['version']
         lock['packages'][0]['version'] = '0.0.0'
-        with self.assertRaisesRegex(ValueError, 'Pillow'):
-            api.verify_environment(lock)
+        with patch.object(api.metadata, 'distribution') as distribution:
+            distribution.return_value.version = installed_version
+            with self.assertRaisesRegex(ValueError, 'Locked version mismatch: Pillow'):
+                api.verify_environment(lock)
+            distribution.assert_called_once_with('Pillow')
+
+    def fixture_provenance(self, api, root, status):
+        def git_output(command, **_kwargs):
+            self.assertEqual(command[:3], ['git', '-C', str(root)])
+            if command[3:] == ['rev-parse', 'HEAD']:
+                return b'1' * 40 + b'\n'
+            self.assertEqual(command[3], 'status')
+            return status.encode('utf-8')
+
+        with patch.object(api.subprocess, 'check_output', side_effect=git_output):
+            return api.source_provenance(root)
 
     def test_source_provenance_includes_actual_dirty_theme_bytes(self):
         api = self.api()
-        report = api.source_provenance(ROOT)
-        self.assertRegex(report['commit'], r'^[0-9a-f]{40}$')
-        self.assertEqual(report['sources']['ratools_pdf/ui/theme.py'],
-                         hashlib.sha256((ROOT/'ratools_pdf/ui/theme.py').read_bytes()).hexdigest())
-        self.assertIsInstance(report['dirty'], bool)
-        self.assertIn('ratools_pdf/ui/theme.py', report['dirty_paths'])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            theme = root / 'ratools_pdf/ui/theme.py'
+            theme.parent.mkdir(parents=True)
+            theme.write_bytes(b'THEME_VERSION = 1\n')
+            clean = self.fixture_provenance(api, root, '')
+            self.assertFalse(clean['dirty'])
+            self.assertEqual(clean['dirty_paths'], [])
+            self.assertEqual(clean['sources']['ratools_pdf/ui/theme.py'],
+                             hashlib.sha256(theme.read_bytes()).hexdigest())
+
+            dirty_bytes = b'THEME_VERSION = 2\n'
+            theme.write_bytes(dirty_bytes)
+            report = self.fixture_provenance(api, root, ' M ratools_pdf/ui/theme.py\n')
+            self.assertRegex(report['commit'], r'^[0-9a-f]{40}$')
+            self.assertTrue(report['dirty'])
+            self.assertEqual(report['sources']['ratools_pdf/ui/theme.py'],
+                             hashlib.sha256(dirty_bytes).hexdigest())
+            self.assertNotEqual(report['sources']['ratools_pdf/ui/theme.py'],
+                                clean['sources']['ratools_pdf/ui/theme.py'])
+            self.assertIn('ratools_pdf/ui/theme.py', report['dirty_paths'])
 
     def test_artifact_verification_detects_changed_bytes_and_extra_files(self):
         api = self.api()
