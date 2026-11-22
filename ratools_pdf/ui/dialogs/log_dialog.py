@@ -1,12 +1,13 @@
 import html
 import re
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout,
 )
 
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
@@ -17,7 +18,7 @@ from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 class LogDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
-        super().__init__("📝 处理日志记录", parent)
+        super().__init__("处理日志记录", parent)
         self.resize(860, 620)
 
         self.raw_log_text = ""
@@ -30,11 +31,12 @@ class LogDialog(FramelessDraggableDialog):
         stats_row = QHBoxLayout()
         stats_row.setContentsMargins(0, 0, 0, 0)
         stats_row.setSpacing(10)
-        self.stat_total_card, self.stat_total_title, self.stat_total_value = self._create_stat_card(stats_row, "总记录")
-        self.stat_success_card, self.stat_success_title, self.stat_success_value = self._create_stat_card(stats_row, "成功")
-        self.stat_failure_card, self.stat_failure_title, self.stat_failure_value = self._create_stat_card(stats_row, "失败")
-        self.stat_precheck_card, self.stat_precheck_title, self.stat_precheck_value = self._create_stat_card(stats_row, "建议处理")
-        self.stat_skip_card, self.stat_skip_title, self.stat_skip_value = self._create_stat_card(stats_row, "跳过")
+        self.stat_cards = {}
+        self.stat_total_card, self.stat_total_title, self.stat_total_value = self._create_stat_card(stats_row, "总记录", "all")
+        self.stat_success_card, self.stat_success_title, self.stat_success_value = self._create_stat_card(stats_row, "成功", "success")
+        self.stat_failure_card, self.stat_failure_title, self.stat_failure_value = self._create_stat_card(stats_row, "失败", "failure")
+        self.stat_precheck_card, self.stat_precheck_title, self.stat_precheck_value = self._create_stat_card(stats_row, "建议处理", "precheck")
+        self.stat_skip_card, self.stat_skip_title, self.stat_skip_value = self._create_stat_card(stats_row, "跳过", "skip")
         self.content_layout.addLayout(stats_row)
 
         filter_row = QHBoxLayout()
@@ -51,6 +53,7 @@ class LogDialog(FramelessDraggableDialog):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setObjectName("dialogSecondaryBtn")
+            btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _checked, current=mode: self.set_filter_mode(current))
             self.filter_buttons[mode] = btn
             filter_row.addWidget(btn)
@@ -104,16 +107,31 @@ class LogDialog(FramelessDraggableDialog):
         log_splitter.setStretchFactor(1, 2)
         self.content_layout.addWidget(log_splitter)
 
+        pal = active_palette()
         btn_layout = QHBoxLayout()
-        self.btn_export = QPushButton("⬇️ 导出日志")
+        btn_layout.setSpacing(8)
+        self.btn_export = QPushButton("导出日志")
         self.btn_export.setObjectName("dialogPrimaryBtn")
-        self.btn_export_precheck = QPushButton("⬇ 导出预检结果")
-        self.btn_export_precheck.setObjectName("dialogPrimaryBtn")
-        self.btn_export_audit = QPushButton("⬇ 导出最近批次审计包")
-        self.btn_export_audit.setObjectName("dialogPrimaryBtn")
+        self.btn_export.setCursor(Qt.PointingHandCursor)
+        self.btn_export.setIconSize(QSize(14, 14))
+        self.btn_export.setIcon(icons.svg_icon("download", pal.text_on_primary, size=14, disabled_color=pal.surface))
+
+        self.btn_export_precheck = QPushButton("导出预检结果")
+        self.btn_export_precheck.setObjectName("dialogSecondaryBtn")
+        self.btn_export_precheck.setCursor(Qt.PointingHandCursor)
+        self.btn_export_precheck.setIconSize(QSize(14, 14))
+        self.btn_export_precheck.setIcon(icons.svg_icon("download", pal.text_body, size=14, disabled_color=pal.text_faint))
+
+        self.btn_export_audit = QPushButton("导出最近批次审计包")
+        self.btn_export_audit.setObjectName("dialogSecondaryBtn")
+        self.btn_export_audit.setCursor(Qt.PointingHandCursor)
+        self.btn_export_audit.setIconSize(QSize(14, 14))
+        self.btn_export_audit.setIcon(icons.svg_icon("download", pal.text_body, size=14, disabled_color=pal.text_faint))
         self.btn_export_audit.setToolTip("导出最近已结束批次的结构化事实；包含失败、取消与缺失证据说明")
+
         self.btn_close = QPushButton("关闭")
         self.btn_close.setObjectName("dialogSecondaryBtn")
+        self.btn_close.setCursor(Qt.PointingHandCursor)
         self.btn_close.clicked.connect(self.accept)
 
         btn_layout.addStretch()
@@ -125,11 +143,16 @@ class LogDialog(FramelessDraggableDialog):
 
         self.set_filter_mode("all")
 
-    def _create_stat_card(self, parent_layout, title):
+    def _create_stat_card(self, parent_layout, title, mode="all"):
         card = QFrame()
         card.setObjectName("statCard")
+        card.setProperty("accent", mode)
+        card.setCursor(Qt.PointingHandCursor)
+        card.mousePressEvent = lambda event, target_mode=mode: (
+            self.set_filter_mode(target_mode) if event.button() == Qt.LeftButton else None
+        )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(10, 6, 10, 6)
+        card_layout.setContentsMargins(12, 8, 12, 8)
         card_layout.setSpacing(4)
 
         title_label = QLabel(title)
@@ -140,6 +163,7 @@ class LogDialog(FramelessDraggableDialog):
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
         parent_layout.addWidget(card)
+        self.stat_cards[mode] = card
         return card, title_label, value_label
 
     @staticmethod
@@ -160,6 +184,10 @@ class LogDialog(FramelessDraggableDialog):
         self.filter_mode = mode
         for key, btn in self.filter_buttons.items():
             btn.setChecked(key == mode)
+        for key, card in getattr(self, "stat_cards", {}).items():
+            card.setProperty("active", "true" if key == mode else "false")
+            card.style().unpolish(card)
+            card.style().polish(card)
         self.refresh_view()
 
     def set_log_text(self, raw_text):

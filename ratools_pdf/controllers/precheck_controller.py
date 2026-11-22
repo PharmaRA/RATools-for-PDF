@@ -76,6 +76,9 @@ class PrecheckController(QObject):
             self.precheck_worker.error_precheck.connect(self.precheck_error)
             self.precheck_worker.finished.connect(self._on_thread_finished)
             view.set_task_busy("precheck", True)
+            set_progress = getattr(view, "set_progress_state", None)
+            if callable(set_progress):
+                set_progress(True, 0, 0)
             self.precheck_worker.start()
         except Exception as exc:
             self._on_thread_finished()
@@ -145,10 +148,16 @@ class PrecheckController(QObject):
 
     def _reset_precheck_ui(self):
         """预检结束/异常后的按钮与状态复位（finished 与 error 共用）。"""
-        self.view.btn_precheck.setText("🔎 预检")
+        self.view.btn_precheck.setText("预检")
         self.view.btn_precheck.setProperty("precheckMode", False)
         self.view.btn_start.setEnabled(True)
         self.precheck_files = []
+        set_progress = getattr(self.view, "set_progress_state", None)
+        if callable(set_progress):
+            set_progress(False, 0, 100)
+        refresh_icons = getattr(self.view, "refresh_icons", None)
+        if callable(refresh_icons):
+            refresh_icons()
 
     def precheck_finished(self, summary):
         self.host.process_logs += f"\n{'=' * 56}\n批量预检结束\n{summary}\n{'=' * 56}\n"

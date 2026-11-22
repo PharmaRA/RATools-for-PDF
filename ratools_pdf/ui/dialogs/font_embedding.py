@@ -1,14 +1,16 @@
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton,
 )
 
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
 )
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.theme import active_palette
 
 
 class _FontRecheckWorker(QThread):
@@ -28,8 +30,9 @@ class _FontRecheckWorker(QThread):
 
 class ManualFontEmbeddingDialog(FramelessDraggableDialog):
     def __init__(self, pdf_paths, open_callback, parent=None, *, capability_text="", recheck_callback=None):
-        super().__init__("🛠 手动嵌入缺失字体", parent)
+        super().__init__("手动嵌入缺失字体", parent)
         self.resize(520, 360)
+        self.content_layout.setSpacing(12)
         self.pdf_paths = list(pdf_paths or [])
         self.open_callback = open_callback
         self.recheck_callback = recheck_callback
@@ -73,20 +76,28 @@ class ManualFontEmbeddingDialog(FramelessDraggableDialog):
         btn_layout.setSpacing(10)
         btn_layout.addStretch()
 
+        pal = active_palette()
         self.btn_open_acrobat = QPushButton("打开 Acrobat")
         self.btn_open_acrobat.setObjectName("dialogPrimaryBtn")
-        self.btn_open_acrobat.setFixedHeight(32)
+        self.btn_open_acrobat.setFixedHeight(34)
+        self.btn_open_acrobat.setCursor(Qt.PointingHandCursor)
+        self.btn_open_acrobat.setIconSize(QSize(14, 14))
+        self.btn_open_acrobat.setIcon(icons.svg_icon("wrench", pal.text_on_primary, size=14, disabled_color=pal.surface))
         self.btn_open_acrobat.clicked.connect(self.open_acrobat)
 
         self.btn_recheck = QPushButton("保存后复检字体")
         self.btn_recheck.setObjectName("dialogSecondaryBtn")
-        self.btn_recheck.setFixedHeight(32)
+        self.btn_recheck.setFixedHeight(34)
+        self.btn_recheck.setCursor(Qt.PointingHandCursor)
+        self.btn_recheck.setIconSize(QSize(14, 14))
+        self.btn_recheck.setIcon(icons.svg_icon("refresh", pal.text_body, size=14, disabled_color=pal.text_faint))
         self.btn_recheck.setEnabled(bool(recheck_callback))
         self.btn_recheck.clicked.connect(self.start_recheck)
 
         self.btn_close = QPushButton("关闭")
         self.btn_close.setObjectName("dialogSecondaryBtn")
-        self.btn_close.setFixedHeight(32)
+        self.btn_close.setFixedHeight(34)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
         self.btn_close.clicked.connect(self.accept)
 
         btn_layout.addWidget(self.btn_open_acrobat)

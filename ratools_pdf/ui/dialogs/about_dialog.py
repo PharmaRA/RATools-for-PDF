@@ -15,7 +15,7 @@ from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 class AboutDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
-        super().__init__("ℹ️ 关于软件", parent)
+        super().__init__("关于软件", parent)
         self.resize(520, 460)
         self.content_layout.setSpacing(16)
         self.latest_release_url = ""
@@ -95,8 +95,10 @@ class AboutDialog(FramelessDraggableDialog):
             update_button_layout.setSpacing(8)
             self.btn_check_updates = QPushButton("检查更新")
             self.btn_check_updates.setObjectName("dialogPrimaryBtn")
+            self.btn_check_updates.setCursor(Qt.PointingHandCursor)
             self.btn_open_release = QPushButton("打开发布页")
             self.btn_open_release.setObjectName("dialogSecondaryBtn")
+            self.btn_open_release.setCursor(Qt.PointingHandCursor)
             self.btn_open_release.hide()
             update_button_layout.addWidget(self.btn_check_updates)
             update_button_layout.addWidget(self.btn_open_release)
@@ -112,6 +114,7 @@ class AboutDialog(FramelessDraggableDialog):
         btn_close = QPushButton("关 闭")
         btn_close.setObjectName("dialogSecondaryBtn")
         btn_close.setFixedHeight(36)
+        btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
 

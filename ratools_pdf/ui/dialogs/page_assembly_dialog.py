@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QRadioButton,
     QSpinBox,
@@ -28,6 +27,7 @@ from PySide6.QtWidgets import (
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
 
 
 class PageAssemblyWorker(QThread):
@@ -109,7 +109,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
     """页面装配与拆分工作台对话框。"""
 
     def __init__(self, initial_files: Optional[List[str]] = None, parent=None):
-        super().__init__("📑 页面装配与拆分工作台", parent)
+        super().__init__("页面装配与拆分工作台", parent)
         self.resize(920, 680)
         self.setMinimumSize(820, 560)
         self.worker: Optional[PageAssemblyWorker] = None
@@ -137,7 +137,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         layout.setSpacing(20)
 
         lbl = QLabel("工作模式：")
-        lbl.setStyleSheet("font-weight: 700;")
+        lbl.setObjectName("dialogSubTitle")
         layout.addWidget(lbl)
 
         self.mode_group = QButtonGroup(self)
@@ -235,7 +235,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         layout.setSpacing(8)
 
         lbl = QLabel("当前选中行快捷范围：")
-        lbl.setStyleSheet("color: gray; font-size: 12px;")
+        lbl.setObjectName("dialogMuted")
         layout.addWidget(lbl)
 
         self.btn_range_all = QPushButton("全部页面 (1-z)")
@@ -271,7 +271,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         layout.setSpacing(18)
 
         lbl = QLabel("拆分方式：")
-        lbl.setStyleSheet("font-weight: 700;")
+        lbl.setObjectName("dialogSubTitle")
         layout.addWidget(lbl)
 
         self.split_group = QButtonGroup(self)
@@ -343,7 +343,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
         layout.setSpacing(12)
 
         self.lbl_status = QLabel("就绪")
-        self.lbl_status.setStyleSheet("color: gray; font-size: 12px;")
+        self.lbl_status.setObjectName("dialogMuted")
         layout.addWidget(self.lbl_status)
         layout.addStretch()
 
@@ -642,7 +642,7 @@ class PageAssemblyDialog(FramelessDraggableDialog):
 
         self.btn_execute.setEnabled(False)
         self.btn_cancel.setEnabled(False)
-        self.lbl_status.setText("⏳ 处理中，请稍候...")
+        self.lbl_status.setText("处理中，请稍候...")
         self.btn_open_target.setVisible(False)
 
         self.worker = PageAssemblyWorker(

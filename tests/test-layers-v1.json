@@ -6,7 +6,8 @@
     "unit": [
       "test_app_paths.py",
       "test_app_version.py",
-      "test_extract_release_notes.py"
+      "test_extract_release_notes.py",
+      "test_icons.py"
     ],
     "integration": [
       "test_audit_evidence.py",

@@ -28,6 +28,7 @@ from ratools_pdf.pdf import inspect as pdf_inspect
 from ratools_pdf.services import system_shell
 from ratools_pdf.services.output_paths import path_key
 from ratools_pdf.services.processing_plan import configuration_matches_plan, timestamp
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.dialogs.processing_plan import ProcessingPlanDialog
 from ratools_pdf.ui.theme import active_palette, tree_status_color
 
@@ -121,6 +122,8 @@ class MainController(QObject):
         self.view.tree.customContextMenuRequested.connect(self.tree_actions.show_tree_context_menu)
         # 绑定树形图双击事件
         self.view.tree.itemDoubleClicked.connect(self.tree_actions.on_item_double_clicked)
+        if hasattr(self.view.tree, "files_dropped"):
+            self.view.tree.files_dropped.connect(self.add_files)
 
     def _is_precheck_running(self):
         return self.precheck.is_running()
@@ -353,6 +356,11 @@ class MainController(QObject):
 
         # 智能算法：获取这一次批量拖入文件的公共根路径（跨盘符时降级为绝对路径树）
         common_base = common_base_dir(to_add)
+        palette = active_palette()
+        root_folder_icon = icons.svg_icon("folder_open", palette.primary_text, size=15)
+        sub_folder_icon = icons.svg_icon("folder", palette.text_muted, size=15)
+        drive_icon = icons.svg_icon("drive", palette.primary_text, size=15)
+        file_icon = icons.svg_icon("file", palette.text_muted, size=15)
 
         for path in to_add:
             self.loaded_files.append(path)
@@ -364,7 +372,9 @@ class MainController(QObject):
                 if common_base not in self.folder_nodes:
                     root_node = QTreeWidgetItem(parent_item)
                     root_name = os.path.basename(common_base) or common_base
-                    root_node.setText(0, f"📁 {root_name}")
+                    root_node.setText(0, root_name)
+                    root_node.setIcon(0, root_folder_icon)
+                    root_node.setData(0, Qt.UserRole, "folder_open")
                     root_node.setText(1, common_base)
                     root_node.setToolTip(0, root_name)
                     root_node.setToolTip(1, common_base)
@@ -382,7 +392,9 @@ class MainController(QObject):
                         current_path_str = str(current_path)
                         if current_path_str not in self.folder_nodes:
                             node = QTreeWidgetItem(parent_item)
-                            node.setText(0, f"📁 {part}")
+                            node.setText(0, part)
+                            node.setIcon(0, sub_folder_icon)
+                            node.setData(0, Qt.UserRole, "folder")
                             node.setText(1, current_path_str)
                             node.setToolTip(0, part)
                             node.setToolTip(1, current_path_str)
@@ -395,7 +407,9 @@ class MainController(QObject):
                 root_str = str(current_path)
                 if root_str not in self.folder_nodes:
                     node = QTreeWidgetItem(parent_item)
-                    node.setText(0, f"💽 {root_str}")
+                    node.setText(0, root_str)
+                    node.setIcon(0, drive_icon)
+                    node.setData(0, Qt.UserRole, "drive")
                     node.setText(1, root_str)
                     node.setToolTip(0, root_str)
                     node.setToolTip(1, root_str)
@@ -408,7 +422,9 @@ class MainController(QObject):
                     current_path_str = str(current_path)
                     if current_path_str not in self.folder_nodes:
                         node = QTreeWidgetItem(parent_item)
-                        node.setText(0, f"📁 {part}")
+                        node.setText(0, part)
+                        node.setIcon(0, sub_folder_icon)
+                        node.setData(0, Qt.UserRole, "folder")
                         node.setText(1, current_path_str)
                         node.setToolTip(0, part)
                         node.setToolTip(1, current_path_str)
@@ -418,13 +434,15 @@ class MainController(QObject):
 
             # 挂载最终的文件节点
             file_node = QTreeWidgetItem(parent_item)
-            file_node.setText(0, f"📄 {p.name}")
+            file_node.setText(0, p.name)
+            file_node.setIcon(0, file_icon)
+            file_node.setData(0, Qt.UserRole, "file")
             file_node.setText(1, path)
             file_node.setText(2, "等待处理")
             file_node.setToolTip(0, p.name)
             file_node.setToolTip(1, path)
             file_node.setToolTip(2, "等待处理")
-            file_node.setForeground(2, QColor(active_palette().text_muted))
+            file_node.setForeground(2, QColor(palette.text_muted))
 
             # 将创建的文件节点加入字典中进行状态管理
             self.file_nodes[path] = file_node
@@ -570,7 +588,7 @@ class MainController(QObject):
             self.last_output_dir = out_dir
 
         self.view.btn_start.setEnabled(True)
-        self.view.btn_start.setText("■ 停止处理")
+        self.view.btn_start.setText("停止处理")
         self.view.btn_start.setProperty("stopMode", True)
         self.view.btn_retry_failed.setEnabled(False)
         self.view.btn_retry_failed.hide()
@@ -581,13 +599,16 @@ class MainController(QObject):
         self.view.btn_skip_current.show()
         self.view.btn_skip_current.setEnabled(True)
         if self.processing_parallel_mode:
-            self.view.btn_skip_current.setText("⏹ 终止选中文件")
+            self.view.btn_skip_current.setText("终止选中文件")
             self.view.btn_skip_current.setToolTip("选中队列中正在处理的 PDF 后，只终止该文件")
         else:
-            self.view.btn_skip_current.setText("⏭ 跳过当前文件")
+            self.view.btn_skip_current.setText("跳过当前文件")
             self.view.btn_skip_current.setToolTip("跳过当前正在处理的文件")
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
+        refresh_icons = getattr(self.view, "refresh_icons", None)
+        if callable(refresh_icons):
+            refresh_icons()
 
         self.processing_started_at = datetime.now()
         self.processing_files = processing_files
@@ -595,6 +616,9 @@ class MainController(QObject):
         self.processing_done = 0
         self.processing_done_paths = set()
         self.batch_result_counts = {"success": 0, "failure": 0, "skip": 0}
+        set_progress = getattr(self.view, "set_progress_state", None)
+        if callable(set_progress):
+            set_progress(True, 0, max(self.processing_total, 1))
         if retry_failed:
             self.process_logs += f"\n{'=' * 56}\n仅处理失败项开始：{len(processing_files)} 个文件\n处理模式：{self.view.get_processing_mode_label()}\n{'=' * 56}\n"
         elif processing_files != self.loaded_files:
@@ -746,10 +770,16 @@ class MainController(QObject):
         return self.detection.is_running()
 
     def _recolor_tree_statuses(self, palette=None):
-        """按当前主题重刷文件树"当前状态"列前景色（主题切换时调用）。"""
+        """按当前主题重刷文件树"当前状态"列前景色与树节点图标（主题切换时调用）。"""
         palette = palette or active_palette()
         waiting_color = QColor(palette.text_muted)
+        for node in getattr(self, "folder_nodes", {}).values():
+            icon_name = node.data(0, Qt.UserRole) or "folder"
+            color = palette.primary_text if icon_name in ("folder_open", "drive") else palette.text_muted
+            node.setIcon(0, icons.svg_icon(icon_name, color, size=15))
+        file_icon = icons.svg_icon("file", palette.text_muted, size=15)
         for node in self.file_nodes.values():
+            node.setIcon(0, file_icon)
             status_text = node.text(2)
             if not status_text or status_text == "等待处理":
                 node.setForeground(2, waiting_color)
@@ -856,17 +886,25 @@ class MainController(QObject):
         """批处理结束/异常后的按钮与状态复位（finished 与 error 共用）。"""
         self.processing_timer.stop()
         self.view.processing_hint_label.setText("")
+        if hasattr(self.view.processing_hint_label, "setVisible"):
+            self.view.processing_hint_label.setVisible(False)
         self.view.btn_start.setEnabled(True)
-        self.view.btn_start.setText("▶ 开始处理")
+        self.view.btn_start.setText("开始处理")
         self.view.btn_start.setProperty("stopMode", False)
         self.view.btn_precheck.show()
         self.view.btn_retry_failed.setProperty("hasFailedItems", bool(self.last_failed_files))
         self.view.btn_skip_current.setEnabled(False)
         self.view.btn_skip_current.hide()
-        self.view.btn_skip_current.setText("⏭ 跳过当前文件")
+        self.view.btn_skip_current.setText("跳过当前文件")
         self.view.btn_skip_current.setToolTip("")
         self.view.style().unpolish(self.view.btn_start)
         self.view.style().polish(self.view.btn_start)
+        refresh_icons = getattr(self.view, "refresh_icons", None)
+        if callable(refresh_icons):
+            refresh_icons()
+        set_progress = getattr(self.view, "set_progress_state", None)
+        if callable(set_progress):
+            set_progress(False, 0, 100)
         self.view.refresh_selection_summary()
         self.processing_started_at = None
         self.processing_total = 0
@@ -908,6 +946,8 @@ class MainController(QObject):
     def _refresh_processing_hint(self, status_text="", file_path=""):
         if not self.processing_started_at:
             self.view.processing_hint_label.setText("")
+            if hasattr(self.view.processing_hint_label, "setVisible"):
+                self.view.processing_hint_label.setVisible(False)
             self._last_processing_hint = ""
             return
 
@@ -915,6 +955,9 @@ class MainController(QObject):
         total = max(self.processing_total, 1)
         done = min(self.processing_done, total)
         percent = int(done * 100 / total)
+        set_progress = getattr(self.view, "set_progress_state", None)
+        if callable(set_progress):
+            set_progress(True, done, total)
         hint = f"处理中 {elapsed}s · {done}/{total} · {percent}%"
 
         current_name = self.processing_current_file
@@ -927,6 +970,8 @@ class MainController(QObject):
 
         if hint != self._last_processing_hint:
             self.view.processing_hint_label.setText(hint)
+            if hasattr(self.view.processing_hint_label, "setVisible"):
+                self.view.processing_hint_label.setVisible(bool(hint))
             self._last_processing_hint = hint
 
     def skip_current_file(self):

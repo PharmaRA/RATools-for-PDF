@@ -8,6 +8,7 @@ import tempfile
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -20,9 +21,9 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +35,8 @@ from ratools_pdf.pdf import qpdf
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
 from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
+from ratools_pdf.ui.theme import active_palette
 
 
 class SecurityWorker(QThread):
@@ -192,7 +195,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     """PDF 安全与密码/权限控制中心对话框（加密 + 解密脱壳）。"""
 
     def __init__(self, initial_file: Optional[str] = None, parent=None):
-        super().__init__("🔒 PDF 安全与密码/权限控制中心", parent)
+        super().__init__("PDF 安全与密码/权限控制中心", parent)
         self.resize(800, 650)
         self.setMinimumSize(740, 560)
         self.encrypt_worker: Optional[SecurityWorker] = None
@@ -305,7 +308,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         vbox_perm.setSpacing(10)
 
         lbl_perm = QLabel("权限细则控制（限制未取得权限密码的普通用户操作）：")
-        lbl_perm.setStyleSheet("font-weight: 700;")
+        lbl_perm.setObjectName("dialogSubTitle")
         vbox_perm.addWidget(lbl_perm)
 
         h_print = QHBoxLayout()
@@ -361,7 +364,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         layout.addLayout(row_opts)
 
         layout.addStretch()
-        self.tabs.addTab(tab, "🔒 PDF 加密与权限保护")
+        self.tabs.addTab(tab, "PDF 加密与权限保护")
 
         if initial_file and os.path.exists(initial_file):
             self.txt_input.setText(initial_file)
@@ -463,10 +466,11 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         v_pass.addLayout(row_pw)
 
         hint_lbl = QLabel(
-            "💡 提示：仅受权限限制（禁止打印/编辑/复制）但未设打开密码的 PDF，无需输入密码即可直接免密脱壳；若设有打开密码，请勾选并输入密码解锁。"
+            "提示：仅受权限限制（禁止打印/编辑/复制）但未设打开密码的 PDF，无需输入密码即可直接免密脱壳；若设有打开密码，请勾选并输入密码解锁。"
         )
-        hint_lbl.setStyleSheet("color: #6B7280; font-size: 11px;")
+        hint_lbl.setObjectName("dialogMuted")
         hint_lbl.setWordWrap(True)
+        hint_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         v_pass.addWidget(hint_lbl)
 
         row_sig_opts = QHBoxLayout()
@@ -535,7 +539,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         v_out.addLayout(row_opts2)
         layout.addWidget(out_card)
 
-        self.tabs.addTab(tab, "🔓 PDF 解密与权限脱壳")
+        self.tabs.addTab(tab, "PDF 解密与权限脱壳")
 
     # =========================================================================
     # 底部状态栏与主执行按钮
@@ -547,7 +551,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         layout.setSpacing(12)
 
         self.lbl_status = QLabel("就绪")
-        self.lbl_status.setStyleSheet("color: gray; font-size: 12px;")
+        self.lbl_status.setObjectName("dialogMuted")
         layout.addWidget(self.lbl_status)
         layout.addStretch()
 
@@ -650,7 +654,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
 
         self.btn_execute.setEnabled(False)
         self.btn_cancel.setEnabled(False)
-        self.lbl_status.setText("⏳ 正在加密...")
+        self.lbl_status.setText("正在加密...")
         self.btn_open_target.setVisible(False)
 
         self.encrypt_worker = SecurityWorker(
@@ -726,12 +730,13 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             # 3: 当前状态
             it_status = QTableWidgetItem(status_text)
             it_status.setTextAlignment(Qt.AlignCenter)
+            pal = active_palette()
             if status_code == "password_required":
-                it_status.setForeground(Qt.red)
+                it_status.setForeground(QColor(pal.danger_text))
             elif status_code == "restricted_no_password":
-                it_status.setForeground(Qt.darkYellow)
+                it_status.setForeground(QColor(pal.warning_text))
             else:
-                it_status.setForeground(Qt.darkGreen)
+                it_status.setForeground(QColor(pal.success_text))
             it_status.setFlags(it_status.flags() & ~Qt.ItemIsEditable)
             self.decrypt_table.setItem(row, 3, it_status)
 
@@ -849,7 +854,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.btn_execute.setEnabled(False)
         self.btn_cancel.setEnabled(False)
         self.btn_open_target.setVisible(False)
-        self.lbl_status.setText("⏳ 正在批量解密脱壳...")
+        self.lbl_status.setText("正在批量解密脱壳...")
 
         self._decrypt_summary = None
         self._decrypt_rows = {row for row, _ in tasks}
@@ -880,9 +885,10 @@ class SecurityCenterDialog(FramelessDraggableDialog):
     def _on_dec_file_finished(self, row_idx: int, success: bool, msg: str):
         it_status = self.decrypt_table.item(row_idx, 3)
         it_desc = self.decrypt_table.item(row_idx, 4)
+        pal = active_palette()
         if it_status:
-            it_status.setText("✅ 已解密" if success else "❌ 失败")
-            it_status.setForeground(Qt.darkGreen if success else Qt.red)
+            it_status.setText("已解密" if success else "失败")
+            it_status.setForeground(QColor(pal.success_text if success else pal.danger_text))
         if it_desc:
             it_desc.setText(msg)
 

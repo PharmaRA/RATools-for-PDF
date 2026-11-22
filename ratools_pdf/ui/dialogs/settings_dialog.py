@@ -2,7 +2,7 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout,
+    QAbstractSpinBox, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ratools_pdf.ui.log_view_model import (
@@ -14,10 +14,24 @@ from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 class SettingsDialog(FramelessDraggableDialog):
     def __init__(self, parent=None):
-        super().__init__("⚙️ 全局设置", parent)
-        self.resize(560, 420)
+        super().__init__("全局设置", parent)
+        self.resize(560, 560)
+        self.setMinimumSize(520, 460)
 
-        self.content_layout.setSpacing(16)
+        self.content_layout.setSpacing(14)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("settingsScroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.viewport().setAutoFillBackground(True)
+        scroll_area.verticalScrollBar().valueChanged.connect(scroll_area.viewport().update)
+
+        body_widget = QWidget()
+        body_layout = QVBoxLayout(body_widget)
+        body_layout.setContentsMargins(2, 2, 6, 4)
+        body_layout.setSpacing(14)
 
         # 复选框视觉由中央 QSS 统一定义；覆盖原文件项用 dangerCheck 标红。
         self.cb_auto_open = QCheckBox("处理完成后自动打开输出文件夹")
@@ -35,37 +49,19 @@ class SettingsDialog(FramelessDraggableDialog):
         self.spin_parallel_workers.setRange(2, self.parallel_max_workers)
         self.spin_parallel_workers.setValue(2)
         self.spin_parallel_workers.setEnabled(False)
-        self.spin_parallel_workers.setObjectName("settingsWorkerSpin")
         self.spin_parallel_workers.setSuffix(" 个任务")
-        self.spin_parallel_workers.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        (
+            worker_spin_layout,
+            self.parallel_worker_stepper,
+            self.btn_parallel_worker_up,
+            self.btn_parallel_worker_down,
+        ) = self._build_stepper_spinbox(self.spin_parallel_workers, enabled=False)
 
-        self.parallel_worker_stepper = QFrame()
-        self.parallel_worker_stepper.setObjectName("settingsSpinStepper")
-        stepper_layout = QVBoxLayout(self.parallel_worker_stepper)
-        stepper_layout.setContentsMargins(0, 0, 0, 0)
-        stepper_layout.setSpacing(0)
-
-        self.btn_parallel_worker_up = QToolButton()
-        self.btn_parallel_worker_down = QToolButton()
-        for btn, direction, arrow_type in [
-            (self.btn_parallel_worker_up, "up", Qt.UpArrow),
-            (self.btn_parallel_worker_down, "down", Qt.DownArrow),
-        ]:
-            btn.setObjectName("settingsSpinStepBtn")
-            btn.setProperty("direction", direction)
-            btn.setArrowType(arrow_type)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setEnabled(False)
-            stepper_layout.addWidget(btn)
-
-        self.btn_parallel_worker_up.clicked.connect(self.spin_parallel_workers.stepUp)
-        self.btn_parallel_worker_down.clicked.connect(self.spin_parallel_workers.stepDown)
         self.cb_parallel_processing.toggled.connect(self.set_parallel_worker_controls_enabled)
 
         title = QLabel("外观主题")
         title.setObjectName("dialogSectionTitle")
-        self.content_layout.addWidget(title)
+        body_layout.addWidget(title)
 
         theme_card = QFrame()
         theme_card.setObjectName("settingsPathCard")
@@ -75,6 +71,7 @@ class SettingsDialog(FramelessDraggableDialog):
 
         theme_hint = QLabel("默认跟随系统深浅色，也可手动锁定为亮色或暗色。")
         theme_hint.setWordWrap(True)
+        theme_hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         theme_hint.setObjectName("settingsPathHint")
         theme_layout.addWidget(theme_hint)
 
@@ -95,11 +92,11 @@ class SettingsDialog(FramelessDraggableDialog):
             theme_row.addWidget(btn)
         theme_row.addStretch()
         theme_layout.addLayout(theme_row)
-        self.content_layout.addWidget(theme_card)
+        body_layout.addWidget(theme_card)
 
         title = QLabel("默认保存位置")
         title.setObjectName("dialogSectionTitle")
-        self.content_layout.addWidget(title)
+        body_layout.addWidget(title)
 
         path_card = QFrame()
         path_card.setObjectName("settingsPathCard")
@@ -122,30 +119,33 @@ class SettingsDialog(FramelessDraggableDialog):
         self.default_output_status.setObjectName("settingsPathStatus")
         self.btn_browse_output = QPushButton("浏览...")
         self.btn_browse_output.setObjectName("dialogSecondaryBtn")
+        self.btn_browse_output.setCursor(Qt.PointingHandCursor)
         self.btn_clear_output = QPushButton("清除")
         self.btn_clear_output.setObjectName("dialogSecondaryBtn")
+        self.btn_clear_output.setCursor(Qt.PointingHandCursor)
         path_row.addWidget(self.default_output_edit, 1)
         path_row.addWidget(self.btn_browse_output)
         path_row.addWidget(self.btn_clear_output)
         path_layout.addLayout(path_row)
         path_layout.addWidget(self.default_output_status)
 
-        self.content_layout.addWidget(path_card)
+        body_layout.addWidget(path_card)
 
         title = QLabel("常规选项")
         title.setObjectName("dialogSectionTitle")
-        self.content_layout.addWidget(title)
-        self.content_layout.addWidget(self.cb_auto_open)
-        self.content_layout.addWidget(self.cb_overwrite)
+        body_layout.addWidget(title)
+        body_layout.addWidget(self.cb_auto_open)
+        body_layout.addWidget(self.cb_overwrite)
 
         danger_hint = QLabel("危险操作：直接覆盖源PDF。建议仅在已有备份且确认规则无误后使用。")
         danger_hint.setWordWrap(True)
+        danger_hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         danger_hint.setObjectName("dangerHint")
-        self.content_layout.addWidget(danger_hint)
+        body_layout.addWidget(danger_hint)
 
         title = QLabel("处理性能")
         title.setObjectName("dialogSectionTitle")
-        self.content_layout.addWidget(title)
+        body_layout.addWidget(title)
 
         parallel_card = QFrame()
         parallel_card.setObjectName("settingsPathCard")
@@ -155,6 +155,7 @@ class SettingsDialog(FramelessDraggableDialog):
 
         parallel_hint = QLabel("并行数量为用户上限，将按可用内存和输入大小保守下调。资源信息不可用时逐个处理；异常文件可在队列中选中后单独终止。")
         parallel_hint.setWordWrap(True)
+        parallel_hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         parallel_hint.setObjectName("settingsPathHint")
         parallel_layout.addWidget(parallel_hint)
 
@@ -166,35 +167,48 @@ class SettingsDialog(FramelessDraggableDialog):
         worker_label = QLabel("并行数量")
         worker_label.setObjectName("settingsPathHint")
         worker_row.addWidget(worker_label)
-        worker_spin_layout = QHBoxLayout()
-        worker_spin_layout.setContentsMargins(0, 0, 0, 0)
-        worker_spin_layout.setSpacing(0)
-        worker_spin_layout.addWidget(self.spin_parallel_workers)
-        worker_spin_layout.addWidget(self.parallel_worker_stepper)
         worker_row.addLayout(worker_spin_layout)
         worker_row.addStretch()
         parallel_layout.addLayout(worker_row)
 
+        perf_sep = QFrame()
+        perf_sep.setObjectName("compressionCardSep")
+        perf_sep.setFixedHeight(1)
+        parallel_layout.addWidget(perf_sep)
+
         timeout_row = QHBoxLayout()
+        timeout_row.setContentsMargins(0, 0, 0, 0)
         timeout_row.setSpacing(8)
-        timeout_row.addWidget(QLabel("每文件超时"))
+        timeout_label = QLabel("每文件超时")
+        timeout_label.setObjectName("settingsPathHint")
+        timeout_row.addWidget(timeout_label)
         self.spin_file_timeout = QSpinBox()
         self.spin_file_timeout.setRange(0, 86400)
         self.spin_file_timeout.setValue(0)
         self.spin_file_timeout.setSuffix(" 秒")
         self.spin_file_timeout.setSpecialValueText("关闭")
+        self.spin_file_timeout.setMinimumWidth(96)
         self.spin_file_timeout.setToolTip("0 为关闭。超时文件保留既有输出，可调整设置后重试；计时包含处理和发布前验证。")
-        timeout_row.addWidget(self.spin_file_timeout)
+        (
+            timeout_spin_layout,
+            self.file_timeout_stepper,
+            self.btn_file_timeout_up,
+            self.btn_file_timeout_down,
+        ) = self._build_stepper_spinbox(self.spin_file_timeout, enabled=True)
+        timeout_row.addLayout(timeout_spin_layout)
         timeout_row.addStretch()
         parallel_layout.addLayout(timeout_row)
 
-        self.content_layout.addWidget(parallel_card)
+        body_layout.addWidget(parallel_card)
+        body_layout.addStretch()
 
-        self.content_layout.addStretch()
+        scroll_area.setWidget(body_widget)
+        self.content_layout.addWidget(scroll_area, 1)
 
         btn_close = QPushButton("确 定")
         btn_close.setObjectName("dialogPrimaryBtn")
         btn_close.setFixedHeight(36)
+        btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.clicked.connect(self.accept)
         self.content_layout.addWidget(btn_close)
 
@@ -236,7 +250,46 @@ class SettingsDialog(FramelessDraggableDialog):
         for key, btn in self.theme_buttons.items():
             btn.setChecked(key == mode)
 
+    def _build_stepper_spinbox(self, spinbox: QSpinBox, *, enabled: bool = True):
+        """将 QSpinBox 包装为统一 Fluent 外置步进按钮样式。"""
+        spinbox.setObjectName("settingsWorkerSpin")
+        spinbox.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        spinbox.setFixedHeight(32)
+
+        stepper = QFrame()
+        stepper.setObjectName("settingsSpinStepper")
+        stepper.setFixedHeight(32)
+        stepper.setEnabled(enabled)
+        stepper_layout = QVBoxLayout(stepper)
+        stepper_layout.setContentsMargins(0, 0, 0, 0)
+        stepper_layout.setSpacing(0)
+
+        btn_up = QToolButton()
+        btn_down = QToolButton()
+        for btn, direction, arrow_type in (
+            (btn_up, "up", Qt.UpArrow),
+            (btn_down, "down", Qt.DownArrow),
+        ):
+            btn.setObjectName("settingsSpinStepBtn")
+            btn.setProperty("direction", direction)
+            btn.setArrowType(arrow_type)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setEnabled(enabled)
+            stepper_layout.addWidget(btn)
+
+        btn_up.clicked.connect(spinbox.stepUp)
+        btn_down.clicked.connect(spinbox.stepDown)
+
+        spin_layout = QHBoxLayout()
+        spin_layout.setContentsMargins(0, 0, 0, 0)
+        spin_layout.setSpacing(0)
+        spin_layout.addWidget(spinbox)
+        spin_layout.addWidget(stepper)
+        return spin_layout, stepper, btn_up, btn_down
+
     def set_parallel_worker_controls_enabled(self, enabled):
         self.spin_parallel_workers.setEnabled(enabled)
+        self.parallel_worker_stepper.setEnabled(enabled)
         self.btn_parallel_worker_up.setEnabled(enabled)
         self.btn_parallel_worker_down.setEnabled(enabled)

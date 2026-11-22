@@ -9,7 +9,9 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout
 
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.theme import active_palette
 
 
 class _ActionChoiceDialog(FramelessDraggableDialog):
@@ -79,9 +81,11 @@ class SignedFilesPromptDialog(_ActionChoiceDialog):
         warn_layout.setContentsMargins(14, 14, 14, 14)
         warn_layout.setSpacing(12)
 
-        warn_icon = QLabel("⚠️")
+        warn_icon = QLabel()
         warn_icon.setObjectName("signedWarnIcon")
-        warn_icon.setAlignment(Qt.AlignTop)
+        warn_icon.setFixedSize(24, 24)
+        warn_icon.setAlignment(Qt.AlignCenter)
+        warn_icon.setPixmap(icons.render_svg_pixmap("alert_triangle", active_palette().warning_text, size=22))
         warn_layout.addWidget(warn_icon, 0, Qt.AlignTop)
 
         warn_text_layout = QVBoxLayout()

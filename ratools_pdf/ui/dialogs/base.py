@@ -1,10 +1,11 @@
 
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtCore import QSize, QThread, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
@@ -55,7 +56,7 @@ class FramelessDraggableDialog(QDialog):
         # 顶部自定义标题栏
         self.title_bar = QFrame()
         self.title_bar.setObjectName("dialogTitleBar")
-        self.title_bar.setFixedHeight(40)
+        self.title_bar.setFixedHeight(42)
         tb_layout = QHBoxLayout(self.title_bar)
         tb_layout.setContentsMargins(16, 0, 8, 0)
 
@@ -64,9 +65,12 @@ class FramelessDraggableDialog(QDialog):
         tb_layout.addWidget(self.title_lbl)
         tb_layout.addStretch()
 
-        self.btn_close = QPushButton("✕")
+        self.btn_close = QPushButton()
         self.btn_close.setObjectName("dialogCloseBtn")
         self.btn_close.setFixedSize(30, 30)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setIconSize(QSize(14, 14))
+        self.btn_close.setIcon(icons.svg_icon("close", active_palette().text_muted, size=14))
         self.btn_close.clicked.connect(self.reject)
         tb_layout.addWidget(self.btn_close)
 

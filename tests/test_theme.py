@@ -231,10 +231,17 @@ class ThemeStartupTests(unittest.TestCase):
     def test_worker_spinbox_uses_custom_stepper_buttons(self):
         window = self._create_window_with_theme("light")
         dialog = window.settings_dialog
-
-        self.assertEqual(QAbstractSpinBox.NoButtons, dialog.spin_parallel_workers.buttonSymbols())
-        self.assertEqual(theme.Qt.UpArrow, dialog.btn_parallel_worker_up.arrowType())
-        self.assertEqual(theme.Qt.DownArrow, dialog.btn_parallel_worker_down.arrowType())
+        dialog.show()
+        self.app.processEvents()
+        try:
+            self.assertEqual(QAbstractSpinBox.NoButtons, dialog.spin_parallel_workers.buttonSymbols())
+            self.assertEqual(theme.Qt.UpArrow, dialog.btn_parallel_worker_up.arrowType())
+            self.assertEqual(theme.Qt.DownArrow, dialog.btn_parallel_worker_down.arrowType())
+            self.assertGreaterEqual(dialog.spin_parallel_workers.lineEdit().width(), 40)
+            self.assertEqual(QAbstractSpinBox.NoButtons, dialog.spin_file_timeout.buttonSymbols())
+            self.assertGreaterEqual(dialog.spin_file_timeout.lineEdit().width(), 40)
+        finally:
+            dialog.close()
 
     def test_worker_spinbox_styles_custom_stepper_buttons(self):
         qss = theme.build_app_qss(theme.LIGHT)
@@ -243,6 +250,26 @@ class ThemeStartupTests(unittest.TestCase):
         self.assertIn("#settingsSpinStepBtn", qss)
         self.assertIn('#settingsSpinStepBtn[direction="up"]', qss)
         self.assertIn('#settingsSpinStepBtn[direction="down"]', qss)
+
+    def test_fluent_qss_includes_modern_controls_and_indicators(self):
+        qss = theme.build_app_qss(theme.LIGHT)
+
+        for selector in (
+            "#ruleCard",
+            "#thinProgressBar",
+            "#statusBadge",
+            "QRadioButton::indicator",
+            "QComboBox::down-arrow",
+            "#queueCard",
+            "#modeSegContainer",
+            "#segmentedContainer",
+        ):
+            self.assertIn(selector, qss)
+
+        self.assertTrue(theme.LIGHT.sidebar.startswith("#"))
+        self.assertTrue(theme.DARK.sidebar.startswith("#"))
+        self.assertTrue(theme.LIGHT.accent_bar.startswith("#"))
+        self.assertTrue(theme.DARK.accent_bar.startswith("#"))
 
 
 if __name__ == "__main__":

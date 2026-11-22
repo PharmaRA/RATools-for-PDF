@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
 
 
 class OverlayWorker(QThread):
@@ -87,7 +87,7 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
     """图层套印与印章管理器对话框。"""
 
     def __init__(self, initial_file: Optional[str] = None, parent=None):
-        super().__init__("🎨 图层套印与印章管理器", parent)
+        super().__init__("图层套印与印章管理器", parent)
         self.resize(720, 520)
         self.worker: Optional[OverlayWorker] = None
         self.last_output_path = ""
@@ -112,7 +112,7 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
         layout.setSpacing(24)
 
         lbl = QLabel("合成模式：")
-        lbl.setStyleSheet("font-weight: 700;")
+        lbl.setObjectName("dialogSubTitle")
         layout.addWidget(lbl)
 
         self.mode_group = QButtonGroup(self)
@@ -178,7 +178,7 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
         vbox.setSpacing(8)
 
         lbl = QLabel("套印范围与重复规则：")
-        lbl.setStyleSheet("font-weight: 700;")
+        lbl.setObjectName("dialogSubTitle")
         vbox.addWidget(lbl)
 
         row = QHBoxLayout()
@@ -246,7 +246,7 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
         layout.setSpacing(12)
 
         self.lbl_status = QLabel("就绪")
-        self.lbl_status.setStyleSheet("color: gray; font-size: 12px;")
+        self.lbl_status.setObjectName("dialogMuted")
         layout.addWidget(self.lbl_status)
         layout.addStretch()
 
@@ -319,7 +319,7 @@ class OverlayUnderlayDialog(FramelessDraggableDialog):
 
         self.btn_execute.setEnabled(False)
         self.btn_cancel.setEnabled(False)
-        self.lbl_status.setText("⏳ 正在合成图层...")
+        self.lbl_status.setText("正在合成图层...")
         self.btn_open_target.setVisible(False)
 
         self.worker = OverlayWorker(

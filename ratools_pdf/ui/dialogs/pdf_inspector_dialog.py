@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.services.output_paths import path_key
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
+from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
 
 
 class DiagnosticWorker(QThread):
@@ -63,7 +63,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
     """PDF 深度诊断与结构探针面板。"""
 
     def __init__(self, initial_file: Optional[str] = None, parent=None):
-        super().__init__("🔍 PDF 深度诊断与受损修复", parent)
+        super().__init__("PDF 深度诊断与受损修复", parent)
         self.resize(880, 640)
         self.setMinimumSize(800, 560)
         self.worker: Optional[DiagnosticWorker] = None
@@ -88,7 +88,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         layout.setSpacing(10)
 
         lbl = QLabel("目标文件：")
-        lbl.setStyleSheet("font-weight: 700;")
+        lbl.setObjectName("dialogSubTitle")
         self.txt_path = QLineEdit()
         self.txt_path.setObjectName("settingsPathEdit")
         self.txt_path.setFixedHeight(34)
@@ -124,9 +124,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         v1.setSpacing(8)
 
         self.lbl_check_badge = QLabel("等待诊断...")
-        self.lbl_check_badge.setStyleSheet(
-            "font-size: 14px; font-weight: bold; padding: 6px 12px; background: #E5E7EB; border-radius: 6px;"
-        )
+        self._set_badge(self.lbl_check_badge, "等待诊断...", "neutral")
         v1.addWidget(self.lbl_check_badge)
 
         self.txt_check_log = QPlainTextEdit()
@@ -142,9 +140,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         v2.setSpacing(8)
 
         self.lbl_enc_badge = QLabel("等待诊断...")
-        self.lbl_enc_badge.setStyleSheet(
-            "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #E5E7EB; border-radius: 6px;"
-        )
+        self._set_badge(self.lbl_enc_badge, "等待诊断...", "neutral")
         v2.addWidget(self.lbl_enc_badge)
 
         self.txt_enc_log = QPlainTextEdit()
@@ -160,9 +156,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         v3.setSpacing(8)
 
         self.lbl_lin_badge = QLabel("等待诊断...")
-        self.lbl_lin_badge.setStyleSheet(
-            "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #E5E7EB; border-radius: 6px;"
-        )
+        self._set_badge(self.lbl_lin_badge, "等待诊断...", "neutral")
         v3.addWidget(self.lbl_lin_badge)
 
         self.txt_lin_log = QPlainTextEdit()
@@ -179,7 +173,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
 
         h_json_tools = QHBoxLayout()
         self.lbl_json_info = QLabel("JSON AST 语法树：")
-        self.lbl_json_info.setStyleSheet("font-weight: 700;")
+        self.lbl_json_info.setObjectName("dialogSubTitle")
         self.btn_export_json = QPushButton("导出 JSON 文件...")
         self.btn_export_json.setObjectName("dialogSecondaryBtn")
         self.btn_export_json.setFixedHeight(30)
@@ -210,15 +204,15 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         v_rep.setContentsMargins(16, 16, 16, 16)
         v_rep.setSpacing(12)
 
-        lbl_rep_title = QLabel("🛠️ PDF 受损抢救与交叉引用表 (XRef) 重建")
-        lbl_rep_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #1E3A8A;")
+        lbl_rep_title = QLabel("PDF 受损抢救与交叉引用表 (XRef) 重建")
+        lbl_rep_title.setObjectName("dialogHeading")
         lbl_rep_desc = QLabel(
             "当 PDF 文档在 Adobe Acrobat 或其他阅读器中打不开、提示文件损坏、缺少 EOF 标志、\n"
             "或交叉引用表错位时，可通过 qpdf 底层容错解析引擎深度扫描全部内部对象流，\n"
             "强制修复并重新生成标准的 XRef 表与 Trailer 结构。"
         )
         lbl_rep_desc.setWordWrap(True)
-        lbl_rep_desc.setStyleSheet("color: #4B5563; line-height: 140%;")
+        lbl_rep_desc.setObjectName("dialogBody")
 
         self.btn_do_repair = QPushButton("尝试强制修复并另存为...")
         self.btn_do_repair.setObjectName("dialogPrimaryBtn")
@@ -235,6 +229,13 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self.tabs.addTab(self.tab_repair, "受损抢救修复")
         self.content_layout.addWidget(self.tabs, stretch=1)
 
+    def _set_badge(self, badge: QLabel, text: str, variant: str = "neutral"):
+        badge.setText(text)
+        badge.setObjectName("statusBadge")
+        badge.setProperty("variant", variant)
+        badge.style().unpolish(badge)
+        badge.style().polish(badge)
+
     def _build_footer(self):
         footer = QWidget()
         layout = QHBoxLayout(footer)
@@ -242,7 +243,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         layout.setSpacing(12)
 
         self.lbl_status = QLabel("就绪")
-        self.lbl_status.setStyleSheet("color: gray; font-size: 12px;")
+        self.lbl_status.setObjectName("dialogMuted")
         layout.addWidget(self.lbl_status)
         layout.addStretch()
 
@@ -270,7 +271,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self.txt_path.setText(file_path)
         self._invalidate_diagnosis()
         self.btn_diagnose.setEnabled(False)
-        self.lbl_status.setText("⏳ 正在进行深度诊断与 AST 解析...")
+        self.lbl_status.setText("正在进行深度诊断与 AST 解析...")
 
         worker = None
         try:
@@ -298,7 +299,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         for widget in (self.txt_check_log, self.txt_enc_log, self.txt_lin_log):
             widget.clear()
         for badge in (self.lbl_check_badge, self.lbl_enc_badge, self.lbl_lin_badge):
-            badge.setText("尚未诊断")
+            self._set_badge(badge, "尚未诊断", "neutral")
         self.lbl_status.setText("文件已更改，请开始诊断")
 
     def _on_diagnosis_thread_finished(self):
@@ -320,7 +321,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         worker.result_received = True
         if data.get("error"):
             self.lbl_status.setText("诊断失败，请重试")
-            self.lbl_check_badge.setText("诊断失败")
+            self._set_badge(self.lbl_check_badge, "诊断失败", "danger")
             self.txt_check_log.setPlainText(str(data["error"]))
             return
         self.lbl_status.setText("诊断完成")
@@ -331,48 +332,27 @@ class PdfInspectorDialog(FramelessDraggableDialog):
         self.txt_check_log.setPlainText(output_txt)
 
         if check_res.get("is_healthy"):
-            self.lbl_check_badge.setText("🟢 语法完整性：正常无损 (0 错误, 0 警告)")
-            self.lbl_check_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 6px 12px; background: #DCFCE7; color: #166534; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_check_badge, "语法完整性：正常无损 (0 错误, 0 警告)", "success")
         elif check_res.get("has_warnings"):
-            self.lbl_check_badge.setText("🟡 语法完整性：存在非标警告 (可正常渲染)")
-            self.lbl_check_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 6px 12px; background: #FEF9C3; color: #854D0E; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_check_badge, "语法完整性：存在非标警告 (可正常渲染)", "warning")
         else:
-            self.lbl_check_badge.setText("🔴 语法完整性：检测到结构损坏或语法错误")
-            self.lbl_check_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 6px 12px; background: #FEE2E2; color: #991B1B; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_check_badge, "语法完整性：检测到结构损坏或语法错误", "danger")
 
         # 2. 加密透视
         enc_txt = data.get("encryption", "")
         self.txt_enc_log.setPlainText(enc_txt)
         if "file is not encrypted" in enc_txt.lower():
-            self.lbl_enc_badge.setText("🔓 该文档未加密 (公开无限制)")
-            self.lbl_enc_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #DCFCE7; color: #166534; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_enc_badge, "该文档未加密 (公开无限制)", "success")
         else:
-            self.lbl_enc_badge.setText("🔒 该文档已加密或包含权限限制")
-            self.lbl_enc_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #FEF3C7; color: #92400E; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_enc_badge, "该文档已加密或包含权限限制", "warning")
 
         # 3. 线性化
         lin_txt = data.get("linearization", "")
         self.txt_lin_log.setPlainText(lin_txt)
         if "linearization data" in lin_txt.lower() and "not linearized" not in lin_txt.lower():
-            self.lbl_lin_badge.setText("⚡ 已启用 Web 快速视图 (支持流式边下边看)")
-            self.lbl_lin_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #DCFCE7; color: #166534; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_lin_badge, "已启用 Web 快速视图 (支持流式边下边看)", "success")
         else:
-            self.lbl_lin_badge.setText("⏳ 未线性化 (流式网络加载需下载全文件)")
-            self.lbl_lin_badge.setStyleSheet(
-                "font-size: 13px; font-weight: bold; padding: 4px 10px; background: #F3F4F6; color: #4B5563; border-radius: 6px;"
-            )
+            self._set_badge(self.lbl_lin_badge, "未线性化 (流式网络加载需下载全文件)", "neutral")
 
         # 4. JSON AST 树
         self.current_json_ast = data.get("json_ast")

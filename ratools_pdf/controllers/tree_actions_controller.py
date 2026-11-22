@@ -6,6 +6,8 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMenu
 
 from ratools_pdf.services import pdf_inspector, system_shell
+from ratools_pdf.ui import icons
+from ratools_pdf.ui.theme import active_palette
 
 
 class TreeActionsController(QObject):
@@ -22,21 +24,33 @@ class TreeActionsController(QObject):
 
         # 菜单样式由应用级中央 QSS（theme.py 的 QMenu 段）提供，明暗主题自动适配
         menu = QMenu(view.tree)
+        pal = active_palette()
 
-        action_remove = menu.addAction("🗑️ 移除选中项")
+        action_remove = menu.addAction(
+            icons.svg_icon("trash", pal.danger_text, size=14), "移除选中项"
+        )
 
         # 只有在选中单个文件/文件夹时，才允许执行详情查看和定位
         is_single_selection = len(selected_items) == 1
         target_path = selected_items[0].text(1) if is_single_selection else ""
 
-        action_locate = menu.addAction("🔍 定位到文件位置")
+        action_locate = menu.addAction(
+            icons.svg_icon("locate", pal.text_body, size=14, disabled_color=pal.text_faint),
+            "定位到文件位置",
+        )
         action_locate.setEnabled(is_single_selection)
 
-        action_details = menu.addAction("📄 查看文件详情...")
+        action_details = menu.addAction(
+            icons.svg_icon("file_text", pal.text_body, size=14, disabled_color=pal.text_faint),
+            "查看文件详情...",
+        )
         action_details.setEnabled(is_single_selection)
 
         menu.addSeparator()
-        action_security = menu.addAction("🔒 安全中心 (加解密)...")
+        action_security = menu.addAction(
+            icons.svg_icon("lock", pal.text_body, size=14, disabled_color=pal.text_faint),
+            "安全中心 (加解密)...",
+        )
         action_security.setEnabled(is_single_selection)
 
         # 暂时隐藏的入口项（保留引用与分支供后续启用）
