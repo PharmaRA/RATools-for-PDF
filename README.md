@@ -4,6 +4,8 @@
 
 项目基于 `PySide6` 构建图形界面，基于 `PyMuPDF` 实现 PDF 底层处理，并使用 `qpdf` 完成版本转换、线性化与权限限制解除等结构级优化。项目源码采用 `GNU AGPL v3`，第三方组件声明见 `THIRD_PARTY_NOTICES.md`。
 
+当前源码版本：`v0.8.2`。本版包含 Win11 Fluent 风格界面、批处理复核与审计流程，以及 Nuitka 发布 ZIP 精简；完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ![RATools-for-PDF 主界面](docs/assets/screenshots/main-window.png)
 
 ## 项目导航
@@ -55,7 +57,7 @@
 - PDF 版本转换
 - 启用线性化（快速网页浏览）
 
-密码和权限操作使用顶部“安全中心”，不属于主界面的批量规则；见下文“安全中心与隐藏工作台”。
+密码和权限操作使用主窗口的“安全中心”，不属于主界面的批量规则；见下文“安全中心与隐藏工作台”。
 
 ### 3. 书签管理
 
@@ -152,13 +154,13 @@
 
 ## 安全中心与隐藏工作台
 
-从主窗口顶部点击“安全中心”：
+从主窗口打开“安全中心”：
 
 - “PDF 加密与权限保护”：设置 AES 加密、打开密码、权限密码和打印/编辑等权限。
 - “PDF 解密与权限脱壳”：添加文件，选择新输出目录；仅有权限限制且能正常打开的 PDF 可尝试免密处理，需要打开密码的文件须勾选“包含已知打开/权限密码”并输入已知密码。程序不破解未知密码。解锁后再将输出加入主队列进行预检或规则处理。
 - “解除数字签名限制”和“移除表单字典”会改变文档。保留印章或签字外观不等于数字签名的密码学有效性、身份或信任链仍有效；应保留签名原件并另行验证。
 
-页面装配、图层套印和深度诊断保留后端/对话框实现，但当前普通界面入口隐藏；顶部按钮未加入可见导航，“文档检测”也未挂载深度诊断按钮。没有面向用户的开启开关，不将这些工作台列为可直接使用的稳定桌面功能。具体边界见[能力矩阵](docs/capabilities.md)。
+页面装配、图层套印和深度诊断保留后端/对话框实现，但当前普通界面入口隐藏；相关入口未加入可见导航，“文档检测”也未挂载深度诊断按钮。没有面向用户的开启开关，不将这些工作台列为可直接使用的稳定桌面功能。具体边界见[能力矩阵](docs/capabilities.md)。
 
 ## 预检与建议处理
 
@@ -251,7 +253,9 @@ RATools-for-PDF/
 
 ### 1. 使用 GitHub Release（推荐）
 
-如果你只是使用本工具，建议优先下载 GitHub Releases 中提供的 Windows 打包版本。
+如果你只是使用本工具，建议优先从 [GitHub Releases](https://github.com/PharmaRA/RATools-for-PDF/releases) 下载 Windows 打包版本。
+
+`v0.8.2` 对应的发布包名称为 `RATools-for-PDF_v0.8.2.zip` 和 `RATools-for-PDF-NoUpdate_v0.8.2.zip`；实际发布状态以 GitHub Releases 为准。
 
 使用方式：
 
@@ -308,6 +312,14 @@ python main_no_update.py
 
 ## Windows 构建与成品验证
 
+### GitHub 发布包（Nuitka）
+
+GitHub Actions 使用 `build_nuitka.bat` 同时构建标准版和 `NoUpdate` 版。推送 `v*` 版本标签或手动触发发布工作流后，从 `ratools_pdf/config/version.py` 读取版本，生成两份 ZIP，并将 CHANGELOG 中对应版本的小节写入 Release。
+
+发布构建固定 `PyMuPDF 1.28.2`；装配时保留 PyMuPDF 代码、配置与原生库，排除当前功能未使用的可选 layout ONNX 权重和字节码缓存。ZIP 使用标准 Deflate 9 级压缩，并逐文件校验保留内容。新版本的实际成品大小和运行验证以本次构建结果为准，不将历史 ZIP 重装配结果视为新成品验收。
+
+### 本机构建与验证（受保护的 PyInstaller 入口）
+
 当前有清理保护的本机构建入口、Windows CPython 3.11 精确 wheel 锁、代理、来源/SBOM/许可证/文件哈希和统一成品自检见 [Windows 构建说明](docs/build-verification.md)。从项目根目录运行，应用与构建依赖会按锁安装到本次独立 target：
 
 ```powershell
@@ -316,7 +328,7 @@ python -B scripts/build_pyinstaller_safely.py --install-dependency
 
 `build_pyinstaller.bat` 委托同一入口，默认生成更新版与 NoUpdate 版；构建开始前必须出现 `BUILD_GUARD parent=blocked isolated_child=blocked`。每次构建使用独立的 `build_pyinstaller/<任务ID>/` 与 `dist/<任务ID>/`，以最终 `BUILD_OUTPUT=` 和其中的 `build.json` 定位产物，不再依赖旧的固定版本目录示例。
 
-历史版本中的 Nuitka 发布记录保留在 CHANGELOG；当前操作以以上有保护的路径为准。PD10 的源码与实际正常版/NoUpdate EXE 使用同一 `--verify-release NEWDIR` 接口，隔离设置并检查 GUI 初始化/关闭、合成核心 PDF、真实 qpdf、实际图片压缩和更新边界。该 smoke 不覆盖全部 GUI/规则、实时在线更新或真实业务/外部阅读器资格；当前本机成品证据见构建说明，历史下载包不会自动包含本轮源码改动。可选签名入口默认 unsigned；未提供证书时不声称已签名。锁定 wheel 也不代表本地 Windows 构建完全隔离或位级可复现。
+本机 PyInstaller 验证与 GitHub Nuitka 发布属于不同构建路径，应分别记录来源和验收结果。PD10 的源码与实际正常版/NoUpdate EXE 使用同一 `--verify-release NEWDIR` 接口，隔离设置并检查 GUI 初始化/关闭、合成核心 PDF、真实 qpdf、实际图片压缩和更新边界。该 smoke 不覆盖全部 GUI/规则、实时在线更新或真实业务/外部阅读器资格；当前本机成品证据见构建说明，历史下载包不会自动包含本轮源码改动。可选签名入口默认 unsigned；未提供证书时不声称已签名。锁定 wheel 也不代表本地 Windows 构建完全隔离或位级可复现。
 
 ## qpdf 说明
 
