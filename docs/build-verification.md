@@ -73,6 +73,22 @@ python -B scripts/sign_release.py 'C:\path\to\app.exe' --certificate-env RATOOLS
 
 软件分层回归入口和资格边界见[测试说明](testing.md)、[资格矩阵](qualification/README.md)；当前成品实测路径与结论随 PD10 任务报告更新，不能由源码通过推定 EXE 已通过。
 
+## Nuitka 发布 ZIP 的体积控制
+
+GitHub 的 Nuitka 发布工作流使用 `requirements-nuitka.constraints.txt` 固定 PyMuPDF 版本。该约束与现有 Windows 发布锁中的 PyMuPDF 版本一致；开发环境继续使用 `requirements.txt`。此约束不等同于锁定全部 Nuitka 编译依赖或核验 wheel 哈希。
+
+`build_nuitka.bat` 通过 `scripts/package_nuitka_release.py stage-pymupdf` 装配运行包：保留 Python 模块、原生库和配置，只排除 `pymupdf/layout/resources/onnx/*.onnx` 与包内 `__pycache__`。当前处理器及其直接 PDF 依赖未使用 layout 模型；PyMuPDF 核心初始化延迟导入 layout。如以后启用相应分析功能，应重新审查这项排除规则。旧输出和冲突插件只通过已校验路径的回收站操作清理，回收失败即停止。
+
+工作流用同一脚本的 `zip` 子命令生成标准 Deflate ZIP，压缩级别为 9，逐文件回读并比较 SHA-256；输出路径必须尚不存在。也可对既有 Nuitka ZIP 使用 `repack` 验证缩包，保留 EXE/DLL 等剩余文件的原始字节：
+
+```powershell
+python -B scripts/package_nuitka_release.py zip --source dist/RATools-for-PDF_v0.8.1 --output RATools-for-PDF_v0.8.1.zip
+python -B scripts/package_nuitka_release.py repack --source original.zip --output optimized.zip --report optimized-report.json
+python -B scripts/run_tests_safely.py test_nuitka_packaging.py --layer integration
+```
+
+成功操作不会留下部分 ZIP；失败时独立命名的 `.partial` 文件保留用于诊断。重打包校验通过不代表重新执行了 Nuitka 编译，仍需针对实际解压后的 EXE 执行上述发布自检。
+
 
 ## 2026-11-10 本机最终证据
 
@@ -88,3 +104,18 @@ python -B scripts/sign_release.py 'C:\path\to\app.exe' --certificate-env RATOOLS
 最终软件回归 **575/575**，180.985 秒，unit 11 + integration 564，qualification not_selected。两个成品都含实际 smoke 报告、能力概要、软件分层摘要和明确的资格未运行说明；补充后各 296 个文件的完整哈希再次通过，EXE 字节不变。未执行正式签名，当前都是 unsigned。
 
 本机机器证据位于 `backups/product-roadmap-20261109/PD10/`：`release-evidence-summary.json`、`artifact-smoke-summary.json`、`source-release-summary.json`、`build-final-4.log`、`full-release-final.log`。两个 EXE 的原始报告分别位于 `release-normal-final/release-verification.json` 与 `release-no-update-final/release-verification.json`。交付记录见 `.superpowers/sdd/product-development/task-10-report.md`；这些本机路径不表示已远程发版。
+
+## 2026-11-23 Nuitka ZIP 缩包验证
+
+以 GitHub v0.8.1 的实际标准版和 NoUpdate ZIP 为输入，保留所有剩余文件的原始字节，仅排除 16 个 layout ONNX 权重文件及 PyMuPDF 字节码缓存，再使用标准 Deflate 9 压缩。每包 231 个保留文件均经过回读 SHA-256 校验，两个重打包命令都 exit 0。
+
+| 变体 | 原 ZIP 字节数 | 新 ZIP 字节数 | 新体积 | 缩减 |
+| --- | ---: | ---: | ---: | ---: |
+| standard | 108589995 | 62974602 | 60.06 MiB | 42.01% |
+| no-update | 108486022 | 62870792 | 59.96 MiB | 42.05% |
+
+成品位于 `dist/zip-size-20261123-adadeb91/`，保留原有版本文件名。原始 ZIP、配置备份及全部验证日志位于 `backups/zip-size-20261123-adadeb91/`；体积和文件校验明细见 `standard-repack.json`、`no-update-repack.json`。9 项定向打包测试通过，日志为 `nuitka-packaging-tests.log`。
+
+实际 ZIP 中的 PyMuPDF 为 2.1。使用同一装配脚本复制缩包后的实际 PyMuPDF 运行库，并加载包内 qpdf，在本机 Python 3.15 与宿主 Qt 下执行当前源码自检：standard、no-update 都 exit 0、ok=true，gui/core_pdf/qpdf/image_compression/update_boundary 五项 passed、Python 网络尝试 0。报告分别位于 `pruned-source-standard/release-verification.json`、`pruned-source-no-update/release-verification.json`。Nuitka 工作流约束采用现有已审查发布锁的 PyMuPDF 1.28.2；该版本也通过本机源码五项自检，见 `pinned-source-check/release-verification.json`。
+
+v0.8.1 tag 的旧程序入口没有 `--verify-release` 分支；两次实际 EXE 参数检查在 45 秒后结束本次测试进程，没有生成报告，不能记作 EXE 发布自检通过。本次未重新执行 Nuitka 编译；上述源码/实际运行库验证和逐文件字节校验不替代完整重编译或真实业务资格验收。

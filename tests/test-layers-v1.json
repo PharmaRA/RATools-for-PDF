@@ -25,6 +25,7 @@
       "test_image_transparency.py",
       "test_io_busy.py",
       "test_log_view_model.py",
+      "test_nuitka_packaging.py",
       "test_output_collisions.py",
       "test_package_structure.py",
       "test_page_assembly.py",

@@ -25,12 +25,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements.txt -c requirements-nuitka.constraints.txt
         pip install -U nuitka ordered-set zstandard
 
     - name: Run regression tests
       run: |
-        python -m unittest discover -s tests -p "test_*.py" -v
+        python -X utf8 -X faulthandler -B scripts/run_tests_safely.py
 
     - name: Run Build Script (Nuitka)
       shell: cmd
@@ -48,10 +48,12 @@ jobs:
         python scripts/extract_release_notes.py --version %APP_VERSION_STR% --changelog CHANGELOG.md --output release_notes.md
 
     - name: Zip Artifacts
-      # Windows 运行器默认使用 PowerShell，直接调用 Compress-Archive 进行压缩
+      # 标准 Deflate 最高压缩级别，并逐文件验证 ZIP 内的保留内容。
       run: |
-        Compress-Archive -Path "dist\RATools-for-PDF_v${env:APP_VERSION_STR}" -DestinationPath "RATools-for-PDF_v${env:APP_VERSION_STR}.zip"
-        Compress-Archive -Path "dist\RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}" -DestinationPath "RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}.zip"
+        python -B scripts/package_nuitka_release.py zip --source "dist\RATools-for-PDF_v${env:APP_VERSION_STR}" --output "RATools-for-PDF_v${env:APP_VERSION_STR}.zip"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        python -B scripts/package_nuitka_release.py zip --source "dist\RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}" --output "RATools-for-PDF-NoUpdate_v${env:APP_VERSION_STR}.zip"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Create Release and Upload Assets
       uses: softprops/action-gh-release@v2

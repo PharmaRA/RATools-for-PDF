@@ -1,0 +1,3 @@
+# PyMuPDF release version shared with requirements-release-win311.lock.json.
+# Keep requirements.txt as the development dependency entry point.
+PyMuPDF==1.28.2

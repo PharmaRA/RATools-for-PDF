@@ -106,8 +106,10 @@ set "VERSIONED_DIR_NAME=%EXE_NAME%_v%APP_VERSION_STR%"
 set "RAW_OUTPUT_DIR=%DIST_DIR%\%ENTRY_BASENAME%.dist"
 set "VERSIONED_OUTPUT_DIR=%DIST_DIR%\%VERSIONED_DIR_NAME%"
 
-if exist "%RAW_OUTPUT_DIR%" rmdir /s /q "%RAW_OUTPUT_DIR%"
-if exist "%VERSIONED_OUTPUT_DIR%" rmdir /s /q "%VERSIONED_OUTPUT_DIR%"
+python -B "%ROOT_DIR%scripts\package_nuitka_release.py" recycle --path "%RAW_OUTPUT_DIR%" --owned-root "%DIST_DIR%"
+if errorlevel 1 exit /b 1
+python -B "%ROOT_DIR%scripts\package_nuitka_release.py" recycle --path "%VERSIONED_OUTPUT_DIR%" --owned-root "%DIST_DIR%"
+if errorlevel 1 exit /b 1
 
 echo.
 echo [INFO] Building %VERSIONED_DIR_NAME% with Nuitka standalone...
@@ -178,8 +180,8 @@ if not exist "%RAW_OUTPUT_DIR%\plugins\qpdf\qpdf.exe" (
 
 if defined PYMUPDF_DIR (
     if exist "%PYMUPDF_DIR%" (
-        echo [INFO] Copying PyMuPDF runtime package to %RAW_OUTPUT_DIR%\pymupdf...
-        xcopy /E /I /Y /Q "%PYMUPDF_DIR%" "%RAW_OUTPUT_DIR%\pymupdf" >nul
+        echo [INFO] Staging PyMuPDF runtime without optional ONNX models and bytecode caches...
+        python -B "%ROOT_DIR%scripts\package_nuitka_release.py" stage-pymupdf --source "%PYMUPDF_DIR%" --destination "%RAW_OUTPUT_DIR%\pymupdf" --owned-root "%RAW_OUTPUT_DIR%"
         if errorlevel 1 (
             echo [ERROR] Failed to copy PyMuPDF runtime package.
             exit /b 1
@@ -197,7 +199,8 @@ if defined PYTHON3_DLL (
 set "OPENSSL_PLUGIN=%RAW_OUTPUT_DIR%\PySide6\qt-plugins\tls\qopensslbackend.dll"
 if exist "%OPENSSL_PLUGIN%" (
     echo [INFO] Removing Qt OpenSSL TLS plugin for %EXE_NAME% to avoid startup DLL conflicts...
-    del /q "%OPENSSL_PLUGIN%"
+    python -B "%ROOT_DIR%scripts\package_nuitka_release.py" recycle --path "%OPENSSL_PLUGIN%" --owned-root "%RAW_OUTPUT_DIR%"
+    if errorlevel 1 exit /b 1
 )
 
 echo [INFO] Renaming %RAW_OUTPUT_DIR% to %VERSIONED_DIR_NAME%...
@@ -222,8 +225,10 @@ exit /b 0
 
 :build_finish
 echo.
-if exist "%DIST_DIR%\main.build" rmdir /s /q "%DIST_DIR%\main.build"
-if exist "%DIST_DIR%\main_no_update.build" rmdir /s /q "%DIST_DIR%\main_no_update.build"
+python -B "%ROOT_DIR%scripts\package_nuitka_release.py" recycle --path "%DIST_DIR%\main.build" --owned-root "%DIST_DIR%"
+if errorlevel 1 exit /b 1
+python -B "%ROOT_DIR%scripts\package_nuitka_release.py" recycle --path "%DIST_DIR%\main_no_update.build" --owned-root "%DIST_DIR%"
+if errorlevel 1 exit /b 1
 echo [OK] Build completed.
 if exist "%DIST_DIR%\RATools-for-PDF_v%APP_VERSION_STR%\RATools-for-PDF.exe" (
     echo [OK] Update-enabled output folder: %DIST_DIR%\RATools-for-PDF_v%APP_VERSION_STR%
