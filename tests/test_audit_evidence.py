@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QWidget
 
+from ratools_pdf.config.version import APP_VERSION_STR
 from ratools_pdf.controllers.log_controller import LogController
 from ratools_pdf.controllers.main_controller import MainController
 from ratools_pdf.controllers.workers import ProcessWorker
@@ -157,7 +158,7 @@ class EvidenceTests(unittest.TestCase):
     def test_new_batch_records_execution_metadata_and_old_batch_stays_unknown(self):
         self.service()
         data = self.read(self.export('current'))
-        self.assertEqual(data['processing_runtime']['application']['version'], '0.8.1')
+        self.assertEqual(data['processing_runtime']['application']['version'], APP_VERSION_STR)
         self.assertTrue(data['processing_runtime']['pymupdf']['version'])
         self.assertEqual(data['processing_runtime']['qpdf']['version'], 'unknown')
         old = copy.deepcopy(self.host.processing_evidence)
