@@ -61,6 +61,27 @@ def install_cleanup_guard(run_dir):
     return stack, failures, recycle
 
 
+def shutdown_test_qt_application():
+    """Release test-owned Qt objects while Python modules are still intact."""
+    # Pure unit tests must not import Qt just to perform cleanup.
+    widgets = sys.modules.get('PySide6.QtWidgets')
+    if widgets is None:
+        return
+    app = widgets.QApplication.instance()
+    if app is None:
+        return
+    print('QT_CLEANUP starting', flush=True)
+    from PySide6.QtCore import QCoreApplication, QEvent
+    # Tests do not run app.exec(); deleteLater() therefore needs an explicit
+    # drain before QApplication tears down its platform resources.
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    print('QT_CLEANUP widgets_released', flush=True)
+    app.shutdown()
+    print('QT_CLEANUP completed', flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pattern', nargs='?', default='test_*.py')
@@ -113,6 +134,11 @@ def main(argv=None):
                 print(f'Classification/selection/qualification error: {exc}', file=sys.stderr)
                 code = 2
     finally:
+        try:
+            shutdown_test_qt_application()
+        except Exception as exc:
+            failures.append(type(exc).__name__)
+            print(f'Qt cleanup failed: {type(exc).__name__}: {exc}', file=sys.stderr, flush=True)
         tempfile.tempdir = previous_temp
         os.environ.pop('RATOOLS_SAFE_TEST_ROOT', None)
         recycle(run_dir)

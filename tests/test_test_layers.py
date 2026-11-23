@@ -62,6 +62,32 @@ class TestLayerRunnerTests(unittest.TestCase):
             self.assertEqual(positional.returncode, 0, positional.stdout + positional.stderr)
             self.assertEqual(self.summary(positional)["totals"]["passed"], 1)
 
+    def test_qt_objects_are_released_before_interpreter_exit_on_success_and_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tests, manifest = self.fixture(Path(directory))
+            for fail in (False, True):
+                with self.subTest(fail=fail):
+                    (tests / "test_native.py").write_text(
+                        "import atexit, unittest\n"
+                        "from PySide6.QtWidgets import QApplication, QWidget\n"
+                        "from shiboken6 import isValid\n"
+                        "app = QApplication.instance() or QApplication([])\n"
+                        "window = QWidget()\n"
+                        "atexit.register(lambda: print('QT_WINDOW_ALIVE_AT_EXIT=' + str(isValid(window)), flush=True))\n"
+                        "class Native(unittest.TestCase):\n"
+                        " def test_window(self):\n"
+                        "  window.show()\n"
+                        "  self.assertTrue(window.isVisible())\n"
+                        + ("  self.fail('EXPECTED_TEST_FAILURE')\n" if fail else ""),
+                        encoding="utf-8")
+                    result = self.run_cli("--layer", "integration", "--tests-dir", tests,
+                                          "--classification", manifest)
+                    output = result.stdout + result.stderr
+                    self.assertEqual(result.returncode, 1 if fail else 0, output)
+                    self.assertIn("QT_WINDOW_ALIVE_AT_EXIT=False", output)
+                    self.assertNotIn("QT_WINDOW_ALIVE_AT_EXIT=True", output)
+                    self.assertEqual(self.summary(result)["totals"]["failed"], int(fail))
+
     def test_missing_and_duplicate_classification_rejected_before_any_test_runs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
