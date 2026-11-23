@@ -3,7 +3,7 @@
 本文收集 RATools-for-PDF 的常见问题、已知限制和维护边界。  
 This document collects common questions, known limitations, and maintenance boundaries for RATools-for-PDF.
 
-当前各功能的入口、软件验证与成品/真实资格状态见[能力矩阵](docs/capabilities.md)；具体操作指南见[文档首页](docs/README.md)。
+安装、逐项功能和操作步骤见[完整使用手册](docs/manual/index.md)，具体报错可先查[使用排错](docs/manual/faq.md)。当前软件验证与成品/真实资格状态见[能力矩阵](docs/capabilities.md)；技术专题见[文档首页](docs/README.md)。
 
 ## 使用与安装
 
@@ -79,7 +79,7 @@ This document collects common questions, known limitations, and maintenance boun
 
 ### 自动化通过是否意味着发布包或真实业务资格通过？
 
-不意味着。自动化、Windows 成品与真实来源/阅读器/法规人工复核分别记录。合成 PDF、mock 和结构检查不替代 Acrobat、Word、LibreOffice、扫描仪、打印驱动的授权样本或独立阅读器证据；缺材料保留 pending。见[资格矩阵](docs/qualification/README.md)和[分层测试](docs/testing.md)。PD09 没有构建当前成品，PD10 仍待实际实施与验证。
+不意味着。自动化、Windows 成品与真实来源/阅读器/法规人工复核分别记录。合成 PDF、mock 和结构检查不替代 Acrobat、Word、LibreOffice、扫描仪、打印驱动的授权样本或独立阅读器证据；缺材料保留 pending。见[资格矩阵](docs/qualification/README.md)、[分层测试](docs/testing.md)和[构建验证记录](docs/build-verification.md)。这些记录需按对应版本与实际验证范围理解，不能视为全部当前功能已通过真实业务验收。
 
 ## 数据导入导出
 

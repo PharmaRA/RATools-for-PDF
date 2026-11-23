@@ -1,0 +1,48 @@
+[
+  { "slug": "manual", "label": "手册首页" },
+  {
+    "label": "安装与入门",
+    "items": [
+      { "slug": "manual/installation", "label": "安装与更新" },
+      { "slug": "manual/quick-start", "label": "第一次处理 PDF" },
+      { "slug": "manual/interface", "label": "认识主窗口" },
+      { "slug": "manual/files-and-output", "label": "文件与保存规则" },
+      { "slug": "manual/precheck", "label": "预检与文档检测" }
+    ]
+  },
+  {
+    "label": "逐项功能",
+    "items": [
+      { "slug": "manual/initial-view", "label": "初始视图与文档属性" },
+      { "slug": "manual/pages-fonts", "label": "页面与字体标准化" },
+      { "slug": "manual/bookmarks", "label": "书签管理" },
+      { "slug": "manual/links", "label": "超链接处理" },
+      { "slug": "manual/cleanup", "label": "内容清理" },
+      { "slug": "manual/compression", "label": "压缩、版本与文件名" }
+    ]
+  },
+  {
+    "label": "方案与独立工具",
+    "items": [
+      { "slug": "manual/profiles", "label": "预设与配置管理" },
+      { "slug": "manual/data-exchange", "label": "书签与链接数据交换" },
+      { "slug": "manual/security", "label": "安全中心" }
+    ]
+  },
+  {
+    "label": "执行与复核",
+    "items": [
+      { "slug": "manual/processing", "label": "计划、停止、跳过与性能" },
+      { "slug": "manual/logs", "label": "日志、结果与审计包" },
+      { "slug": "manual/workflows", "label": "常见工作流程" }
+    ]
+  },
+  {
+    "label": "查阅与排错",
+    "items": [
+      { "slug": "manual/faq", "label": "常见问题" },
+      { "slug": "manual/glossary", "label": "术语表" },
+      { "slug": "manual/feature-index", "label": "全部功能索引" }
+    ]
+  }
+]

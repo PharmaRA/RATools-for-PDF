@@ -1,0 +1,76 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import sidebar from '../data/sidebar.json';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const manual = (page = '') => `${base}/manual/${page ? `${page}/` : ''}`;
+const features = [
+  { number: '01', title: '先检查，再处理', text: '读懂预检结果、字体风险和失效引用，确认本批文件需要哪些操作。', page: 'precheck', tag: '只读检查' },
+  { number: '02', title: '统一页面与阅读体验', text: '从首页打开到 A4 / Letter，理解尺寸、旋转、字体与初始视图的区别。', page: 'pages-fonts', tag: '页面与字体' },
+  { number: '03', title: '整理书签与链接', text: '调整导航和链接样式，用 CSV、JSON 交换数据，并核对真正的跳转目标。', page: 'data-exchange', tag: '文档导航' },
+  { number: '04', title: '清理内容，减小体积', text: '按需移除批注和附件，选择结构压缩或图像降采样，保留需要的内容。', page: 'compression', tag: '清理与压缩' },
+  { number: '05', title: '处理密码与权限', text: '设置保护，或用已知密码生成解锁副本；分清签名外观和签名有效性。', page: 'security', tag: '安全中心' },
+  { number: '06', title: '复核结果，留下记录', text: '阅读实际变化与未验证事项，保存处理日志、配置和最近批次审计包。', page: 'logs', tag: '结果与归档' },
+];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'RATools for PDF 使用手册',
+    description: '从第一份 PDF 到完整批次：安装、预检、42 条处理规则、独立工具与结果复核的中文使用手册。',
+    template: 'splash',
+    pagefind: true,
+  }}
+  hasSidebar={false}
+>
+  <div class="home-shell not-content">
+    <section class="home-hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span aria-hidden="true"></span>RATOOLS / PDF 使用手册</p>
+        <h2 id="hero-title">把每一份 PDF，<br />处理得<span class="accent-text">清楚有据。</span></h2>
+        <p class="hero-lede">从预检到输出复核，了解每个按钮会做什么、文件保存在哪里，以及哪些结果仍需要你确认。</p>
+        <div class="hero-actions">
+          <a class="action-primary" href={manual('quick-start')}>开始第一次处理 <span aria-hidden="true">→</span></a>
+          <a class="action-secondary" href={manual('feature-index')}>查找全部功能</a>
+        </div>
+        <dl class="hero-facts">
+          <div><dt>7</dt><dd>功能模块</dd></div>
+          <div><dt>42</dt><dd>处理规则</dd></div>
+          <div><dt>21</dt><dd>手册章节</dd></div>
+        </dl>
+      </div>
+      <aside class="workflow-card" aria-label="典型处理流程">
+        <div class="workflow-head"><span class="document-mark" aria-hidden="true">PDF</span><div><strong>一次清晰的处理流程</strong><p>文件 · 规则 · 结果</p></div></div>
+        <ol class="workflow-steps">
+          <li><span class="step-number">01</span><div><strong>添加工作副本</strong><p>核对队列范围，保留输入原件。</p></div></li>
+          <li><span class="step-number">02</span><div><strong>预检并选择规则</strong><p>理解建议，审阅本轮执行计划。</p></div></li>
+          <li><span class="step-number">03</span><div><strong>另存处理结果</strong><p>按文件状态确认实际输出。</p></div></li>
+          <li><span class="step-number">04</span><div><strong>复核并保存记录</strong><p>检查页面与导航，归档本批证据。</p></div></li>
+        </ol>
+        <a class="workflow-link" href={manual('files-and-output')}>先了解文件与保存规则 <span aria-hidden="true">↗</span></a>
+      </aside>
+    </section>
+
+    <section class="home-section" aria-labelledby="tasks-title">
+      <div class="section-heading"><p class="eyebrow">按工作查找</p><h2 id="tasks-title">从你要完成的事开始</h2><p>每个章节都说明入口、步骤、处理范围和结果检查。</p></div>
+      <div class="feature-grid">
+        {features.map((feature) => <a class="feature-card" href={manual(feature.page)}>
+          <div class="feature-top"><span class="feature-number">{feature.number}</span><span>{feature.tag}</span></div>
+          <h3>{feature.title}</h3><p>{feature.text}</p><span class="feature-link">阅读操作指南 <span aria-hidden="true">→</span></span>
+        </a>)}
+      </div>
+    </section>
+
+    <section class="start-banner" aria-labelledby="start-title">
+      <div><p class="eyebrow">第一次使用</p><h2 id="start-title">用一份副本，走完完整流程。</h2><p>先安装软件，再完成两条规则的入门练习。熟悉保存位置和结果之后，再扩展到批量任务。</p></div>
+      <div class="start-links"><a href={manual('installation')}>01　安装与更新 <span aria-hidden="true">→</span></a><a href={manual('quick-start')}>02　第一次处理 PDF <span aria-hidden="true">→</span></a><a href={manual('workflows')}>03　常见工作流程 <span aria-hidden="true">→</span></a></div>
+    </section>
+
+    <section class="home-section manual-map" aria-labelledby="map-title">
+      <div class="section-heading"><p class="eyebrow">完整手册</p><h2 id="map-title">需要的细节，都有出处。</h2></div>
+      <div class="map-grid">{sidebar.filter((group) => group.items).map((group) => <div><h3>{group.label}</h3><ul>{group.items?.map((item) => <li><a href={`${base}/${item.slug}/`}>{item.label}</a></li>)}</ul></div>)}</div>
+    </section>
+
+    <footer class="home-footer"><p><strong>RATools for PDF</strong><br />按 v0.8.2 标识的源码编写 · 结构检查与人工复核分别记录</p><div><a href={manual()}>手册首页</a><a href="https://github.com/PharmaRA/RATools-for-PDF/releases">下载软件</a><a href="https://github.com/PharmaRA/RATools-for-PDF/issues">反馈问题</a></div></footer>
+  </div>
+</StarlightPage>

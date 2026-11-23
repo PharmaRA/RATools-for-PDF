@@ -12,3 +12,9 @@ settings.ini
 .claude/
 /.pi
 /backups/
+/website/node_modules/
+/website/.astro/
+/website/.npm-cache/
+/website/dist/
+/website/src/content/docs/manual/
+/website/public/manual-assets/

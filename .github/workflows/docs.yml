@@ -1,0 +1,54 @@
+name: PDF Documentation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/manual/**'
+      - 'docs/assets/**'
+      - 'docs/docs-site.md'
+      - 'website/**'
+      - 'ratools_pdf/config/rules_catalog.py'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/manual/**'
+      - 'docs/assets/**'
+      - 'docs/docs-site.md'
+      - 'website/**'
+      - 'ratools_pdf/config/rules_catalog.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdf-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install locked site dependencies with recycle protection
+        run: node scripts/install-deps.mjs
+      - name: Check and build the portal /pdf/ manual
+        run: npm run build:portal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-manual-preview
+          path: website/dist
+          if-no-files-found: error
+          retention-days: 7

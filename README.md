@@ -6,10 +6,25 @@
 
 当前源码版本：`v0.8.2`。本版包含 Win11 Fluent 风格界面、批处理复核与审计流程，以及 Nuitka 发布 ZIP 精简；完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
+**[下载软件](https://github.com/PharmaRA/RATools-for-PDF/releases) · [完整使用手册](docs/manual/index.md) · [第一次处理 PDF](docs/manual/quick-start.md) · [全部功能索引](docs/manual/feature-index.md)**
+
 ![RATools-for-PDF 主界面](docs/assets/screenshots/main-window.png)
+
+截图来自较早版本，用于展示主要区域；当前按钮和菜单位置见[认识主窗口](docs/manual/interface.md)。
+
+## 开始使用
+
+1. 按[安装与更新](docs/manual/installation.md)完整解压 Windows 发布包，运行对应 EXE。
+2. 添加 PDF 工作副本，保持默认另存，先运行只读预检。
+3. 选择规则或预设，点击“开始处理”，选择输出位置并审阅处理计划。
+4. 打开实际输出复核内容，再按需保存日志及最近批次审计包。
+
+使用手册逐项说明七个模块、42 条规则及独立工具的入口、操作步骤、保存位置和限制。可直接阅读[常见工作流程](docs/manual/workflows.md)，或按问题查阅[排错指南](docs/manual/faq.md)。
 
 ## 项目导航
 
+- 安装、逐项功能与场景教程：[完整使用手册](docs/manual/index.md)
+- 带搜索的手册网站与本地预览：[Starlight 文档站](docs/docs-site.md)
 - 当前入口、稳定状态与验收边界：[能力矩阵](docs/capabilities.md)
 - 按使用目的查找说明：[文档首页](docs/README.md)
 - 使用问题与已知限制：[FAQ.md](FAQ.md)
