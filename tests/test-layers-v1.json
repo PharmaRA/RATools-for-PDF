@@ -56,6 +56,8 @@
       "test_test_layers.py",
       "test_theme.py",
       "test_update_checker.py",
+      "test_watermark_dialog.py",
+      "test_watermarks.py",
       "test_window_lifecycle.py",
       "test_worker_lifecycle.py",
       "test_worker_output_safety.py"

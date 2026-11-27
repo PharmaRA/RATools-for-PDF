@@ -10,6 +10,7 @@
 - [常见工作流程](manual/workflows.md)
 - [使用排错](manual/faq.md)
 - [当前能力、桌面入口与证据边界](capabilities.md)
+- [去除水印：对象选择、预览、页码与另存](manual/watermarks.md)
 - [安装、主窗口操作与安全中心入口](../README.md)
 - [常见问题与已知限制](../FAQ.md)
 - [处理计划预览与输出验证](processing-verification.md)
@@ -33,6 +34,7 @@
 
 ## 计划与审查记录
 
+- [2026-11-27 去水印首版：交付审查、专项验证与限制](reviews/2026-11-27-watermark-v1.md)
 - [功能与开发质量实施计划：十项交付、验收与提交记录](plans/product-development.md)
 - [2026-11-08 代码审查：18 项发现与证据](reviews/2026-11-08-code-review.md)
 - [质量改进执行计划：修复顺序、验收与提交记录](plans/quality-improvement.md)

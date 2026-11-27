@@ -10,9 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import fitz
-from PySide6.QtCore import QObject, QThread, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QThread, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow
+from shiboken6 import isValid
 
 from ratools_pdf.controllers.main_controller import MainController
 from ratools_pdf.controllers.workers import ProcessWorker
@@ -57,6 +58,37 @@ class WindowLifecycleTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def setUp(self):
+        # Keep signal/close-guard reference cycles alive until explicit GUI-thread
+        # destruction. Otherwise a later ProcessWorker allocation can trigger GC
+        # of old widgets on that worker, stopping Qt timers from the wrong thread.
+        self._owned_objects = []
+
+    def own(self, obj):
+        self._owned_objects.append(obj)
+        return obj
+
+    def tearDown(self):
+        self.assertEqual(QThread.currentThread(), self.app.thread())
+        for obj in self._owned_objects:
+            if isValid(obj) and isinstance(obj, QThread):
+                if isinstance(obj, HeldThread):
+                    obj.release.set()
+                elif obj.isRunning():
+                    obj.request_stop()
+                self.assertTrue(obj.wait(15000), 'Test-owned thread did not finish')
+        # Close guards still need live controller/thread wrappers at this point.
+        for obj in self._owned_objects:
+            if isValid(obj) and isinstance(obj, (QMainWindow, PdfInspectorDialog,
+                    OverlayUnderlayDialog, PageAssemblyDialog, SecurityCenterDialog)):
+                obj.close()
+        for obj in reversed(self._owned_objects):
+            if isValid(obj):
+                obj.deleteLater()
+                QCoreApplication.sendPostedEvents(obj, QEvent.DeferredDelete)
+                self.assertFalse(isValid(obj), 'Test-owned QObject survived cleanup')
+        self._owned_objects.clear()
+
     def spin_until(self, condition):
         deadline = time.monotonic() + 5
         while not condition() and time.monotonic() < deadline:
@@ -67,6 +99,7 @@ class WindowLifecycleTests(unittest.TestCase):
     def controller(self, view):
         controller = MainController.__new__(MainController)
         QObject.__init__(controller)
+        self.own(controller)
         controller.view = view
         controller.worker = None
         controller.precheck = SimpleNamespace(precheck_worker=None)
@@ -80,11 +113,11 @@ class WindowLifecycleTests(unittest.TestCase):
         for cls in (OverlayUnderlayDialog, PageAssemblyDialog, SecurityCenterDialog, PdfInspectorDialog):
             for action in ('title', 'escape', 'system', 'accept', 'done'):
                 with self.subTest(dialog=cls.__name__, action=action):
-                    dialog = cls()
+                    dialog = self.own(cls())
                     # Inspector shadows btn_close with its footer button. Find
                     # the actual title button by object name.
                     title = dialog.findChild(type(dialog.btn_close), 'dialogCloseBtn')
-                    worker = HeldThread(dialog)
+                    worker = self.own(HeldThread(dialog))
                     worker.start()
                     dialog.show()
                     self.spin_until(worker.isRunning)
@@ -110,9 +143,9 @@ class WindowLifecycleTests(unittest.TestCase):
     def test_main_close_waits_for_every_controller_worker_type(self):
         for kind in ('processing','precheck','detection','io','updates'):
             with self.subTest(kind=kind):
-                view = WindowHarness()
+                view = self.own(WindowHarness())
                 controller = self.controller(view)
-                worker = HeldThread()
+                worker = self.own(HeldThread())
                 if kind == 'processing':
                     controller.worker = worker
                 else:
@@ -134,10 +167,11 @@ class WindowLifecycleTests(unittest.TestCase):
                 view.persist_all_settings.assert_called_once()
 
     def test_main_close_finds_dialog_threads_even_when_latest_reference_changed(self):
-        view = WindowHarness()
+        view = self.own(WindowHarness())
         controller = self.controller(view)
-        dialog = PdfInspectorDialog(parent=view)
-        old_worker, latest_worker = HeldThread(dialog), HeldThread(dialog)
+        dialog = self.own(PdfInspectorDialog(parent=view))
+        old_worker = self.own(HeldThread(dialog))
+        latest_worker = self.own(HeldThread(dialog))
         dialog.worker = latest_worker
         old_worker.start()
         view.show()
@@ -153,9 +187,9 @@ class WindowLifecycleTests(unittest.TestCase):
         self.assertFalse(view.isVisible())
 
     def test_shutdown_waits_for_all_workers_and_retained_dialog_children(self):
-        view = WindowHarness()
+        view = self.own(WindowHarness())
         controller = self.controller(view)
-        workers = [HeldThread() for _ in range(5)] + [HeldThread(view)]
+        workers = [self.own(HeldThread()) for _ in range(5)] + [self.own(HeldThread(view))]
         controller.worker = workers[0]
         controller.precheck.precheck_worker = workers[1]
         controller.detection.detection_worker = workers[2]
@@ -183,9 +217,9 @@ class WindowLifecycleTests(unittest.TestCase):
                 doc.new_page().insert_text((72, 72), 'Synthetic input')
                 doc.save(source)
             started, release = mp.get_context('spawn').Event(), mp.get_context('spawn').Event()
-            worker = ProcessWorker([str(source)], set(), str(root/'out'),
-                                   compression_settings={'started':started, 'release':release})
-            view = WindowHarness()
+            worker = self.own(ProcessWorker([str(source)], set(), str(root/'out'),
+                                   compression_settings={'started':started, 'release':release}))
+            view = self.own(WindowHarness())
             controller = self.controller(view)
             controller.worker = worker
             view.show()

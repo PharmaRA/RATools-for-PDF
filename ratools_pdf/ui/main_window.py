@@ -249,6 +249,17 @@ class MainWindow(QMainWindow):
         dlg = OverlayUnderlayDialog(initial_file=initial_file, parent=self)
         dlg.exec()
 
+    def show_watermark_dialog(self):
+        from ratools_pdf.ui.dialogs.watermark_dialog import WatermarkDialog
+
+        selected = self.tree.selectedItems()
+        initial_file = selected[0].text(1) if selected and selected[0].text(1).lower().endswith('.pdf') else None
+        dialog = WatermarkDialog(initial_file=initial_file, parent=self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
     def show_pdf_inspector_dialog(self, initial_file=None):
         """弹出 PDF 深度诊断与受损修复面板。"""
         if initial_file is None:
@@ -635,6 +646,15 @@ class MainWindow(QMainWindow):
                 page_layout.addSpacing(8)
                 page_layout.addWidget(self._create_section_label("导出 / 导入链接"))
                 page_layout.addWidget(self.btn_link_io_wizard)
+
+            elif mod["title"] == "内容合规与安全性":
+                page_layout.addSpacing(8)
+                page_layout.addWidget(self._create_section_label("选择性去除水印"))
+                self.btn_remove_watermark = QPushButton("去除水印…")
+                self.btn_remove_watermark.setObjectName("secondaryBtn")
+                self.btn_remove_watermark.setToolTip("选择批注、独立文字、图片或绘图对象，预览后另存为新 PDF。")
+                self.btn_remove_watermark.clicked.connect(self.show_watermark_dialog)
+                page_layout.addWidget(self.btn_remove_watermark)
 
             elif mod["title"] == "文档检测":
                 page_layout.addWidget(self._create_section_label("只读检测（不修改文件）"))
@@ -1672,6 +1692,8 @@ class MainWindow(QMainWindow):
                 self.btn_process_precheck_suggested.setToolTip("处理中无法仅处理建议文件")
 
         busy = bool(busy_tasks) or is_prechecking or is_processing
+        if hasattr(self, 'btn_remove_watermark'):
+            self.btn_remove_watermark.setEnabled(not busy)
         for name in ("btn_bookmark_io_wizard", "btn_link_io_wizard",
                      "btn_detect_annotations", "btn_detect_broken_refs", "btn_clear"):
             btn = getattr(self, name, None)
