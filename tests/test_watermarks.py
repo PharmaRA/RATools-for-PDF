@@ -345,6 +345,46 @@ class WatermarkTests(unittest.TestCase):
         self.assertNotEqual(after_cached, before_first)
         self.assertNotEqual(after_cached, after_first)
 
+    def test_artifact_watermark_block_removes_multiline_text_and_keeps_body(self):
+        stream = (
+            b'BT /helv 12 Tf 30 180 Td (BODY TEXT) Tj ET\n'
+            b'/Artifact <</Subtype /Watermark>> BDC\n'
+            b'q BT /helv 18 Tf 30 110 Td (CONFIDENTIAL) Tj 0 -20 Td (DRAFT) Tj ET Q\n'
+            b'EMC\n'
+        )
+        doc = self.document(stream)
+        analysis = self.analyze(doc)
+        blocks = [c for c in analysis.candidates if c.kind == '水印标记']
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(blocks[0].watermark_likely)
+        self.assertIn('CONFIDENTIAL', blocks[0].label)
+        result = self.export(analysis, blocks)
+        text = result[0].get_text()
+        self.assertIn('BODY TEXT', text)
+        self.assertNotIn('CONFIDENTIAL', text)
+        self.assertNotIn('DRAFT', text)
+
+    def test_shading_operator_does_not_skip_page_and_unsafe_artifact_is_rejected(self):
+        stream_with_shading = (
+            b'/Sh1 sh\n'
+            b'BT /helv 14 Tf 30 140 Td (DRAFT) Tj ET\n'
+        )
+        doc1 = self.document(stream_with_shading)
+        analysis1 = self.analyze(doc1)
+        self.assertEqual(len(analysis1.candidates), 1)
+        self.assertIn('DRAFT', analysis1.candidates[0].label)
+
+        unsafe_artifact = (
+            b'/Artifact <</Subtype /Watermark>> BDC\n'
+            b'10 10 80 40 re W n\n'
+            b'BT /helv 14 Tf 30 100 Td (CLIPPED) Tj ET\n'
+            b'EMC\n'
+        )
+        doc2 = self.document(unsafe_artifact)
+        analysis2 = self.analyze(doc2)
+        self.assertEqual([c for c in analysis2.candidates if c.kind == '水印标记'], [])
+        self.assertTrue(analysis2.notes)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -88,7 +88,8 @@ def _annotation_refs(doc, page):
 
 
 _PAINT = {'S', 's', 'f', 'F', 'f*', 'B', 'B*', 'b', 'b*'}
-_KNOWN = set('q Q cm w J j M d ri i gs m l c v y h re W W* n BT ET Tc Tw Tz TL Tf Tr Ts Td TD Tm T* Tj TJ SC SCN sc scn G g RG rg K k CS cs Do BMC BDC EMC MP DP'.split()) | _PAINT | {"'", '"'}
+_KNOWN = set('q Q cm w J j M d ri i gs m l c v y h re W W* n BT ET Tc Tw Tz TL Tf Tr Ts Td TD Tm T* Tj TJ SC SCN sc scn G g RG rg K k CS cs Do BMC BDC EMC MP DP sh'.split()) | _PAINT | {"'", '"'}
+_STATE_OPS = set('cm gs w J j M d ri i Tc Tw Tz TL Tf Tr Ts RG rg G g K k CS cs SC SCN sc scn'.split())
 _WATERMARK_KEYWORDS = (
     'watermark', 'draft', 'confidential', 'sample', 'copy', 'void', 'internal',
     '水印', '草稿', '机密', '保密', '绝密', '样稿', '内部', '受控', '副本', '作废', '仅供',
@@ -183,6 +184,33 @@ def _extgstate_alphas(doc, page):
     return alphas
 
 
+def _watermark_property_names(doc, page):
+    names = set()
+    kind, val = doc.xref_get_key(page.xref, 'Resources/Properties')
+    if kind == 'xref':
+        val = doc.xref_object(int(val.split()[0]), compressed=True)
+    elif kind != 'dict':
+        return names
+    for name, ref_id in re.findall(r'/([^\s/<>\[\]()]+)\s+(\d+)\s+\d+\s+R', val):
+        try:
+            obj = doc.xref_object(int(ref_id), compressed=True)
+        except Exception:
+            continue
+        if '/Watermark' in obj or _has_watermark_keyword(obj):
+            names.add(name)
+    for name, body in re.findall(r'/([^\s/<>\[\]()]+)\s*<<([^>]*)>>', val):
+        if '/Watermark' in body or _has_watermark_keyword(body):
+            names.add(name)
+    return names
+
+
+def _is_watermark_bdc(command, wm_props):
+    if re.search(r'/Artifact\b', command) and ('/Watermark' in command or _has_watermark_keyword(command)):
+        return True
+    match = re.search(r'/OC\s+/([^\s/<>\[\]()]+)\s+BDC', command)
+    return bool(match and match.group(1) in wm_props)
+
+
 def _match_text_trace(traces, used, origin_pt, literal_text):
     best_idx = None
     best_dist = 18.0
@@ -243,13 +271,15 @@ def _painting_candidates(doc, page):
 
     page_matrix = page.transformation_matrix
     ext_alphas = _extgstate_alphas(doc, page)
+    wm_props = _watermark_property_names(doc, page)
     traces = page.get_texttrace()
     used_traces = set()
     image_rects = {}
     image_used = {}
 
     candidates = []
-    stack, marked = [], 0
+    stack, marked_stack = [], []
+    active_wm = None
     render_mode = 0
     ctm = fitz.Identity
     alpha = 1.0
@@ -264,6 +294,11 @@ def _painting_candidates(doc, page):
         if operator not in _KNOWN:
             raise WatermarkError('包含首版不支持的绘制指令，已跳过该页内容对象。')
         command = text[start:end]
+        if active_wm is not None:
+            if operator in ('W', 'W*'):
+                active_wm['unsafe'] = True
+            elif operator in _STATE_OPS and len(stack) == active_wm['stack_depth']:
+                active_wm['unsafe'] = True
         if operator == 'q':
             stack.append((render_mode, fitz.Matrix(ctm), alpha))
         elif operator == 'Q':
@@ -278,17 +313,55 @@ def _painting_candidates(doc, page):
             match = re.search(r'/([^\s/<>\[\]()]+)\s+gs', command)
             if match and match[1] in ext_alphas:
                 alpha = min(alpha, ext_alphas[match[1]])
-        elif operator in ('BMC', 'BDC'):
-            marked += 1
+        elif operator == 'BMC':
+            marked_stack.append(None)
+        elif operator == 'BDC':
+            if active_wm is None and _is_watermark_bdc(command, wm_props):
+                active_wm = {
+                    'start': start,
+                    'stack_depth': len(stack),
+                    'unsafe': False,
+                    'texts': [],
+                    'bboxes': [],
+                    'has_paint': False,
+                }
+                marked_stack.append(active_wm)
+            else:
+                marked_stack.append(None)
         elif operator == 'EMC':
-            marked -= 1
-            if marked < 0:
+            if not marked_stack:
                 raise WatermarkError('标记内容不平衡。')
+            popped = marked_stack.pop()
+            if popped is not None:
+                if len(stack) != active_wm['stack_depth'] or active_text is not None or path_active:
+                    raise WatermarkError('水印标记块内存在未闭合状态。')
+                if active_wm['unsafe']:
+                    notes.add('部分水印标记块包含未隔离状态或裁剪指令，未作为整体候选。')
+                elif active_wm['has_paint'] or active_wm['texts']:
+                    joined = ' '.join(t for t in active_wm['texts'] if t).strip()
+                    short = _truncate_text(joined)
+                    label = f'水印标记“{short}”' if short else '标准水印标记块'
+                    sig = f'artifact:{" ".join(joined.split())[:40]}' if joined else ''
+                    bbox = ()
+                    if active_wm['bboxes']:
+                        bbox = (
+                            min(b[0] for b in active_wm['bboxes']),
+                            min(b[1] for b in active_wm['bboxes']),
+                            max(b[2] for b in active_wm['bboxes']),
+                            max(b[3] for b in active_wm['bboxes']),
+                        )
+                    candidates.append((
+                        '水印标记', label, active_wm['start'], end, b'',
+                        sig, 'PDF Watermark 标记块', bbox, True,
+                    ))
+                active_wm = None
         elif operator == 'Tr':
             match = re.fullmatch(r'\s*([0-7])\s+Tr', command)
             if not match:
                 raise WatermarkError('无法判定文字渲染模式。')
             render_mode = int(match[1])
+            if active_wm is not None and render_mode >= 4:
+                active_wm['unsafe'] = True
         elif operator == 'BT':
             if active_text is not None:
                 raise WatermarkError('文字对象嵌套。')
@@ -323,9 +396,22 @@ def _painting_candidates(doc, page):
         elif operator == 'ET':
             if active_text is None:
                 raise WatermarkError('文字对象不平衡。')
+            if active_wm is not None:
+                for _, _, _, _, show_tm, show_ctm, _, show_cmd in active_text:
+                    literal = _extract_pdf_literal_text(show_cmd)
+                    origin_pt = fitz.Point(0, 0) * show_tm * show_ctm * page_matrix
+                    trace = _match_text_trace(traces, used_traces, origin_pt, literal)
+                    if trace is not None:
+                        snippet = ''.join(chr(ch[0]) for ch in trace.get('chars') or ()).strip()
+                        if snippet:
+                            active_wm['texts'].append(snippet)
+                        active_wm['bboxes'].append(_round_bbox(fitz.Rect(trace['bbox'])))
+                    elif literal.strip():
+                        active_wm['texts'].append(literal.strip())
+                    active_wm['has_paint'] = True
             # Leave text/graphics state instructions intact. With just one show,
             # dropping Tj/TJ cannot shift subsequent text within this BT/ET.
-            if len(active_text) == 1 and active_text[0][0] in ('Tj', 'TJ') and active_text[0][3] in (0, 1, 2):
+            elif len(active_text) == 1 and active_text[0][0] in ('Tj', 'TJ') and active_text[0][3] in (0, 1, 2):
                 _, begin, finish, _, show_tm, show_ctm, show_alpha, show_cmd = active_text[0]
                 literal = _extract_pdf_literal_text(show_cmd)
                 origin_pt = fitz.Point(0, 0) * show_tm * show_ctm * page_matrix
@@ -389,6 +475,10 @@ def _painting_candidates(doc, page):
                     bbox = _round_bbox(placements[occ])
                 else:
                     bbox = _round_bbox(fitz.Rect(0, 0, 1, 1) * ctm * page_matrix)
+                if active_wm is not None:
+                    active_wm['bboxes'].append(bbox)
+                    active_wm['has_paint'] = True
+                    continue
                 label = f'图片 /{res_name} ({img_w}×{img_h})'
                 detail_parts = [f'{img_w}×{img_h} px']
                 likely = alpha < 0.95
@@ -399,6 +489,11 @@ def _painting_candidates(doc, page):
                 _, _, raw_bbox = info
                 form_rect = fitz.Rect(raw_bbox) * ctm * page_matrix
                 bbox = _round_bbox(form_rect) if not form_rect.is_empty else ()
+                if active_wm is not None:
+                    if bbox:
+                        active_wm['bboxes'].append(bbox)
+                    active_wm['has_paint'] = True
+                    continue
                 label = f'组合对象 /{res_name} ({round(form_rect.width)}×{round(form_rect.height)})'
                 likely = alpha < 0.95 or _has_watermark_keyword(res_name)
                 detail_parts = []
@@ -443,14 +538,19 @@ def _painting_candidates(doc, page):
                     w, h = round(rect.width), round(rect.height)
                     label = f'绘图路径 ({w}×{h})'
                     signature = f'path:{round(rect.x0)}:{round(rect.y0)}:{w}:{h}'
-                detail = f'透明度 {round(alpha * 100)}%' if alpha < 0.95 else ''
-                candidates.append(('绘图', label, start, end, b'n', signature, detail, bbox, alpha < 0.95))
+                if active_wm is not None:
+                    if bbox:
+                        active_wm['bboxes'].append(bbox)
+                    active_wm['has_paint'] = True
+                else:
+                    detail = f'透明度 {round(alpha * 100)}%' if alpha < 0.95 else ''
+                    candidates.append(('绘图', label, start, end, b'n', signature, detail, bbox, alpha < 0.95))
             path_active = False
             path_points = []
         elif operator == 'n':
             path_active = False
             path_points = []
-    if stack or marked or active_text is not None or path_active:
+    if stack or marked_stack or active_text is not None or path_active:
         raise WatermarkError('内容流存在未闭合状态，已跳过该页内容对象。')
     return candidates, sorted(notes)
 
