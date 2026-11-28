@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QStyle,
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from ratools_pdf.common.status import status_semantic
 from ratools_pdf.ui import icons
-from ratools_pdf.ui.theme import active_palette
+from ratools_pdf.ui.theme import active_palette, active_typography
 
 
 def _extract_local_paths(mime_data) -> list[str]:
@@ -247,13 +248,16 @@ class NavModuleButton(QPushButton):
 
         if self._badge_count > 0:
             text = str(self._badge_count)
+            typo = active_typography()
             badge_font = QFont(self.font())
-            badge_font.setPixelSize(11)
-            badge_font.setWeight(QFont.Weight.Bold)
+            badge_font.setPixelSize(max(10, typo.fs_xs))
+            badge_font.setWeight(
+                QFont.Weight.DemiBold if typo.has_medium_weight else QFont.Weight.Normal
+            )
             painter.setFont(badge_font)
             fm = painter.fontMetrics()
             pill_w = max(22, fm.horizontalAdvance(text) + 12)
-            pill_h = 20
+            pill_h = max(19, fm.height() + 4)
             pill_x = self.width() - pill_w - 10
             pill_y = (self.height() - pill_h) / 2.0
             pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
@@ -274,6 +278,27 @@ class NavModuleButton(QPushButton):
         painter.end()
 
 
+class SearchLineEdit(QLineEdit):
+    """支持 Escape 清空与回车激活的轻量搜索输入框。"""
+
+    escape_pressed = Signal()
+    submit_pressed = Signal()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            if self.text():
+                self.clear()
+            self.escape_pressed.emit()
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.submit_pressed.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class RuleOptionCard(QFrame):
     """右侧整行可点击的 Fluent 规则选项卡片。"""
 
@@ -283,6 +308,7 @@ class RuleOptionCard(QFrame):
         desc: str = "",
         checked: bool = False,
         tag: tuple[str, str] | None = None,
+        rich_text: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -302,6 +328,9 @@ class RuleOptionCard(QFrame):
         self.checkbox.setFocusPolicy(Qt.NoFocus)
 
         self.title_label = QLabel(title)
+        self.title_label.setTextFormat(
+            Qt.TextFormat.RichText if rich_text else Qt.TextFormat.PlainText
+        )
         self.title_label.setWordWrap(True)
         self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.title_label.setObjectName("optionTitle")
@@ -322,6 +351,9 @@ class RuleOptionCard(QFrame):
 
         if desc:
             self.desc_label = QLabel(desc)
+            self.desc_label.setTextFormat(
+                Qt.TextFormat.RichText if rich_text else Qt.TextFormat.PlainText
+            )
             self.desc_label.setWordWrap(True)
             self.desc_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             self.desc_label.setObjectName("optionDesc")
@@ -341,6 +373,11 @@ class RuleOptionCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
+    def set_search_highlight(self, active: bool):
+        self.setProperty("searchHighlight", "true" if active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.checkbox.isEnabled():
             self.checkbox.toggle()
@@ -354,7 +391,8 @@ class StatusBadgeDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
-        return QSize(base.width(), max(base.height(), 34))
+        typo = active_typography()
+        return QSize(base.width(), max(base.height(), typo.fs_sm + 22))
 
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
@@ -402,16 +440,19 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
+        typo = active_typography()
         pill_font = QFont(opt.font)
-        pill_font.setPixelSize(12)
-        pill_font.setWeight(QFont.Weight.DemiBold)
+        pill_font.setPixelSize(typo.fs_sm)
+        pill_font.setWeight(
+            QFont.Weight.Medium if typo.has_medium_weight else QFont.Weight.Normal
+        )
         painter.setFont(pill_font)
         fm = painter.fontMetrics()
 
         dot_size = 6
         gap = 6
         h_pad = 9
-        pill_h = 22
+        pill_h = max(22, fm.height() + 6)
         max_pill_w = max(40, opt.rect.width() - 12)
         natural_w = h_pad * 2 + dot_size + gap + fm.horizontalAdvance(text)
         pill_w = min(max_pill_w, natural_w)

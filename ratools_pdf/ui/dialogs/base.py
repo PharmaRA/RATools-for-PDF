@@ -85,6 +85,15 @@ class FramelessDraggableDialog(QDialog):
 
         self.main_layout.addWidget(self.bg_frame)
 
+    def refresh_backdrop(self) -> None:
+        """强制刷新圆角容器及其阴影缓存，避免小数 DPI 下切页/重绘残留 1px 残影。"""
+        self.content_widget.update()
+        self.bg_frame.update()
+        effect = self.bg_frame.graphicsEffect()
+        if effect is not None:
+            effect.update()
+        self.update()
+
     def _can_close(self):
         # Inspect all children, including an older worker whose latest-reference
         # attribute may have been replaced. wait(0) also covers final thread cleanup.

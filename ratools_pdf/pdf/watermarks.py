@@ -561,7 +561,7 @@ def analyze(path, page_expression='', cancel=None):
     candidates, notes = [], []
     with fitz.open(stream=source, filetype='pdf') as doc:
         if doc.needs_pass:
-            raise WatermarkError('请先在安全中心解锁 PDF，再使用去水印工具。')
+            raise WatermarkError('请先在「加密与解密」中解锁 PDF，再使用去水印工具。')
         if not doc.is_pdf or doc.page_count == 0:
             raise WatermarkError('需要包含页面的 PDF 文件。')
         if doc.is_repaired:

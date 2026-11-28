@@ -7,7 +7,7 @@ import os
 import tempfile
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QTabWidget,
     QTableWidget,
@@ -34,9 +35,11 @@ from PySide6.QtWidgets import (
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.services.file_safety import check_unlinked_path, recycle_owned_path
 from ratools_pdf.services.output_paths import common_base_dir, relative_source_directory, validate_output_plan
+from ratools_pdf.ui import icons
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
 from ratools_pdf.ui.theme import active_palette
+from ratools_pdf.ui.widgets import ElidedLabel, NoFocusItemDelegate
 
 
 class SecurityWorker(QThread):
@@ -192,20 +195,25 @@ class DecryptWorker(QThread):
 
 
 class SecurityCenterDialog(FramelessDraggableDialog):
-    """PDF 安全与密码/权限控制中心对话框（加密 + 解密脱壳）。"""
+    """PDF 加密与解密工作台对话框（批量解密脱壳 + 加密保护）。"""
 
     def __init__(self, initial_file: Optional[str] = None, parent=None):
-        super().__init__("PDF 安全与密码/权限控制中心", parent)
-        self.resize(800, 650)
-        self.setMinimumSize(740, 560)
+        super().__init__("PDF 加密与解密", parent)
+        self.setWindowTitle("PDF 加密与解密")
+        self.resize(840, 680)
+        self.setMinimumSize(760, 580)
         self.encrypt_worker: Optional[SecurityWorker] = None
         self.decrypt_worker: Optional[DecryptWorker] = None
         self.last_output_path = ""
         self.last_decrypt_dir = ""
 
+        self.content_layout.setContentsMargins(20, 14, 20, 16)
         self.content_layout.setSpacing(10)
 
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("securityTabs")
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.tabBar().setFocusPolicy(Qt.NoFocus)
         self._build_decrypt_tab()
         self._build_encrypt_tab(initial_file)
         self.content_layout.addWidget(self.tabs, stretch=1)
@@ -215,108 +223,170 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         if initial_file and os.path.exists(initial_file):
             self.add_decrypt_files([initial_file])
 
+    def _attach_password_toggle(self, edit: QLineEdit):
+        pal = active_palette()
+        action = edit.addAction(
+            icons.svg_icon("eye", pal.text_muted, size=14, disabled_color=pal.text_faint),
+            QLineEdit.TrailingPosition,
+        )
+        action.setToolTip("显示/隐藏密码")
+
+        def _toggle():
+            is_hidden = edit.echoMode() == QLineEdit.Password
+            edit.setEchoMode(QLineEdit.Normal if is_hidden else QLineEdit.Password)
+            cur_pal = active_palette()
+            action.setIcon(
+                icons.svg_icon(
+                    "eye_off" if is_hidden else "eye",
+                    cur_pal.text_muted,
+                    size=14,
+                    disabled_color=cur_pal.text_faint,
+                )
+            )
+
+        action.triggered.connect(_toggle)
+
+    @staticmethod
+    def _make_form_label(text: str, min_width: int = 72) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("dialogCaption")
+        lbl.setMinimumWidth(min_width)
+        return lbl
+
     # =========================================================================
-    # 选项卡 1：🔒 PDF 加密与权限保护
+    # 选项卡 1：PDF 加密与权限保护
     # =========================================================================
     def _build_encrypt_tab(self, initial_file: Optional[str]):
+        pal = active_palette()
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(0, 10, 0, 0)
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("settingsScroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        scroll_body = QWidget()
+        layout = QVBoxLayout(scroll_body)
+        layout.setContentsMargins(1, 2, 1, 4)
         layout.setSpacing(12)
 
-        # 1. 文件选择
+        # 1. 文件位置
         picker_card = QFrame()
-        picker_card.setObjectName("wizardCard")
+        picker_card.setObjectName("securitySectionCard")
         grid = QGridLayout(picker_card)
         grid.setContentsMargins(14, 12, 14, 12)
-        grid.setSpacing(10)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
 
-        grid.addWidget(QLabel("源 PDF 文件："), 0, 0)
+        grid.addWidget(self._make_form_label("源 PDF", 74), 0, 0)
         self.txt_input = QLineEdit()
         self.txt_input.setObjectName("settingsPathEdit")
         self.txt_input.setFixedHeight(34)
-        self.txt_input.setPlaceholderText("选择需要加密保护的 PDF 文件...")
+        self.txt_input.setPlaceholderText("选择需要加密保护的源 PDF 文件…")
         self.txt_input.textChanged.connect(self._auto_fill_output)
         self.txt_input.textChanged.connect(self._update_encrypt_status)
-        self.btn_browse_input = QPushButton("浏览...")
+        self.btn_browse_input = QPushButton("浏览…")
         self.btn_browse_input.setObjectName("dialogSecondaryBtn")
         self.btn_browse_input.setFixedHeight(34)
         self.btn_browse_input.setCursor(Qt.PointingHandCursor)
+        self.btn_browse_input.setIconSize(QSize(14, 14))
+        self.btn_browse_input.setIcon(
+            icons.svg_icon("folder_open", pal.text_body, size=14, disabled_color=pal.text_faint)
+        )
         self.btn_browse_input.clicked.connect(self._on_browse_input_clicked)
         grid.addWidget(self.txt_input, 0, 1)
         grid.addWidget(self.btn_browse_input, 0, 2)
 
-        grid.addWidget(QLabel("输出另存为："), 1, 0)
+        grid.addWidget(self._make_form_label("输出路径", 74), 1, 0)
         self.txt_output = QLineEdit()
         self.txt_output.setObjectName("settingsPathEdit")
         self.txt_output.setFixedHeight(34)
-        self.txt_output.setPlaceholderText("加密后的 PDF 另存路径...")
-        self.btn_browse_output = QPushButton("浏览...")
+        self.txt_output.setPlaceholderText("加密后 PDF 文件的保存路径…")
+        self.btn_browse_output = QPushButton("浏览…")
         self.btn_browse_output.setObjectName("dialogSecondaryBtn")
         self.btn_browse_output.setFixedHeight(34)
         self.btn_browse_output.setCursor(Qt.PointingHandCursor)
+        self.btn_browse_output.setIconSize(QSize(14, 14))
+        self.btn_browse_output.setIcon(
+            icons.svg_icon("folder_open", pal.text_body, size=14, disabled_color=pal.text_faint)
+        )
         self.btn_browse_output.clicked.connect(self._on_browse_output_clicked)
         grid.addWidget(self.txt_output, 1, 1)
         grid.addWidget(self.btn_browse_output, 1, 2)
+        grid.setColumnStretch(1, 1)
         layout.addWidget(picker_card)
 
         # 2. 算法与密码
         crypto_card = QFrame()
-        crypto_card.setObjectName("wizardCard")
-        vbox_crypto = QVBoxLayout(crypto_card)
-        vbox_crypto.setContentsMargins(14, 12, 14, 12)
-        vbox_crypto.setSpacing(10)
+        crypto_card.setObjectName("securitySectionCard")
+        grid_crypto = QGridLayout(crypto_card)
+        grid_crypto.setContentsMargins(14, 12, 14, 12)
+        grid_crypto.setHorizontalSpacing(10)
+        grid_crypto.setVerticalSpacing(10)
 
-        row_algo = QHBoxLayout()
-        row_algo.addWidget(QLabel("加密算法："))
+        grid_crypto.addWidget(self._make_form_label("加密算法", 74), 0, 0)
         self.combo_algo = QComboBox()
         self.combo_algo.setFixedHeight(34)
-        self.combo_algo.addItem("256-bit AES (推荐：最高安全等级，Acrobat X 及更高版本)", 256)
-        self.combo_algo.addItem("128-bit AES (兼容旧版阅读器)", 128)
-        row_algo.addWidget(self.combo_algo, stretch=1)
-        vbox_crypto.addLayout(row_algo)
+        self.combo_algo.addItem("256-bit AES（推荐，兼容 Acrobat X 及以上）", 256)
+        self.combo_algo.addItem("128-bit AES（兼容旧版阅读器）", 128)
+        grid_crypto.addWidget(self.combo_algo, 0, 1)
 
-        grid_pass = QGridLayout()
-        grid_pass.setSpacing(8)
-
-        self.cb_user_pass = QCheckBox("设置打开密码 (User Password)：")
+        self.cb_user_pass = QCheckBox("打开密码")
+        self.cb_user_pass.setToolTip("设置打开文档时需输入的密码（User Password）")
         self.txt_user_pass = QLineEdit()
         self.txt_user_pass.setObjectName("settingsPathEdit")
-        self.txt_user_pass.setFixedHeight(32)
+        self.txt_user_pass.setFixedHeight(34)
         self.txt_user_pass.setEchoMode(QLineEdit.Password)
         self.txt_user_pass.setPlaceholderText("留空表示任何人均可直接打开阅读")
-        grid_pass.addWidget(self.cb_user_pass, 0, 0)
-        grid_pass.addWidget(self.txt_user_pass, 0, 1)
+        self.txt_user_pass.setEnabled(False)
+        self._attach_password_toggle(self.txt_user_pass)
+        self.cb_user_pass.toggled.connect(self.txt_user_pass.setEnabled)
+        grid_crypto.addWidget(self.cb_user_pass, 1, 0)
+        grid_crypto.addWidget(self.txt_user_pass, 1, 1)
 
-        self.cb_owner_pass = QCheckBox("设置权限密码 (Owner Password)：")
+        self.cb_owner_pass = QCheckBox("权限密码")
+        self.cb_owner_pass.setToolTip("设置修改打印、复制或编辑权限时需输入的密码（Owner Password）")
         self.cb_owner_pass.setChecked(True)
         self.txt_owner_pass = QLineEdit()
         self.txt_owner_pass.setObjectName("settingsPathEdit")
-        self.txt_owner_pass.setFixedHeight(32)
+        self.txt_owner_pass.setFixedHeight(34)
         self.txt_owner_pass.setEchoMode(QLineEdit.Password)
-        self.txt_owner_pass.setPlaceholderText("用于限制或修改打印/编辑等权限")
-        grid_pass.addWidget(self.cb_owner_pass, 1, 0)
-        grid_pass.addWidget(self.txt_owner_pass, 1, 1)
-        vbox_crypto.addLayout(grid_pass)
+        self.txt_owner_pass.setPlaceholderText("用于保护打印、编辑与复制限制策略")
+        self._attach_password_toggle(self.txt_owner_pass)
+        self.cb_owner_pass.toggled.connect(self.txt_owner_pass.setEnabled)
+        grid_crypto.addWidget(self.cb_owner_pass, 2, 0)
+        grid_crypto.addWidget(self.txt_owner_pass, 2, 1)
+        grid_crypto.setColumnStretch(1, 1)
         layout.addWidget(crypto_card)
 
-        # 3. 权限矩阵
+        # 3. 权限细则与输出选项
         perm_card = QFrame()
-        perm_card.setObjectName("wizardCard")
+        perm_card.setObjectName("securitySectionCard")
         vbox_perm = QVBoxLayout(perm_card)
         vbox_perm.setContentsMargins(14, 12, 14, 12)
         vbox_perm.setSpacing(10)
 
-        lbl_perm = QLabel("权限细则控制（限制未取得权限密码的普通用户操作）：")
+        lbl_perm = QLabel("权限控制与输出选项")
         lbl_perm.setObjectName("dialogSubTitle")
         vbox_perm.addWidget(lbl_perm)
 
+        grid_perm = QGridLayout()
+        grid_perm.setContentsMargins(0, 0, 0, 0)
+        grid_perm.setHorizontalSpacing(10)
+        grid_perm.setVerticalSpacing(10)
+
+        grid_perm.addWidget(self._make_form_label("打印权限", 74), 0, 0)
         h_print = QHBoxLayout()
-        h_print.addWidget(QLabel("打印权限："))
+        h_print.setContentsMargins(0, 0, 0, 0)
+        h_print.setSpacing(14)
         self.print_group = QButtonGroup(self)
-        self.rb_print_full = QRadioButton("允许高质量打印")
-        self.rb_print_low = QRadioButton("仅允许低分辨率 (150 dpi)")
-        self.rb_print_none = QRadioButton("完全禁止打印")
+        self.rb_print_full = QRadioButton("高质量打印")
+        self.rb_print_low = QRadioButton("低分辨率 (150 dpi)")
+        self.rb_print_none = QRadioButton("禁止打印")
         self.rb_print_full.setChecked(True)
         self.print_group.addButton(self.rb_print_full, 0)
         self.print_group.addButton(self.rb_print_low, 1)
@@ -325,77 +395,152 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         h_print.addWidget(self.rb_print_low)
         h_print.addWidget(self.rb_print_none)
         h_print.addStretch()
-        vbox_perm.addLayout(h_print)
+        grid_perm.addLayout(h_print, 0, 1)
 
-        h_mod = QHBoxLayout()
-        h_mod.addWidget(QLabel("修改权限："))
+        grid_perm.addWidget(self._make_form_label("修改权限", 74), 1, 0)
         self.combo_modify = QComboBox()
         self.combo_modify.setFixedHeight(34)
-        self.combo_modify.addItem("完全禁止修改 (推荐定稿归档)", "none")
-        self.combo_modify.addItem("仅允许页面装配 (插入、删除、旋转页面)", "assembly")
+        self.combo_modify.addItem("完全禁止修改（推荐定稿归档）", "none")
+        self.combo_modify.addItem("仅允许页面装配（插入、删除、旋转页面）", "assembly")
         self.combo_modify.addItem("仅允许填写表单字段与电子签名", "form")
         self.combo_modify.addItem("允许批注与填写表单", "annotate")
         self.combo_modify.addItem("允许完全修改", "all")
-        h_mod.addWidget(self.combo_modify, stretch=1)
-        vbox_perm.addLayout(h_mod)
+        grid_perm.addWidget(self.combo_modify, 1, 1)
+        grid_perm.setColumnStretch(1, 1)
+        vbox_perm.addLayout(grid_perm)
 
-        h_extract = QHBoxLayout()
-        self.cb_extract = QCheckBox("允许复制与提取文本/图像内容 (Extract)")
-        self.cb_accessibility = QCheckBox("允许屏幕阅读器辅助功能 (Accessibility)")
+        checks_grid = QGridLayout()
+        checks_grid.setContentsMargins(0, 2, 0, 0)
+        checks_grid.setHorizontalSpacing(20)
+        checks_grid.setVerticalSpacing(8)
+
+        self.cb_extract = QCheckBox("允许复制与提取内容")
+        self.cb_extract.setToolTip("允许未持有权限密码的用户复制文本或提取图像 (Extract)")
+        self.cb_accessibility = QCheckBox("允许无障碍辅助阅读")
+        self.cb_accessibility.setToolTip("允许屏幕阅读器等无障碍工具访问文档内容 (Accessibility)")
         self.cb_accessibility.setChecked(True)
-        h_extract.addWidget(self.cb_extract)
-        h_extract.addWidget(self.cb_accessibility)
-        h_extract.addStretch()
-        vbox_perm.addLayout(h_extract)
+        self.cb_cleartext_meta = QCheckBox("保持元数据明文（便于检索）")
+        self.cb_cleartext_meta.setToolTip("保持文档元数据明文不加密 (Cleartext Metadata)，便于 Windows 检索与档案库索引")
+        self.cb_cleartext_meta.setChecked(True)
+        self.cb_linearize = QCheckBox("启用 Web 快速视图（线性化）")
+        self.cb_linearize.setChecked(True)
+
+        checks_grid.addWidget(self.cb_extract, 0, 0)
+        checks_grid.addWidget(self.cb_accessibility, 0, 1)
+        checks_grid.addWidget(self.cb_cleartext_meta, 1, 0)
+        checks_grid.addWidget(self.cb_linearize, 1, 1)
+        checks_grid.setColumnStretch(0, 1)
+        checks_grid.setColumnStretch(1, 1)
+        vbox_perm.addLayout(checks_grid)
         layout.addWidget(perm_card)
 
-        # 4. 合规与优化
-        row_opts = QHBoxLayout()
-        row_opts.setSpacing(16)
-        self.cb_cleartext_meta = QCheckBox(
-            "保持元数据明文未加密 (Cleartext Metadata，便于 Windows 检索与档案库索引)"
-        )
-        self.cb_cleartext_meta.setChecked(True)
-        self.cb_linearize = QCheckBox("启用 Web 快速视图 (线性化)")
-        self.cb_linearize.setChecked(True)
-        row_opts.addWidget(self.cb_cleartext_meta)
-        row_opts.addWidget(self.cb_linearize)
-        row_opts.addStretch()
-        layout.addLayout(row_opts)
-
         layout.addStretch()
-        self.tabs.addTab(tab, "PDF 加密与权限保护")
+        scroll_area.setWidget(scroll_body)
+        tab_layout.addWidget(scroll_area)
+
+        self.tabs.addTab(tab, "加密与权限保护")
 
         if initial_file and os.path.exists(initial_file):
             self.txt_input.setText(initial_file)
 
     # =========================================================================
-    # 选项卡 2：🔓 PDF 解密与权限脱壳
+    # 选项卡 2：PDF 解密与权限脱壳
     # =========================================================================
     def _build_decrypt_tab(self):
+        pal = active_palette()
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(10)
 
-        # 1. 待解密文件表格
-        table_container = QWidget()
-        h_table = QHBoxLayout(table_container)
-        h_table.setContentsMargins(0, 0, 0, 0)
-        h_table.setSpacing(10)
+        # 1. 待解密文件列表卡片（单层边框 + 顶栏操作 + 无网格表格）
+        self.table_card = QFrame()
+        self.table_card.setObjectName("securityTableCard")
+        self.table_card.setAcceptDrops(True)
+        self.table_card.dragEnterEvent = self._decrypt_drag_enter
+        self.table_card.dragMoveEvent = self._decrypt_drag_move
+        self.table_card.dragLeaveEvent = self._decrypt_drag_leave
+        self.table_card.dropEvent = self._decrypt_drop
+
+        table_card_layout = QVBoxLayout(self.table_card)
+        table_card_layout.setContentsMargins(1, 1, 1, 1)
+        table_card_layout.setSpacing(0)
+
+        table_header = QFrame()
+        table_header.setObjectName("securityTableHeader")
+        th_layout = QHBoxLayout(table_header)
+        th_layout.setContentsMargins(12, 8, 10, 8)
+        th_layout.setSpacing(6)
+
+        self.lbl_dec_list_title = QLabel("待解密文件 (0)")
+        self.lbl_dec_list_title.setObjectName("dialogSubTitle")
+        list_hint = QLabel("支持拖拽 PDF 或文件夹")
+        list_hint.setObjectName("dialogMuted")
+        th_layout.addWidget(self.lbl_dec_list_title)
+        th_layout.addWidget(list_hint)
+        th_layout.addStretch()
+
+        self.btn_dec_add = QPushButton("添加文件")
+        self.btn_dec_add.setObjectName("compactSecondaryBtn")
+        self.btn_dec_add.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_add.setIconSize(QSize(13, 13))
+        self.btn_dec_add.setIcon(
+            icons.svg_icon("plus", pal.text_body, size=13, disabled_color=pal.text_faint)
+        )
+        self.btn_dec_add.clicked.connect(self._on_dec_add_clicked)
+
+        self.btn_dec_add_folder = QPushButton("添加文件夹")
+        self.btn_dec_add_folder.setObjectName("compactSecondaryBtn")
+        self.btn_dec_add_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_add_folder.setIconSize(QSize(13, 13))
+        self.btn_dec_add_folder.setIcon(
+            icons.svg_icon("folder", pal.text_body, size=13, disabled_color=pal.text_faint)
+        )
+        self.btn_dec_add_folder.clicked.connect(self._on_dec_add_folder_clicked)
+
+        self.btn_dec_remove = QPushButton("移除")
+        self.btn_dec_remove.setObjectName("ghostBtn")
+        self.btn_dec_remove.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_remove.setToolTip("移除表格中选中的文件")
+        self.btn_dec_remove.clicked.connect(self._on_dec_remove_clicked)
+
+        self.btn_dec_clear = QPushButton("清空")
+        self.btn_dec_clear.setObjectName("ghostBtn")
+        self.btn_dec_clear.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_clear.setIconSize(QSize(13, 13))
+        self.btn_dec_clear.setIcon(
+            icons.svg_icon("trash", pal.text_muted, size=13, disabled_color=pal.text_faint)
+        )
+        self.btn_dec_clear.clicked.connect(self._on_dec_clear_clicked)
+
+        th_layout.addWidget(self.btn_dec_add)
+        th_layout.addWidget(self.btn_dec_add_folder)
+        th_layout.addWidget(self.btn_dec_remove)
+        th_layout.addWidget(self.btn_dec_clear)
+        table_card_layout.addWidget(table_header)
 
         self.decrypt_table = QTableWidget()
-        self.decrypt_table.setObjectName("previewTable")
+        self.decrypt_table.setObjectName("securityTable")
+        self.decrypt_table.setFrameShape(QFrame.NoFrame)
+        self.decrypt_table.setShowGrid(False)
+        self.decrypt_table.verticalHeader().setVisible(False)
+        self.decrypt_table.verticalHeader().setDefaultSectionSize(34)
+        self.decrypt_table.setItemDelegate(NoFocusItemDelegate(self.decrypt_table))
         self.decrypt_table.setColumnCount(6)
         self.decrypt_table.setHorizontalHeaderLabels(
-            ["#", "文件名", "总页数", "当前安全状态", "诊断建议", "完整路径"]
+            ["#", "文件名", "页数", "安全状态", "诊断建议", "完整路径"]
         )
-        self.decrypt_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.decrypt_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.decrypt_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.decrypt_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.decrypt_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self.decrypt_table.setColumnWidth(0, 40)
+        header = self.decrypt_table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        self.decrypt_table.setColumnWidth(0, 38)
+        self.decrypt_table.setColumnWidth(1, 220)
+        self.decrypt_table.setColumnWidth(2, 56)
+        self.decrypt_table.setColumnWidth(3, 112)
         self.decrypt_table.setColumnHidden(5, True)
         self.decrypt_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.decrypt_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -404,161 +549,146 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.decrypt_table.setAcceptDrops(True)
         self.decrypt_table.dragEnterEvent = self._decrypt_drag_enter
         self.decrypt_table.dragMoveEvent = self._decrypt_drag_move
+        self.decrypt_table.dragLeaveEvent = self._decrypt_drag_leave
         self.decrypt_table.dropEvent = self._decrypt_drop
+        self.decrypt_table.itemSelectionChanged.connect(self._sync_decrypt_table_controls)
 
-        h_table.addWidget(self.decrypt_table, stretch=1)
+        table_card_layout.addWidget(self.decrypt_table, stretch=1)
+        layout.addWidget(self.table_card, stretch=1)
 
-        v_btn_bar = QVBoxLayout()
-        v_btn_bar.setSpacing(8)
-        self.btn_dec_add = QPushButton("+ 添加文件")
-        self.btn_dec_add.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_add.setFixedWidth(108)
-        self.btn_dec_add.setFixedHeight(30)
-        self.btn_dec_add.setCursor(Qt.PointingHandCursor)
-        self.btn_dec_add.clicked.connect(self._on_dec_add_clicked)
-
-        self.btn_dec_add_folder = QPushButton("+ 添加文件夹")
-        self.btn_dec_add_folder.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_add_folder.setFixedWidth(108)
-        self.btn_dec_add_folder.setFixedHeight(30)
-        self.btn_dec_add_folder.setCursor(Qt.PointingHandCursor)
-        self.btn_dec_add_folder.clicked.connect(self._on_dec_add_folder_clicked)
-
-        self.btn_dec_remove = QPushButton("- 移除选中")
-        self.btn_dec_remove.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_remove.setFixedWidth(108)
-        self.btn_dec_remove.setFixedHeight(30)
-        self.btn_dec_remove.setCursor(Qt.PointingHandCursor)
-        self.btn_dec_remove.clicked.connect(self._on_dec_remove_clicked)
-
-        self.btn_dec_clear = QPushButton("清空")
-        self.btn_dec_clear.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_clear.setFixedWidth(108)
-        self.btn_dec_clear.setFixedHeight(30)
-        self.btn_dec_clear.setCursor(Qt.PointingHandCursor)
-        self.btn_dec_clear.clicked.connect(self._on_dec_clear_clicked)
-
-        v_btn_bar.addWidget(self.btn_dec_add)
-        v_btn_bar.addWidget(self.btn_dec_add_folder)
-        v_btn_bar.addWidget(self.btn_dec_remove)
-        v_btn_bar.addWidget(self.btn_dec_clear)
-        v_btn_bar.addStretch()
-        h_table.addLayout(v_btn_bar)
-        layout.addWidget(table_container, stretch=1)
-
-        # 2. 解密密码配置卡片
+        # 2. 解密与解锁选项
         pass_card = QFrame()
-        pass_card.setObjectName("wizardCard")
+        pass_card.setObjectName("securitySectionCard")
         v_pass = QVBoxLayout(pass_card)
         v_pass.setContentsMargins(14, 10, 14, 10)
         v_pass.setSpacing(8)
 
         row_pw = QHBoxLayout()
         row_pw.setSpacing(10)
-        self.cb_dec_use_pass = QCheckBox("包含已知打开/权限密码：")
+        self.cb_dec_use_pass = QCheckBox("输入打开/权限密码")
         self.txt_dec_pass = QLineEdit()
         self.txt_dec_pass.setObjectName("settingsPathEdit")
         self.txt_dec_pass.setFixedHeight(32)
         self.txt_dec_pass.setEchoMode(QLineEdit.Password)
-        self.txt_dec_pass.setPlaceholderText("批量文件若包含统一打开密码可在此输入，否则留空自动免密脱壳")
+        self.txt_dec_pass.setPlaceholderText("设有打开密码时勾选并输入，仅受权限限制可留空")
+        self.txt_dec_pass.setEnabled(False)
+        self._attach_password_toggle(self.txt_dec_pass)
+        self.cb_dec_use_pass.toggled.connect(self.txt_dec_pass.setEnabled)
         row_pw.addWidget(self.cb_dec_use_pass)
         row_pw.addWidget(self.txt_dec_pass, stretch=1)
         v_pass.addLayout(row_pw)
 
         hint_lbl = QLabel(
-            "提示：仅受权限限制（禁止打印/编辑/复制）但未设打开密码的 PDF，无需输入密码即可直接免密脱壳；若设有打开密码，请勾选并输入密码解锁。"
+            "仅受权限限制（禁止打印/编辑/复制）的 PDF 无需密码即可免密解除；设有打开密码的文件请勾选并输入密码。"
         )
         hint_lbl.setObjectName("dialogMuted")
         hint_lbl.setWordWrap(True)
         hint_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         v_pass.addWidget(hint_lbl)
 
-        row_sig_opts = QHBoxLayout()
-        row_sig_opts.setSpacing(20)
-        self.cb_dec_remove_restrictions = QCheckBox("解除数字签名限制 (保留签名外观，解锁编辑)")
+        row_sig_opts = QGridLayout()
+        row_sig_opts.setContentsMargins(0, 2, 0, 0)
+        row_sig_opts.setHorizontalSpacing(20)
+        self.cb_dec_remove_restrictions = QCheckBox("解除数字签名限制（保留外观）")
         self.cb_dec_remove_restrictions.setToolTip(
             "解除数字签名限制并解锁后续编辑；采用 300 DPI 靶向外观固化技术，绝对保留印章与签字视觉效果且不破坏任何超链接"
         )
         self.cb_dec_remove_restrictions.setChecked(True)
 
-        self.cb_dec_remove_acroform = QCheckBox("移除表单字典 (清除 AcroForm 交互状态)")
+        self.cb_dec_remove_acroform = QCheckBox("移除交互表单字典（AcroForm）")
         self.cb_dec_remove_acroform.setToolTip(
             "从文档 Catalog 中移除交互式表单字典 (--remove-acroform)，清除表单字段与签名锁定状态"
         )
         self.cb_dec_remove_acroform.setChecked(False)
 
-        row_sig_opts.addWidget(self.cb_dec_remove_restrictions)
-        row_sig_opts.addWidget(self.cb_dec_remove_acroform)
-        row_sig_opts.addStretch()
+        row_sig_opts.addWidget(self.cb_dec_remove_restrictions, 0, 0)
+        row_sig_opts.addWidget(self.cb_dec_remove_acroform, 0, 1)
+        row_sig_opts.setColumnStretch(0, 1)
+        row_sig_opts.setColumnStretch(1, 1)
         v_pass.addLayout(row_sig_opts)
         layout.addWidget(pass_card)
 
-        # 3. 输出与优化设置卡片
+        # 3. 输出设置
         out_card = QFrame()
-        out_card.setObjectName("wizardCard")
-        v_out = QVBoxLayout(out_card)
-        v_out.setContentsMargins(14, 10, 14, 10)
-        v_out.setSpacing(8)
+        out_card.setObjectName("securitySectionCard")
+        grid_out = QGridLayout(out_card)
+        grid_out.setContentsMargins(14, 10, 14, 10)
+        grid_out.setHorizontalSpacing(10)
+        grid_out.setVerticalSpacing(8)
 
-        row_out_dir = QHBoxLayout()
-        row_out_dir.addWidget(QLabel("解密输出目录："))
+        grid_out.addWidget(self._make_form_label("输出目录", 72), 0, 0)
         self.txt_dec_out_dir = QLineEdit()
         self.txt_dec_out_dir.setObjectName("settingsPathEdit")
-        self.txt_dec_out_dir.setFixedHeight(34)
-        self.txt_dec_out_dir.setPlaceholderText("选择解密后 PDF 存放的文件夹目录...")
-        self.btn_dec_browse_dir = QPushButton("浏览...")
+        self.txt_dec_out_dir.setFixedHeight(32)
+        self.txt_dec_out_dir.setPlaceholderText("选择解密后 PDF 的保存目录…")
+        self.btn_dec_browse_dir = QPushButton("浏览…")
         self.btn_dec_browse_dir.setObjectName("dialogSecondaryBtn")
-        self.btn_dec_browse_dir.setFixedHeight(34)
+        self.btn_dec_browse_dir.setFixedHeight(32)
         self.btn_dec_browse_dir.setCursor(Qt.PointingHandCursor)
+        self.btn_dec_browse_dir.setIconSize(QSize(14, 14))
+        self.btn_dec_browse_dir.setIcon(
+            icons.svg_icon("folder_open", pal.text_body, size=14, disabled_color=pal.text_faint)
+        )
         self.btn_dec_browse_dir.clicked.connect(self._on_dec_browse_dir_clicked)
-        row_out_dir.addWidget(self.txt_dec_out_dir, stretch=1)
-        row_out_dir.addWidget(self.btn_dec_browse_dir)
-        v_out.addLayout(row_out_dir)
+        grid_out.addWidget(self.txt_dec_out_dir, 0, 1)
+        grid_out.addWidget(self.btn_dec_browse_dir, 0, 2)
 
+        grid_out.addWidget(self._make_form_label("文件命名", 72), 1, 0)
         row_naming = QHBoxLayout()
-        row_naming.addWidget(QLabel("文件命名："))
+        row_naming.setContentsMargins(0, 0, 0, 0)
+        row_naming.setSpacing(16)
         self.naming_group = QButtonGroup(self)
-        self.rb_name_suffix = QRadioButton("自动追加 '_decrypted' 后缀 (推荐，保留原件)")
-        self.rb_name_origin = QRadioButton("保持原文件名 (覆盖输出)")
+        self.rb_name_suffix = QRadioButton("追加 _decrypted 后缀（保留原件）")
+        self.rb_name_origin = QRadioButton("保持原文件名（覆盖输出）")
         self.rb_name_suffix.setChecked(True)
         self.naming_group.addButton(self.rb_name_suffix, 0)
         self.naming_group.addButton(self.rb_name_origin, 1)
         row_naming.addWidget(self.rb_name_suffix)
         row_naming.addWidget(self.rb_name_origin)
         row_naming.addStretch()
-        v_out.addLayout(row_naming)
+        grid_out.addLayout(row_naming, 1, 1, 1, 2)
 
+        grid_out.addWidget(self._make_form_label("输出优化", 72), 2, 0)
         row_opts2 = QHBoxLayout()
-        self.cb_dec_linearize = QCheckBox("启用 Web 快速视图 (线性化)")
+        row_opts2.setContentsMargins(0, 0, 0, 0)
+        row_opts2.setSpacing(16)
+        self.cb_dec_linearize = QCheckBox("启用 Web 快速视图（线性化）")
         self.cb_dec_linearize.setChecked(True)
-        self.cb_dec_objstms = QCheckBox("压缩生成对象流 (PDF 1.5+)")
+        self.cb_dec_objstms = QCheckBox("生成对象流压缩（PDF 1.5+）")
         self.cb_dec_objstms.setChecked(True)
         row_opts2.addWidget(self.cb_dec_linearize)
         row_opts2.addWidget(self.cb_dec_objstms)
         row_opts2.addStretch()
-        v_out.addLayout(row_opts2)
+        grid_out.addLayout(row_opts2, 2, 1, 1, 2)
+        grid_out.setColumnStretch(1, 1)
         layout.addWidget(out_card)
 
-        self.tabs.addTab(tab, "PDF 解密与权限脱壳")
+        self._sync_decrypt_table_controls()
+        self.tabs.addTab(tab, "解密与解除限制")
 
     # =========================================================================
     # 底部状态栏与主执行按钮
     # =========================================================================
     def _build_footer(self):
-        footer = QWidget()
+        pal = active_palette()
+        footer = QFrame()
+        footer.setObjectName("securityFooter")
         layout = QHBoxLayout(footer)
-        layout.setContentsMargins(0, 6, 0, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setSpacing(10)
 
-        self.lbl_status = QLabel("就绪")
+        self.lbl_status = ElidedLabel("就绪")
         self.lbl_status.setObjectName("dialogMuted")
-        layout.addWidget(self.lbl_status)
-        layout.addStretch()
+        layout.addWidget(self.lbl_status, stretch=1)
 
         self.btn_open_target = QPushButton("打开输出目录")
         self.btn_open_target.setObjectName("dialogSecondaryBtn")
         self.btn_open_target.setFixedHeight(34)
         self.btn_open_target.setCursor(Qt.PointingHandCursor)
+        self.btn_open_target.setIconSize(QSize(14, 14))
+        self.btn_open_target.setIcon(
+            icons.svg_icon("folder_open", pal.text_body, size=14, disabled_color=pal.text_faint)
+        )
         self.btn_open_target.setVisible(False)
         self.btn_open_target.clicked.connect(self._on_open_target_clicked)
         layout.addWidget(self.btn_open_target)
@@ -574,6 +704,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.btn_execute.setObjectName("dialogPrimaryBtn")
         self.btn_execute.setFixedHeight(34)
         self.btn_execute.setCursor(Qt.PointingHandCursor)
+        self.btn_execute.setIconSize(QSize(14, 14))
         self.btn_execute.clicked.connect(self._on_execute_clicked)
         layout.addWidget(self.btn_execute)
 
@@ -581,15 +712,33 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._on_tab_changed(0)
 
+    def _sync_decrypt_table_controls(self):
+        cnt = self.decrypt_table.rowCount()
+        if hasattr(self, "lbl_dec_list_title"):
+            self.lbl_dec_list_title.setText(f"待解密文件 ({cnt})")
+        if hasattr(self, "btn_dec_clear"):
+            self.btn_dec_clear.setEnabled(cnt > 0)
+        if hasattr(self, "btn_dec_remove"):
+            self.btn_dec_remove.setEnabled(cnt > 0 and self.decrypt_table.currentRow() >= 0)
+
     def _on_tab_changed(self, idx: int):
+        pal = active_palette()
         self.btn_open_target.setVisible(False)
         if idx == 0:
             self.btn_execute.setText("开始批量解密")
+            self.btn_execute.setIcon(
+                icons.svg_icon("unlock", pal.text_on_primary, size=14, disabled_color=pal.surface)
+            )
             cnt = self.decrypt_table.rowCount()
             self.lbl_status.setText(f"已选 {cnt} 个待解密文件" if cnt > 0 else "请添加待解密 PDF 文件")
         else:
             self.btn_execute.setText("应用安全加密")
+            self.btn_execute.setIcon(
+                icons.svg_icon("lock", pal.text_on_primary, size=14, disabled_color=pal.surface)
+            )
             self._update_encrypt_status()
+        self.refresh_backdrop()
+        QTimer.singleShot(0, self, self.refresh_backdrop)
 
     def _update_encrypt_status(self):
         if not hasattr(self, "lbl_status") or self.tabs.currentIndex() != 1:
@@ -762,6 +911,7 @@ class SecurityCenterDialog(FramelessDraggableDialog):
             self.txt_dec_out_dir.setText(os.path.dirname(first_p))
 
         cnt = self.decrypt_table.rowCount()
+        self._sync_decrypt_table_controls()
         if hasattr(self, "lbl_status"):
             self.lbl_status.setText(f"已选 {cnt} 个待解密文件")
 
@@ -796,10 +946,12 @@ class SecurityCenterDialog(FramelessDraggableDialog):
                 if it:
                     it.setText(str(r + 1))
             cnt = self.decrypt_table.rowCount()
+            self._sync_decrypt_table_controls()
             self.lbl_status.setText(f"已选 {cnt} 个待解密文件" if cnt > 0 else "请添加待解密 PDF 文件")
 
     def _on_dec_clear_clicked(self):
         self.decrypt_table.setRowCount(0)
+        self._sync_decrypt_table_controls()
         self.lbl_status.setText("已清空列表")
 
     def _on_dec_browse_dir_clicked(self):
@@ -807,15 +959,27 @@ class SecurityCenterDialog(FramelessDraggableDialog):
         if folder:
             self.txt_dec_out_dir.setText(folder)
 
+    def _set_table_drag_active(self, active: bool):
+        card = getattr(self, "table_card", None)
+        if card is not None:
+            card.setProperty("dragActive", "true" if active else "false")
+            card.style().unpolish(card)
+            card.style().polish(card)
+
     def _decrypt_drag_enter(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+            self._set_table_drag_active(True)
 
     def _decrypt_drag_move(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
+    def _decrypt_drag_leave(self, _event):
+        self._set_table_drag_active(False)
+
     def _decrypt_drop(self, event):
+        self._set_table_drag_active(False)
         urls = event.mimeData().urls()
         files = []
         for u in urls:

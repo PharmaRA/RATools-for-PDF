@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from ratools_pdf.pdf import qpdf
 from ratools_pdf.ui.dialogs.overlay_dialog import OverlayUnderlayDialog
 from ratools_pdf.ui.dialogs.security_center_dialog import SecurityCenterDialog
+from ratools_pdf.ui.widgets import NoFocusItemDelegate
 
 
 app = QApplication.instance() or QApplication([])
@@ -204,19 +205,45 @@ class SecurityAndOverlayDialogUiTests(unittest.TestCase):
             _create_sample_pdf(pdf_path, 1)
 
             dlg = SecurityCenterDialog(initial_file=pdf_path)
+            self.assertEqual("PDF 加密与解密", dlg.title_lbl.text())
             self.assertEqual(dlg.txt_input.text(), pdf_path)
             self.assertIn("_encrypted.pdf", dlg.txt_output.text())
             self.assertEqual(dlg.tabs.count(), 2)
             self.assertIn("解密", dlg.tabs.tabText(0))
             self.assertIn("加密", dlg.tabs.tabText(1))
 
+            # 验证无多余网格线、行头与虚线焦点框
+            self.assertFalse(dlg.decrypt_table.showGrid())
+            self.assertTrue(dlg.decrypt_table.verticalHeader().isHidden())
+            self.assertIsInstance(dlg.decrypt_table.itemDelegate(), NoFocusItemDelegate)
+
+            # 验证密码复选框联动输入框可用状态
+            self.assertFalse(dlg.txt_dec_pass.isEnabled())
+            dlg.cb_dec_use_pass.setChecked(True)
+            self.assertTrue(dlg.txt_dec_pass.isEnabled())
+
+            self.assertFalse(dlg.txt_user_pass.isEnabled())
+            dlg.cb_user_pass.setChecked(True)
+            self.assertTrue(dlg.txt_user_pass.isEnabled())
+
+            self.assertTrue(dlg.txt_owner_pass.isEnabled())
+            dlg.cb_owner_pass.setChecked(False)
+            self.assertFalse(dlg.txt_owner_pass.isEnabled())
+
             # 验证签名与表单限制移除复选框
             self.assertTrue(dlg.cb_dec_remove_restrictions.isChecked())
             self.assertFalse(dlg.cb_dec_remove_acroform.isChecked())
 
-            # 添加文件到解密表格
+            # 添加文件到解密表格并检查按钮状态同步
+            self.assertTrue(dlg.btn_dec_clear.isEnabled())
+            self.assertFalse(dlg.btn_dec_remove.isEnabled())
             dlg.add_decrypt_files([pdf_path])
             self.assertEqual(dlg.decrypt_table.rowCount(), 2)  # initial_file (1) + added (1)
+            dlg.decrypt_table.selectRow(0)
+            self.assertTrue(dlg.btn_dec_remove.isEnabled())
+            dlg._on_dec_clear_clicked()
+            self.assertFalse(dlg.btn_dec_clear.isEnabled())
+            self.assertFalse(dlg.btn_dec_remove.isEnabled())
             dlg.close()
 
     def test_overlay_dialog_init(self):

@@ -3,7 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QCursor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QProgressBar,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from ratools_pdf.config import rules_catalog
 from ratools_pdf.config.compression import (
@@ -53,9 +55,11 @@ from ratools_pdf.ui.dialogs import (
     SettingsDialog,
 )
 from ratools_pdf.ui.dialogs.prompts import MajorUpdatePromptDialog, SignedFilesPromptDialog
+from ratools_pdf.ui.module_search import highlight_matches, search_modules
 from ratools_pdf.ui.theme import (
     ThemeManager,
     active_palette,
+    active_typography,
     apply_windows_title_bar_theme,
     build_app_qss,
 )
@@ -65,6 +69,7 @@ from ratools_pdf.ui.widgets import (
     NavModuleButton,
     QueueTreeWidget,
     RuleOptionCard,
+    SearchLineEdit,
     StatusBadgeDelegate,
 )
 
@@ -109,6 +114,10 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(970, 620)
 
         self.all_checkboxes = {}
+        self.rule_cards = {}
+        self._search_sync_connections = []
+        self._last_search_result = None
+        self._highlighted_widget = None
         self.current_file_count = 0
 
         # ================= 初始化 QSettings 与主题管理 =================
@@ -119,10 +128,16 @@ class MainWindow(QMainWindow):
         # 否则启动时会给 MainWindow 残留一份本地亮色 QSS，压过应用级暗色主题。
         app = QApplication.instance()
         theme_mode = str(self.app_settings.value("Settings/ThemeMode", "system") or "system").lower()
+        font_scale = str(self.app_settings.value("Settings/FontScale", "standard") or "standard").lower()
         if app is not None:
-            self.theme_manager = ThemeManager(app, theme_mode)
+            self.theme_manager = ThemeManager(
+                app,
+                theme_mode,
+                font_scale=font_scale,
+                parent=self,
+            )
             self.theme_manager.changed.connect(self.apply_native_title_bar_theme)
-            self.theme_manager.changed.connect(self.refresh_icons)
+            self.theme_manager.changed.connect(self._on_theme_or_typography_changed)
             self.theme_manager.apply()
         else:
             self.theme_manager = None
@@ -139,7 +154,13 @@ class MainWindow(QMainWindow):
         self.MODULES_DATA = rules_catalog.MODULES
 
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # 小屏/高缩放时允许外框缩至工作区内，完整内容仍可滚动访问。
+        central_widget.setMinimumSize(970, 620)
+        content_scroll = QScrollArea()
+        content_scroll.setFrameShape(QFrame.NoFrame)
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setWidget(central_widget)
+        self.setCentralWidget(content_scroll)
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -173,6 +194,16 @@ class MainWindow(QMainWindow):
         self.settings_dialog.set_theme_mode(theme_mode)
         for mode, btn in self.settings_dialog.theme_buttons.items():
             btn.clicked.connect(lambda _checked=False, m=mode: self.on_theme_mode_changed(m))
+
+        self._sync_font_scale_ui()
+        self.settings_dialog.font_scale_group.buttonClicked.connect(
+            self._on_font_scale_button_clicked
+        )
+
+        self._shortcut_search_f = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._shortcut_search_f.activated.connect(self.focus_module_search)
+        self._shortcut_search_k = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._shortcut_search_k.activated.connect(self.focus_module_search)
 
         self.load_all_settings()
         self.refresh_selection_summary()
@@ -288,7 +319,7 @@ class MainWindow(QMainWindow):
         # ================= 左侧导航栏 =================
         left_sidebar = QFrame()
         left_sidebar.setObjectName("leftSidebar")
-        left_sidebar.setFixedWidth(216)
+        left_sidebar.setFixedWidth(228)
         left_layout = QVBoxLayout(left_sidebar)
         left_layout.setContentsMargins(12, 14, 12, 14)
         left_layout.setSpacing(6)
@@ -296,6 +327,27 @@ class MainWindow(QMainWindow):
         nav_title = QLabel("功能模块")
         nav_title.setObjectName("navTitle")
         left_layout.addWidget(nav_title)
+
+        self.module_search_input = SearchLineEdit()
+        self.module_search_input.setObjectName("moduleSearchInput")
+        self.module_search_input.setPlaceholderText("搜索模块或规则…")
+        self.module_search_input.setToolTip("搜索功能模块、规则名称、说明或工具（Ctrl+F）")
+        pal = active_palette()
+        self._search_icon_action = self.module_search_input.addAction(
+            icons.svg_icon("search", pal.text_muted, size=14),
+            QLineEdit.LeadingPosition,
+        )
+        self._search_clear_action = self.module_search_input.addAction(
+            icons.svg_icon("close", pal.text_muted, size=14),
+            QLineEdit.TrailingPosition,
+        )
+        self._search_clear_action.setToolTip("清空搜索")
+        self._search_clear_action.setVisible(False)
+        self._search_clear_action.triggered.connect(self.clear_module_search)
+        self.module_search_input.textChanged.connect(self.on_module_search_changed)
+        self.module_search_input.escape_pressed.connect(self.clear_module_search)
+        self.module_search_input.submit_pressed.connect(self._activate_first_search_result)
+        left_layout.addWidget(self.module_search_input)
 
         self.nav_buttons = []
         self.nav_btn_group = QButtonGroup(self)
@@ -308,6 +360,13 @@ class MainWindow(QMainWindow):
             self.nav_btn_group.addButton(btn, idx)
             left_layout.addWidget(btn)
 
+        self.module_search_empty_label = QLabel("未找到匹配模块")
+        self.module_search_empty_label.setObjectName("moduleSearchEmpty")
+        self.module_search_empty_label.setAlignment(Qt.AlignCenter)
+        self.module_search_empty_label.setWordWrap(True)
+        self.module_search_empty_label.hide()
+        left_layout.addWidget(self.module_search_empty_label)
+
         self.nav_buttons[0].setChecked(True)
         left_layout.addStretch()
 
@@ -316,10 +375,11 @@ class MainWindow(QMainWindow):
         sidebar_sep.setFixedHeight(1)
         left_layout.addWidget(sidebar_sep)
 
-        self.btn_top_security = QPushButton("安全中心")
+        self.btn_top_security = QPushButton("加密与解密")
         self.btn_top_security.setObjectName("sidebarUtilBtn")
         self.btn_top_security.setCursor(Qt.PointingHandCursor)
         self.btn_top_security.setIconSize(QSize(15, 15))
+        self.btn_top_security.setToolTip("PDF 批量解密、解除权限限制与加密保护")
         self.btn_top_security.clicked.connect(lambda: self.show_security_center_dialog())
         left_layout.addWidget(self.btn_top_security)
 
@@ -552,10 +612,16 @@ class MainWindow(QMainWindow):
         self.btn_clear_module.setObjectName("moduleActionLink")
         self.btn_clear_module.setCursor(Qt.PointingHandCursor)
         self.btn_clear_module.clicked.connect(self._clear_current_module_options)
+        self.btn_clear_search = QPushButton("清空搜索")
+        self.btn_clear_search.setObjectName("moduleActionLink")
+        self.btn_clear_search.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_search.clicked.connect(self.clear_module_search)
+        self.btn_clear_search.hide()
         rh_sub_row.addWidget(self.module_selection_label)
         rh_sub_row.addStretch()
         rh_sub_row.addWidget(self.btn_select_module)
         rh_sub_row.addWidget(self.btn_clear_module)
+        rh_sub_row.addWidget(self.btn_clear_search)
         rh_layout.addLayout(rh_sub_row)
 
         right_layout.addWidget(right_header)
@@ -566,6 +632,7 @@ class MainWindow(QMainWindow):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setObjectName("settingsScroll")
+        self.settings_scroll_area = scroll_area
 
         self.settings_container = QWidget()
         self.settings_layout = QVBoxLayout(self.settings_container)
@@ -594,12 +661,13 @@ class MainWindow(QMainWindow):
         self.btn_detect_broken_refs.setIconSize(QSize(14, 14))
         self.btn_detect_broken_refs.setToolTip("扫描队列中所有 PDF，检测 Word 转 PDF 后残留的“错误！未找到引用源”等失效占位文本，仅检测不修改文件。")
 
-        self.btn_open_inspector_studio = QPushButton("打开 PDF 深度诊断与受损修复工作台...")
+        self.btn_open_inspector_studio = QPushButton("打开 PDF 深度诊断与受损修复工作台...", self)
         self.btn_open_inspector_studio.setObjectName("secondaryBtn")
         self.btn_open_inspector_studio.setCursor(Qt.PointingHandCursor)
         self.btn_open_inspector_studio.setIconSize(QSize(14, 14))
         self.btn_open_inspector_studio.setToolTip("使用 qpdf 对 PDF 执行语法合规体检(--check)、查看加密透视、分析线性化报告及强制重建受损 XRef。")
         self.btn_open_inspector_studio.clicked.connect(lambda: self.show_pdf_inspector_dialog())
+        self.btn_open_inspector_studio.hide()
 
         for btn in [self.btn_bookmark_io_wizard, self.btn_link_io_wizard]:
             btn.setObjectName("secondaryBtn")
@@ -618,6 +686,7 @@ class MainWindow(QMainWindow):
                         page_layout.addWidget(self._create_checkbox(opt["id"], opt["title"], opt["desc"], False))
 
                 comp_card = self._build_compression_card()
+                self.compression_card = comp_card
                 page_layout.addWidget(comp_card)
 
                 for opt in mod["options"]:
@@ -679,6 +748,24 @@ class MainWindow(QMainWindow):
             self.settings_layout.addWidget(page)
             page.hide()
             self.settings_pages.append(page)
+
+        self.search_results_page = QWidget()
+        self.search_results_layout = QVBoxLayout(self.search_results_page)
+        self.search_results_layout.setContentsMargins(14, 14, 14, 16)
+        self.search_results_layout.setSpacing(8)
+        self.settings_layout.addWidget(self.search_results_page)
+        self.search_results_page.hide()
+
+        self._tool_buttons = {
+            "embed_missing_fonts": getattr(self, "btn_embed_missing_fonts", None),
+            "bookmark_io_wizard": getattr(self, "btn_bookmark_io_wizard", None),
+            "link_io_wizard": getattr(self, "btn_link_io_wizard", None),
+            "remove_watermark": getattr(self, "btn_remove_watermark", None),
+            "detect_annotations": getattr(self, "btn_detect_annotations", None),
+            "detect_broken_refs": getattr(self, "btn_detect_broken_refs", None),
+            "security_center": getattr(self, "btn_top_security", None),
+            "global_settings": getattr(self, "btn_top_settings", None),
+        }
 
         scroll_area.setWidget(self.settings_container)
         right_layout.addWidget(scroll_area)
@@ -977,6 +1064,48 @@ class MainWindow(QMainWindow):
                 quality = DEFAULT_JPEG_QUALITY
             self.spin_image_quality.setValue(quality)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_startup_window_placed", False):
+            return
+        self._startup_window_placed = True
+        screen = QApplication.screenAt(QCursor.pos()) or self.screen()
+        if screen is not None:
+            self.setScreen(screen)
+        # 此时原生窗口已创建，避免构造期 winId() 提前固定窗口位置。
+        self.apply_native_title_bar_theme()
+        self._finish_startup_placement()
+        # Windows 在首次显示时还会更新 DPI/非客户区尺寸，下一轮再校正一次。
+        QTimer.singleShot(0, self._finish_startup_placement)
+
+    def _finish_startup_placement(self):
+        if not self.isVisible() or self.isMinimized() or self.isMaximized() or self.isFullScreen():
+            return
+        screen = self.screen()
+        if screen is not None:
+            self._fit_startup_window(screen.availableGeometry())
+
+    def _fit_startup_window(self, available):
+        """在 Qt 逻辑坐标中安置整个外框，保留任务栏和原生标题栏空间。"""
+        if available.isEmpty():
+            return
+        # Win11 的不可见 resize border 不一定计入 Qt frameGeometry；留出
+        # 逻辑像素间距，避免原生外框覆盖任务栏或越过显示器边缘。
+        margin = min(12, (available.width() - 1) // 2, (available.height() - 1) // 2)
+        available = available.adjusted(margin, margin, -margin, -margin)
+        frame = self.frameGeometry()
+        border_width = max(0, frame.width() - self.width())
+        border_height = max(0, frame.height() - self.height())
+        width = max(1, available.width() - border_width)
+        height = max(1, available.height() - border_height)
+        self.setMinimumSize(min(970, width), min(620, height))
+        self.resize(min(self.width(), width), min(self.height(), height))
+        frame = self.frameGeometry()
+        self.move(
+            available.x() + (available.width() - frame.width()) // 2,
+            available.y() + (available.height() - frame.height()) // 2,
+        )
+
     def closeEvent(self, event):
         close_guard = getattr(self, "close_guard", None)
         if close_guard is not None and not close_guard():
@@ -1000,6 +1129,8 @@ class MainWindow(QMainWindow):
         self.app_settings.setValue("Settings/ParallelWorkerCount", self.settings_dialog.spin_parallel_workers.value())
         self.app_settings.setValue("Settings/ProcessingMode", self.get_processing_mode())
         self.app_settings.setValue("Settings/FileTimeoutSeconds", self.settings_dialog.spin_file_timeout.value())
+        if self.theme_manager is not None:
+            self.app_settings.setValue("Settings/FontScale", self.theme_manager.font_scale)
 
     def persist_parallel_settings(self):
         if not hasattr(self, "app_settings") or self.is_applying_preset:
@@ -1027,8 +1158,44 @@ class MainWindow(QMainWindow):
         self.refresh_icons(active_palette())
         QTimer.singleShot(0, self.apply_native_title_bar_theme)
 
+    def _sync_font_scale_ui(self):
+        if not hasattr(self, "settings_dialog"):
+            return
+        typo = (
+            self.theme_manager.current_typography()
+            if self.theme_manager is not None
+            else active_typography()
+        )
+        self.settings_dialog.set_font_scale(typo.scale, base_px=typo.fs_base)
+
+    def _on_font_scale_button_clicked(self, button):
+        for scale_key, btn in self.settings_dialog.font_scale_buttons.items():
+            if btn is button:
+                self.on_font_scale_changed(scale_key)
+                return
+
+    def on_font_scale_changed(self, scale):
+        """切换界面字号缩放并立即生效与持久化。"""
+        if self.theme_manager is not None:
+            self.theme_manager.set_font_scale(scale)
+        if hasattr(self, "app_settings"):
+            self.app_settings.setValue("Settings/FontScale", scale)
+        self._sync_font_scale_ui()
+
+    def _on_theme_or_typography_changed(self, palette=None):
+        if not isValid(self):
+            return
+        pal = palette or active_palette()
+        self.refresh_icons(pal)
+        self._sync_font_scale_ui()
+        last_result = getattr(self, "_last_search_result", None)
+        if last_result is not None and last_result.is_active:
+            self._rebuild_search_results(last_result)
+
     def apply_native_title_bar_theme(self, palette=None):
         """同步 Windows 原生标题栏颜色；非 Windows 平台会静默跳过。"""
+        if not isValid(self) or not self.isVisible():
+            return
         apply_windows_title_bar_theme(self, palette or active_palette())
 
     def refresh_icons(self, palette=None):
@@ -1066,6 +1233,13 @@ class MainWindow(QMainWindow):
         for nav_btn in getattr(self, "nav_buttons", []):
             if hasattr(nav_btn, "set_theme_icon"):
                 nav_btn.set_theme_icon(pal)
+
+        search_icon_action = getattr(self, "_search_icon_action", None)
+        if search_icon_action is not None:
+            search_icon_action.setIcon(icons.svg_icon("search", pal.text_muted, size=14))
+        search_clear_action = getattr(self, "_search_clear_action", None)
+        if search_clear_action is not None:
+            search_clear_action.setIcon(icons.svg_icon("close", pal.text_muted, size=14))
 
         empty_icon = getattr(self, "empty_drop_icon", None)
         if empty_icon is not None:
@@ -1278,6 +1452,10 @@ class MainWindow(QMainWindow):
             if idx < len(nav_buttons) and hasattr(nav_buttons[idx], "set_badge_count"):
                 selected, _total = self._module_option_stats(mod)
                 nav_buttons[idx].set_badge_count(selected)
+
+        last_search = getattr(self, "_last_search_result", None)
+        if last_search is not None and last_search.is_active:
+            return
 
         mod_idx = getattr(self, "current_module_index", 0)
         if 0 <= mod_idx < len(modules):
@@ -1520,7 +1698,11 @@ class MainWindow(QMainWindow):
 
     def switch_settings_page(self, index):
         # ⚠️使用原生的显示/隐藏逻辑：隐藏的 QWidget 在 QVBoxLayout 中绝对不占任何空间参与高度计算
+        if getattr(self, "_last_search_result", None) is not None and self._last_search_result.is_active:
+            self._reset_search_state(restore_page=False)
         self.current_module_index = index
+        if hasattr(self, "search_results_page"):
+            self.search_results_page.hide()
         for i, page in enumerate(self.settings_pages):
             if i == index:
                 page.show()
@@ -1529,6 +1711,373 @@ class MainWindow(QMainWindow):
         if hasattr(self, "rh_title") and 0 <= index < len(self.MODULES_DATA):
             self.rh_title.setText(self.MODULES_DATA[index]["title"])
         self._refresh_module_indicators()
+
+    def focus_module_search(self):
+        search_input = getattr(self, "module_search_input", None)
+        if search_input is None:
+            return
+        search_input.setFocus()
+        search_input.selectAll()
+
+    def clear_module_search(self):
+        search_input = getattr(self, "module_search_input", None)
+        if search_input is None:
+            return
+        if search_input.text():
+            search_input.clear()
+        else:
+            self._reset_search_state(restore_page=True)
+
+    def _clear_search_results_layout(self):
+        for cb, conn in getattr(self, "_search_sync_connections", []):
+            try:
+                if isValid(cb):
+                    cb.toggled.disconnect(conn)
+            except (RuntimeError, TypeError):
+                pass
+        self._search_sync_connections = []
+
+        layout = getattr(self, "search_results_layout", None)
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+
+    def _reset_search_state(self, restore_page: bool = True):
+        search_input = getattr(self, "module_search_input", None)
+        if search_input is not None and search_input.text():
+            search_input.blockSignals(True)
+            try:
+                search_input.clear()
+            finally:
+                search_input.blockSignals(False)
+        if getattr(self, "_search_clear_action", None) is not None:
+            self._search_clear_action.setVisible(False)
+        self._last_search_result = None
+        for btn in getattr(self, "nav_buttons", []):
+            btn.setVisible(True)
+        if hasattr(self, "module_search_empty_label"):
+            self.module_search_empty_label.hide()
+        if hasattr(self, "btn_clear_search"):
+            self.btn_clear_search.hide()
+        self._clear_search_results_layout()
+        if hasattr(self, "search_results_page"):
+            self.search_results_page.hide()
+        if restore_page:
+            idx = getattr(self, "current_module_index", 0)
+            for i, page in enumerate(self.settings_pages):
+                page.setVisible(i == idx)
+            if hasattr(self, "rh_title") and 0 <= idx < len(self.MODULES_DATA):
+                self.rh_title.setText(self.MODULES_DATA[idx]["title"])
+            self._refresh_module_indicators()
+
+    def on_module_search_changed(self, text: str):
+        has_text = bool((text or "").strip())
+        if getattr(self, "_search_clear_action", None) is not None:
+            self._search_clear_action.setVisible(has_text)
+
+        result = search_modules(text, self.MODULES_DATA)
+        if not result.is_active:
+            self._reset_search_state(restore_page=True)
+            return
+
+        self._last_search_result = result
+        for idx, btn in enumerate(self.nav_buttons):
+            btn.setVisible(idx in result.matched_module_indices)
+
+        if hasattr(self, "module_search_empty_label"):
+            self.module_search_empty_label.setVisible(len(result.matched_module_indices) == 0)
+
+        for page in self.settings_pages:
+            page.hide()
+
+        self._rebuild_search_results(result)
+        if hasattr(self, "search_results_page"):
+            self.search_results_page.show()
+
+        if hasattr(self, "rh_title"):
+            self.rh_title.setText("搜索结果")
+        if hasattr(self, "module_selection_label"):
+            self.module_selection_label.setText(
+                f"共找到 {result.total_matches} 项匹配"
+                if result.total_matches > 0
+                else "未找到匹配功能"
+            )
+        if hasattr(self, "btn_select_module"):
+            self.btn_select_module.hide()
+        if hasattr(self, "btn_clear_module"):
+            self.btn_clear_module.hide()
+        if hasattr(self, "btn_clear_search"):
+            self.btn_clear_search.show()
+
+        scroll_area = getattr(self, "settings_scroll_area", None)
+        if scroll_area is not None:
+            scroll_area.verticalScrollBar().setValue(0)
+
+    def _current_lossless_label(self) -> str:
+        if hasattr(self, "cb_compress_aggressive") and self.cb_compress_aggressive.isChecked():
+            return "当前：极限无损"
+        if (
+            (hasattr(self, "cb_compress_standard") and self.cb_compress_standard.isChecked())
+            or (hasattr(self, "cb_generate_object_streams") and self.cb_generate_object_streams.isChecked())
+        ):
+            return "当前：智能无损"
+        return "当前：未启用"
+
+    def _build_search_action_card(
+        self,
+        title_html: str,
+        desc_html: str,
+        status_text: str,
+        primary_label: str,
+        primary_callback,
+        *,
+        primary_enabled: bool = True,
+        primary_tooltip: str = "",
+        module_index: int = -1,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("searchActionCard")
+        v_layout = QVBoxLayout(card)
+        v_layout.setContentsMargins(12, 10, 12, 10)
+        v_layout.setSpacing(6)
+
+        title_lbl = QLabel(title_html)
+        title_lbl.setObjectName("optionTitle")
+        title_lbl.setTextFormat(Qt.TextFormat.RichText)
+        title_lbl.setWordWrap(True)
+        title_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        v_layout.addWidget(title_lbl)
+
+        if desc_html:
+            desc_lbl = QLabel(desc_html)
+            desc_lbl.setObjectName("optionDesc")
+            desc_lbl.setTextFormat(Qt.TextFormat.RichText)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            v_layout.addWidget(desc_lbl)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 2, 0, 0)
+        action_row.setSpacing(6)
+        if status_text:
+            status_lbl = QLabel(status_text)
+            status_lbl.setObjectName("mutedSmall")
+            action_row.addWidget(status_lbl)
+        action_row.addStretch()
+
+        if module_index >= 0 and primary_label != "进入模块":
+            jump_link = QPushButton("定位模块")
+            jump_link.setObjectName("moduleActionLink")
+            jump_link.setCursor(Qt.PointingHandCursor)
+            jump_link.clicked.connect(lambda _c=False, m=module_index: self.jump_to_module(m))
+            action_row.addWidget(jump_link)
+
+        action_btn = QPushButton(primary_label)
+        action_btn.setObjectName("compactSecondaryBtn")
+        action_btn.setCursor(Qt.PointingHandCursor)
+        action_btn.setEnabled(primary_enabled)
+        if primary_tooltip:
+            action_btn.setToolTip(primary_tooltip)
+        action_btn.clicked.connect(lambda _c=False: primary_callback())
+        action_row.addWidget(action_btn)
+
+        v_layout.addLayout(action_row)
+        return card
+
+    def _rebuild_search_results(self, result):
+        self._clear_search_results_layout()
+        layout = getattr(self, "search_results_layout", None)
+        if layout is None:
+            return
+
+        pal = active_palette()
+        tokens = result.tokens
+
+        if result.total_matches == 0 and not result.matched_module_indices:
+            empty_card = QFrame()
+            empty_card.setObjectName("searchEmptyCard")
+            empty_layout = QVBoxLayout(empty_card)
+            empty_layout.setContentsMargins(16, 20, 16, 20)
+            empty_layout.setSpacing(8)
+
+            title_lbl = QLabel("没有找到匹配的功能或规则")
+            title_lbl.setObjectName("optionTitle")
+            title_lbl.setAlignment(Qt.AlignCenter)
+            hint_lbl = QLabel("试试搜索“书签”、“压缩”、“A4”、“水印”、“字体”或“eCTD”等关键词。")
+            hint_lbl.setObjectName("optionDesc")
+            hint_lbl.setWordWrap(True)
+            hint_lbl.setAlignment(Qt.AlignCenter)
+
+            btn_reset = QPushButton("清空搜索条件")
+            btn_reset.setObjectName("compactSecondaryBtn")
+            btn_reset.setCursor(Qt.PointingHandCursor)
+            btn_reset.clicked.connect(self.clear_module_search)
+
+            empty_layout.addWidget(title_lbl)
+            empty_layout.addWidget(hint_lbl)
+            empty_layout.addSpacing(4)
+            empty_layout.addWidget(btn_reset, 0, Qt.AlignCenter)
+            layout.addWidget(empty_card)
+            layout.addStretch()
+            return
+
+        for group in result.groups:
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(2, 4, 2, 0)
+            header_row.setSpacing(6)
+
+            group_title = QLabel(group.module_title)
+            group_title.setObjectName("searchGroupTitle")
+            header_row.addWidget(group_title)
+
+            if group.items:
+                count_lbl = QLabel(f"{len(group.items)} 项")
+                count_lbl.setObjectName("searchGroupCount")
+                header_row.addWidget(count_lbl)
+
+            header_row.addStretch()
+
+            if group.module_index >= 0:
+                enter_btn = QPushButton("进入模块")
+                enter_btn.setObjectName("moduleActionLink")
+                enter_btn.setCursor(Qt.PointingHandCursor)
+                enter_btn.clicked.connect(
+                    lambda _c=False, m=group.module_index: self.jump_to_module(m)
+                )
+                header_row.addWidget(enter_btn)
+
+            layout.addLayout(header_row)
+
+            for item in group.items:
+                title_html = highlight_matches(item.title, tokens, pal.selection_bg, pal.selection_text)
+                desc_html = highlight_matches(item.desc, tokens, pal.selection_bg, pal.selection_text)
+
+                if item.kind == "rule":
+                    real_cb = self.all_checkboxes.get(item.id)
+                    if real_cb is None:
+                        continue
+                    card = RuleOptionCard(
+                        title_html,
+                        desc_html,
+                        real_cb.isChecked(),
+                        tag=self.RULE_TAGS.get(item.id),
+                        rich_text=True,
+                    )
+                    search_cb = card.checkbox
+
+                    def _on_search_cb_toggled(checked, target=real_cb):
+                        if target.isChecked() != checked:
+                            target.setChecked(checked)
+
+                    def _on_real_cb_toggled(checked, proxy=search_cb, proxy_card=card):
+                        if not isValid(proxy):
+                            return
+                        if proxy.isChecked() != checked:
+                            proxy.blockSignals(True)
+                            try:
+                                proxy.setChecked(checked)
+                            finally:
+                                proxy.blockSignals(False)
+                        if isValid(proxy_card):
+                            proxy_card._sync_checked_state(checked)
+
+                    search_cb.toggled.connect(_on_search_cb_toggled)
+                    conn = real_cb.toggled.connect(_on_real_cb_toggled)
+                    self._search_sync_connections.append((real_cb, conn))
+                    layout.addWidget(card)
+
+                elif item.kind == "lossless_rule":
+                    comp_card = getattr(self, "compression_card", None)
+                    card = self._build_search_action_card(
+                        title_html,
+                        desc_html,
+                        self._current_lossless_label(),
+                        "前往配置",
+                        lambda m=item.module_index, w=comp_card: self.jump_to_module(m, focus_widget=w),
+                        module_index=item.module_index,
+                    )
+                    layout.addWidget(card)
+
+                elif item.kind == "tool":
+                    backing_btn = getattr(self, "_tool_buttons", {}).get(item.id)
+                    can_trigger = backing_btn is not None and backing_btn.isEnabled()
+                    tip = ""
+                    if backing_btn is not None and not can_trigger:
+                        tip = backing_btn.toolTip() or "请先添加 PDF 文件后执行"
+                    label = "打开" if item.module_index < 0 or item.id in {"remove_watermark", "bookmark_io_wizard", "link_io_wizard", "embed_missing_fonts"} else "执行"
+                    card = self._build_search_action_card(
+                        title_html,
+                        desc_html,
+                        "",
+                        label,
+                        (backing_btn.click if backing_btn is not None else lambda m=item.module_index: self.jump_to_module(m)),
+                        primary_enabled=(can_trigger if backing_btn is not None else True),
+                        primary_tooltip=tip,
+                        module_index=item.module_index,
+                    )
+                    layout.addWidget(card)
+
+            layout.addSpacing(4)
+
+        layout.addStretch()
+
+    def _activate_first_search_result(self):
+        result = getattr(self, "_last_search_result", None)
+        if result is None or not result.is_active or not result.groups:
+            return
+        first_group = result.groups[0]
+        if first_group.items:
+            first_item = first_group.items[0]
+            if first_item.module_index >= 0:
+                target_widget = (
+                    self.compression_card
+                    if first_item.kind == "lossless_rule"
+                    else self.rule_cards.get(first_item.id)
+                )
+                self.jump_to_module(first_item.module_index, focus_widget=target_widget)
+                return
+            backing_btn = getattr(self, "_tool_buttons", {}).get(first_item.id)
+            if backing_btn is not None and backing_btn.isEnabled():
+                backing_btn.click()
+                return
+        if first_group.module_index >= 0:
+            self.jump_to_module(first_group.module_index)
+
+    def _set_widget_search_highlight(self, widget, active: bool):
+        if widget is None or not isValid(widget):
+            return
+        widget.setProperty("searchHighlight", "true" if active else "false")
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def jump_to_module(self, module_index: int, focus_widget=None):
+        if not (0 <= module_index < len(self.MODULES_DATA)):
+            return
+        if 0 <= module_index < len(self.nav_buttons):
+            self.nav_buttons[module_index].setChecked(True)
+        self.switch_settings_page(module_index)
+
+        if focus_widget is not None and isValid(focus_widget):
+            prev = getattr(self, "_highlighted_widget", None)
+            if prev is not None and prev is not focus_widget:
+                self._set_widget_search_highlight(prev, False)
+            self._highlighted_widget = focus_widget
+
+            def _apply_focus():
+                if not isValid(focus_widget):
+                    return
+                scroll_area = getattr(self, "settings_scroll_area", None)
+                if scroll_area is not None and isValid(scroll_area):
+                    scroll_area.ensureWidgetVisible(focus_widget, 0, 24)
+                self._set_widget_search_highlight(focus_widget, True)
+                QTimer.singleShot(1200, lambda w=focus_widget: self._set_widget_search_highlight(w, False))
+
+            QTimer.singleShot(0, _apply_focus)
 
     def get_selected_options(self):
         selected = []
@@ -1743,6 +2292,7 @@ class MainWindow(QMainWindow):
         cb = card.checkbox
         cb.toggled.connect(self.on_checkbox_toggled)
         self.all_checkboxes[opt_id] = cb
+        self.rule_cards[opt_id] = card
         return card
 
     def _build_compression_card(self):
@@ -1792,10 +2342,17 @@ class MainWindow(QMainWindow):
         v_card.addWidget(self.lbl_compress_hint)
 
         # 内部虚拟复选框（注册进 self.all_checkboxes，与底层处理管线和预检逻辑无缝映射）
-        self.cb_compress_standard = QCheckBox()
-        self.cb_compress_aggressive = QCheckBox()
-        self.cb_generate_object_streams = QCheckBox()
-        self.cb_realloc_flate = QCheckBox()
+        self.cb_compress_standard = QCheckBox(card)
+        self.cb_compress_aggressive = QCheckBox(card)
+        self.cb_generate_object_streams = QCheckBox(card)
+        self.cb_realloc_flate = QCheckBox(card)
+        for cb in (
+            self.cb_compress_standard,
+            self.cb_compress_aggressive,
+            self.cb_generate_object_streams,
+            self.cb_realloc_flate,
+        ):
+            cb.hide()
 
         self.all_checkboxes["compress_standard"] = self.cb_compress_standard
         self.all_checkboxes["compress_aggressive"] = self.cb_compress_aggressive

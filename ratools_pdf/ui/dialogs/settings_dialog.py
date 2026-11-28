@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
+from ratools_pdf.ui import theme
 from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
@@ -93,6 +94,45 @@ class SettingsDialog(FramelessDraggableDialog):
         theme_row.addStretch()
         theme_layout.addLayout(theme_row)
         body_layout.addWidget(theme_card)
+
+        title = QLabel("界面字号")
+        title.setObjectName("dialogSectionTitle")
+        body_layout.addWidget(title)
+
+        font_card = QFrame()
+        font_card.setObjectName("settingsPathCard")
+        font_layout = QVBoxLayout(font_card)
+        font_layout.setContentsMargins(12, 12, 12, 12)
+        font_layout.setSpacing(10)
+
+        font_hint = QLabel("默认使用微软雅黑 UI，可按屏幕分辨率切换界面字号大小。")
+        font_hint.setWordWrap(True)
+        font_hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        font_hint.setObjectName("settingsPathHint")
+        font_layout.addWidget(font_hint)
+
+        scale_row = QHBoxLayout()
+        scale_row.setContentsMargins(0, 0, 0, 0)
+        scale_row.setSpacing(8)
+        self.font_scale_group = QButtonGroup(self)
+        self.font_scale_group.setExclusive(True)
+        self.font_scale_buttons = {}
+        for scale_key in ("compact", "standard", "comfortable"):
+            btn = QPushButton(theme.FONT_SCALE_LABELS[scale_key])
+            btn.setObjectName("themeSegBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            self.font_scale_group.addButton(btn)
+            self.font_scale_buttons[scale_key] = btn
+            scale_row.addWidget(btn)
+        scale_row.addStretch()
+        self.lbl_font_scale_status = QLabel("")
+        self.lbl_font_scale_status.setObjectName("settingsPathHint")
+        scale_row.addWidget(self.lbl_font_scale_status)
+        font_layout.addLayout(scale_row)
+
+        body_layout.addWidget(font_card)
 
         title = QLabel("默认保存位置")
         title.setObjectName("dialogSectionTitle")
@@ -249,6 +289,20 @@ class SettingsDialog(FramelessDraggableDialog):
             mode = "system"
         for key, btn in self.theme_buttons.items():
             btn.setChecked(key == mode)
+
+    def get_font_scale(self) -> str:
+        for scale_key, btn in self.font_scale_buttons.items():
+            if btn.isChecked():
+                return scale_key
+        return "standard"
+
+    def set_font_scale(self, scale: str, base_px: int | None = None):
+        norm_scale = scale if scale in self.font_scale_buttons else "standard"
+        for key, btn in self.font_scale_buttons.items():
+            btn.setChecked(key == norm_scale)
+        px = base_px if base_px is not None else theme.resolve_typography(norm_scale).fs_base
+        scale_label = theme.FONT_SCALE_LABELS.get(norm_scale, "标准")
+        self.lbl_font_scale_status.setText(f"当前：{scale_label} ({px}px)")
 
     def _build_stepper_spinbox(self, spinbox: QSpinBox, *, enabled: bool = True):
         """将 QSpinBox 包装为统一 Fluent 外置步进按钮样式。"""

@@ -5,7 +5,6 @@ import os
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -26,6 +25,7 @@ from ratools_pdf.pdf import qpdf
 from ratools_pdf.services.output_paths import path_key
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 from ratools_pdf.ui.dialogs.message_box import CustomMessageBox as QMessageBox
+from ratools_pdf.ui.theme import build_mono_qfont
 
 
 class DiagnosticWorker(QThread):
@@ -129,7 +129,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
 
         self.txt_check_log = QPlainTextEdit()
         self.txt_check_log.setReadOnly(True)
-        self.txt_check_log.setFont(QFont("Consolas", 10))
+        self.txt_check_log.setFont(build_mono_qfont())
         v1.addWidget(self.txt_check_log)
         self.tabs.addTab(self.tab_check, "语法健康体检")
 
@@ -145,7 +145,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
 
         self.txt_enc_log = QPlainTextEdit()
         self.txt_enc_log.setReadOnly(True)
-        self.txt_enc_log.setFont(QFont("Consolas", 10))
+        self.txt_enc_log.setFont(build_mono_qfont())
         v2.addWidget(self.txt_enc_log)
         self.tabs.addTab(self.tab_enc, "加密与权限透视")
 
@@ -161,7 +161,7 @@ class PdfInspectorDialog(FramelessDraggableDialog):
 
         self.txt_lin_log = QPlainTextEdit()
         self.txt_lin_log.setReadOnly(True)
-        self.txt_lin_log.setFont(QFont("Consolas", 10))
+        self.txt_lin_log.setFont(build_mono_qfont())
         v3.addWidget(self.txt_lin_log)
         self.tabs.addTab(self.tab_lin, "线性化(Web快速视图)")
 

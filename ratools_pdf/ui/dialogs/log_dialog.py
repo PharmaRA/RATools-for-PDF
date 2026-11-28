@@ -12,7 +12,7 @@ from ratools_pdf.ui.log_view_model import (
     build_log_summary_items,
     filter_log_summary_items,
 )
-from ratools_pdf.ui.theme import active_palette, log_status_colors
+from ratools_pdf.ui.theme import active_palette, active_typography, log_status_colors
 from ratools_pdf.ui.dialogs.base import FramelessDraggableDialog
 
 
@@ -219,8 +219,9 @@ class LogDialog(FramelessDraggableDialog):
 
         if not self.filtered_items:
             pal = active_palette()
+            typo = active_typography()
             self.text_edit.setHtml(
-                f"<div style='color:{pal.text_faint}; font-family:Consolas,\'Courier New\',monospace; font-size:12px;'>暂无匹配日志...</div>"
+                f"<div style='color:{pal.text_faint}; font-family:{typo.mono_font_css}; font-size:{typo.fs_sm}px;'>暂无匹配日志...</div>"
             )
             return
 
@@ -277,8 +278,9 @@ class LogDialog(FramelessDraggableDialog):
         accent, bg, _text = log_status_colors(pal, tags)
 
         highlighted = self._highlight_html(item.get("detail", ""), query)
+        typo = active_typography()
         self.text_edit.setHtml(
             f"<div style='padding:10px 12px; background:{bg}; border:1px solid {pal.border}; border-left:4px solid {accent}; border-radius:8px;'>"
-            f"<pre style='margin:0; white-space:pre-wrap; color:{pal.text_body}; font-family:Consolas,\"Courier New\",monospace; font-size:12px;'>{highlighted}</pre>"
+            f"<pre style='margin:0; white-space:pre-wrap; color:{pal.text_body}; font-family:{typo.mono_font_css}; font-size:{typo.fs_sm}px;'>{highlighted}</pre>"
             "</div>"
         )

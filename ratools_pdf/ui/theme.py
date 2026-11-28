@@ -23,7 +23,7 @@ from dataclasses import dataclass, asdict
 from string import Template
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from ratools_pdf.ui import icons, win32
@@ -259,6 +259,186 @@ def active_palette() -> Palette:
     return _ACTIVE_PALETTE
 
 
+# ============================================================================
+# 排版与字体系统
+# ============================================================================
+DEFAULT_UI_FONT_FAMILIES: tuple[str, ...] = ("Microsoft YaHei UI", "Segoe UI")
+
+PREFERRED_MONO_FONT_FAMILIES: tuple[str, ...] = (
+    "Cascadia Mono",
+    "JetBrains Mono",
+    "Consolas",
+    "Microsoft YaHei UI",
+    "Courier New",
+)
+
+FONT_SCALES: dict[str, int] = {
+    "compact": -1,
+    "standard": 0,
+    "comfortable": 1,
+}
+
+FONT_SCALE_LABELS: dict[str, str] = {
+    "compact": "紧凑",
+    "standard": "标准",
+    "comfortable": "舒适",
+}
+
+
+@dataclass(frozen=True)
+class Typography:
+    """应用级排版与字重/字号令牌。"""
+
+    scale: str
+    primary_family: str
+    ui_families: tuple[str, ...]
+    ui_font_css: str
+    mono_families: tuple[str, ...]
+    mono_font_css: str
+    has_medium_weight: bool
+    weight_regular: int
+    weight_medium: int
+    weight_bold: int
+    fs_xs: int
+    fs_sm: int
+    fs_base: int
+    fs_md: int
+    fs_lg: int
+    fs_xl: int
+    fs_2xl: int
+
+    def as_qss_tokens(self) -> dict:
+        return {
+            "font_ui": self.ui_font_css,
+            "font_mono": self.mono_font_css,
+            "w_regular": self.weight_regular,
+            "w_medium": self.weight_medium,
+            "w_bold": self.weight_bold,
+            "fs_xs": self.fs_xs,
+            "fs_sm": self.fs_sm,
+            "fs_base": self.fs_base,
+            "fs_md": self.fs_md,
+            "fs_lg": self.fs_lg,
+            "fs_xl": self.fs_xl,
+            "fs_2xl": self.fs_2xl,
+        }
+
+
+def installed_font_families() -> set[str]:
+    """安全获取当前系统已安装字体族集合。"""
+    try:
+        if QApplication.instance() is None:
+            return set()
+        return set(QFontDatabase.families())
+    except Exception:
+        return set()
+
+
+def font_has_medium_weight(family: str) -> bool:
+    """检查指定字体族是否具备真实的 Medium/Semibold 字重。"""
+    if not family or QApplication.instance() is None:
+        return False
+    try:
+        styles = QFontDatabase.styles(family)
+    except Exception:
+        return False
+    return any(
+        token in style.lower()
+        for style in styles
+        for token in ("medium", "semibold", "demibold")
+    )
+
+
+def _format_css_families(families: tuple[str, ...], generic: str) -> str:
+    quoted = [f'"{fam}"' for fam in families]
+    quoted.append(generic)
+    return ", ".join(quoted)
+
+
+def _dedupe_families(families: list[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for fam in families:
+        if fam and fam not in seen:
+            seen.add(fam)
+            result.append(fam)
+    return tuple(result)
+
+
+def resolve_typography(
+    scale: str = "standard",
+    installed: set[str] | None = None,
+) -> Typography:
+    """依据字号偏好与系统已安装等宽字体解析应用排版令牌。"""
+    norm_scale = scale if scale in FONT_SCALES else "standard"
+    delta = FONT_SCALES[norm_scale]
+    families = installed_font_families() if installed is None else set(installed)
+
+    ui_list = DEFAULT_UI_FONT_FAMILIES
+    primary_family = ui_list[0]
+    mono_list = _dedupe_families(
+        [f for f in PREFERRED_MONO_FONT_FAMILIES if (not families or f in families)]
+        + ["Consolas", "Microsoft YaHei UI", "Courier New"]
+    )
+
+    return Typography(
+        scale=norm_scale,
+        primary_family=primary_family,
+        ui_families=ui_list,
+        ui_font_css=_format_css_families(ui_list, "sans-serif"),
+        mono_families=mono_list,
+        mono_font_css=_format_css_families(mono_list, "monospace"),
+        has_medium_weight=font_has_medium_weight(primary_family),
+        weight_regular=400,
+        weight_medium=500,
+        weight_bold=700,
+        fs_xs=max(10, 11 + delta),
+        fs_sm=12 + delta,
+        fs_base=13 + delta,
+        fs_md=14 + delta,
+        fs_lg=15 + delta,
+        fs_xl=17 + delta,
+        fs_2xl=20 + delta,
+    )
+
+
+_ACTIVE_TYPOGRAPHY: Typography | None = None
+
+
+def active_typography() -> Typography:
+    """返回当前生效的排版令牌。"""
+    global _ACTIVE_TYPOGRAPHY
+    if _ACTIVE_TYPOGRAPHY is not None:
+        return _ACTIVE_TYPOGRAPHY
+    if QApplication.instance() is None:
+        return resolve_typography(installed=set())
+    _ACTIVE_TYPOGRAPHY = resolve_typography()
+    return _ACTIVE_TYPOGRAPHY
+
+
+def build_app_qfont(typography: Typography | None = None) -> QFont:
+    """构建应用级抗锯齿 UI 字体。"""
+    typo = typography or active_typography()
+    font = QFont()
+    font.setFamilies(list(typo.ui_families))
+    font.setPixelSize(typo.fs_base)
+    font.setWeight(QFont.Weight.Normal)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
+    font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
+    return font
+
+
+def build_mono_qfont(typography: Typography | None = None, size_delta: int = 0) -> QFont:
+    """构建日志与诊断视图使用的等宽字体（附带清晰中文回退）。"""
+    typo = typography or active_typography()
+    font = QFont()
+    font.setFamilies(list(typo.mono_families))
+    font.setPixelSize(max(10, typo.fs_sm + size_delta))
+    font.setWeight(QFont.Weight.Normal)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
+    return font
+
+
 # ---------------------------------------------------------------------------
 # 勾选框对勾图标（兼容旧导出入口）
 # ---------------------------------------------------------------------------
@@ -317,8 +497,9 @@ def apply_windows_title_bar_theme(widget, palette: Palette) -> bool:
 _APP_QSS_TEMPLATE = Template(r"""
 /* ============================ 全局基础 ============================ */
 QWidget {
-    font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-    font-size: 13px;
+    font-family: $font_ui;
+    font-size: ${fs_base}px;
+    font-weight: $w_regular;
     color: $text_body;
 }
 QMainWindow { background-color: $window; }
@@ -340,21 +521,35 @@ QToolTip {
 #mainView { background-color: $window; }
 
 /* ---- 左侧导航与底部全局入口 ---- */
-#navTitle { color: $text_faint; font-size: 12px; font-weight: 700; margin: 2px 6px 6px 6px; }
+#navTitle { color: $text_faint; font-size: ${fs_sm}px; font-weight: $w_medium; letter-spacing: 0.5px; margin: 2px 6px 2px 6px; }
+#moduleSearchInput {
+    background-color: $surface;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: ${fs_sm}px;
+    font-weight: $w_regular;
+    color: $text_body;
+    selection-background-color: $selection_bg;
+    selection-color: $selection_text;
+}
+#moduleSearchInput:hover { border-color: $border_strong; }
+#moduleSearchInput:focus { border-color: $primary; }
+#moduleSearchEmpty { color: $text_faint; font-size: ${fs_sm}px; padding: 12px 8px; }
 #navBtn {
     text-align: left;
     padding: 10px 36px 10px 12px;
     border: 1px solid transparent;
     border-radius: 6px;
     color: $text_body;
-    font-weight: 600;
+    font-weight: $w_regular;
     background-color: transparent;
 }
 #navBtn:hover { background-color: $surface_hover; color: $text; }
 #navBtn:checked {
     background-color: $primary_soft;
     color: $primary_text;
-    font-weight: 700;
+    font-weight: $w_bold;
     border-color: $primary_soft_border;
 }
 #sidebarSep { background-color: $border; border: none; margin: 4px 2px; }
@@ -364,7 +559,7 @@ QToolTip {
     border: 1px solid transparent;
     border-radius: 6px;
     color: $text_body;
-    font-weight: 600;
+    font-weight: $w_regular;
     background-color: transparent;
 }
 #sidebarUtilBtn:hover { background-color: $surface_hover; color: $text; border-color: $border; }
@@ -374,8 +569,8 @@ QToolTip {
     border: 1px solid $border;
     border-radius: 6px;
     color: $text_body;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_regular;
     padding: 6px 10px;
 }
 #sidebarFooterBtn:hover, #themeQuickBtn:hover {
@@ -391,19 +586,19 @@ QToolTip {
     border: 1px solid $border;
     border-radius: 8px;
 }
-#sectionTitle { font-size: 14px; font-weight: 700; color: $text; }
-#sectionHint { color: $text_muted; font-size: 12px; }
-#listTitle { font-weight: 700; font-size: 14px; color: $text; }
-#rightPanelTitle { font-weight: 700; font-size: 14px; color: $text; }
+#sectionTitle { font-size: ${fs_md}px; font-weight: $w_bold; color: $text; }
+#sectionHint { color: $text_muted; font-size: ${fs_sm}px; }
+#listTitle { font-weight: $w_bold; font-size: ${fs_md}px; color: $text; }
+#rightPanelTitle { font-weight: $w_bold; font-size: ${fs_md}px; color: $text; }
 #listHeader {
     border-bottom: 1px solid $border;
     background-color: $surface_alt;
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
 }
-#mutedLabel { color: $text_muted; font-size: 12px; }
-#mutedSmall { color: $text_muted; font-size: 12px; }
-#sectionCaption { color: $text_muted; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+#mutedLabel { color: $text_muted; font-size: ${fs_sm}px; }
+#mutedSmall { color: $text_muted; font-size: ${fs_sm}px; }
+#sectionCaption { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_medium; margin-bottom: 2px; }
 
 /* ---- 居中空队列拖拽热区 ---- */
 #emptyDropContainer { background-color: transparent; border: none; }
@@ -412,7 +607,7 @@ QToolTip {
     border-radius: 8px;
     background-color: $dropzone_bg;
     color: $text_muted;
-    font-weight: 600;
+    font-weight: $w_medium;
 }
 #dropZone:hover { border-color: $primary; background-color: $primary_soft; color: $primary_text; }
 #dropZone[dragActive="true"] { border: 2px dashed $primary; background-color: $primary_soft; color: $primary_text; }
@@ -421,8 +616,8 @@ QToolTip {
     border: 1px solid $primary_soft_border;
     border-radius: 8px;
 }
-#emptyDropTitle { font-size: 15px; font-weight: 700; color: $text; border: none; background: transparent; }
-#emptyDropDesc { font-size: 12px; color: $text_muted; border: none; background: transparent; }
+#emptyDropTitle { font-size: ${fs_lg}px; font-weight: $w_bold; color: $text; border: none; background: transparent; }
+#emptyDropDesc { font-size: ${fs_sm}px; color: $text_muted; border: none; background: transparent; }
 
 /* ---- 三阶通用按钮 ---- */
 #primaryBtn {
@@ -430,7 +625,7 @@ QToolTip {
     border-radius: 6px;
     background-color: $primary;
     color: $text_on_primary;
-    font-weight: 600;
+    font-weight: $w_medium;
     border: none;
 }
 #primaryBtn:hover { background-color: $primary_hover; }
@@ -442,7 +637,7 @@ QToolTip {
     border-radius: 6px;
     background-color: $surface;
     color: $text_body;
-    font-weight: 600;
+    font-weight: $w_medium;
 }
 #secondaryBtn { padding: 7px 14px; }
 #compactSecondaryBtn { padding: 5px 10px; }
@@ -456,7 +651,7 @@ QToolTip {
     border-radius: 6px;
     background-color: $surface;
     color: $text_body;
-    font-weight: 600;
+    font-weight: $w_medium;
 }
 #configMenuBtn:hover { background-color: $surface_hover; border-color: $primary_soft_border; color: $text; }
 #configMenuBtn:pressed { background-color: $surface_alt; }
@@ -476,7 +671,7 @@ QPushButton#configMenuBtn::menu-indicator {
     border-radius: 6px;
     background-color: transparent;
     color: $text_muted;
-    font-weight: 600;
+    font-weight: $w_medium;
 }
 #ghostBtn:hover { background-color: $surface_hover; color: $text; border-color: $border; }
 #ghostBtn:pressed { background-color: $surface_alt; }
@@ -490,16 +685,16 @@ QPushButton#configMenuBtn::menu-indicator {
     border: 1px solid $border;
     border-radius: 6px;
     padding: 3px 10px;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
 }
-#moduleStatsLabel { color: $text_muted; font-size: 12px; }
+#moduleStatsLabel { color: $text_muted; font-size: ${fs_sm}px; }
 #moduleActionLink {
     background: transparent;
     border: none;
     color: $primary_text;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
     padding: 2px 6px;
     border-radius: 4px;
 }
@@ -519,10 +714,14 @@ QPushButton#configMenuBtn::menu-indicator {
     background-color: $primary_soft;
     border-color: $primary_soft_border;
 }
+#ruleCard[searchHighlight="true"], #compressionCard[searchHighlight="true"] {
+    border: 2px solid $primary;
+    background-color: $primary_soft;
+}
 #ruleCard QCheckBox { background: transparent; }
 #ruleTag {
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_xs}px;
+    font-weight: $w_medium;
     border-radius: 4px;
     padding: 1px 7px;
     border: none;
@@ -531,10 +730,29 @@ QPushButton#configMenuBtn::menu-indicator {
 #ruleTag[tone="warning"] { background-color: $warning_soft; color: $warning_text; }
 #ruleTag[tone="danger"] { background-color: $danger_soft; color: $danger_text; }
 
-#optionTitle { font-weight: 600; font-size: 13px; color: $text; background: transparent; border: none; }
-#optionDesc { color: $text_muted; font-size: 12px; background: transparent; border: none; }
+#optionTitle { font-weight: $w_medium; font-size: ${fs_base}px; color: $text; background: transparent; border: none; }
+#optionDesc { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_regular; background: transparent; border: none; }
 
-#dangerHint { color: $danger_text; background-color: $danger_soft; border: 1px solid $danger_soft_border; border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+#searchGroupTitle { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_bold; background: transparent; border: none; }
+#searchGroupCount { color: $text_faint; font-size: ${fs_xs}px; font-weight: $w_medium; background: transparent; border: none; }
+#searchActionCard {
+    background-color: $surface;
+    border: 1px solid $border;
+    border-radius: 8px;
+}
+#searchActionCard:hover {
+    background-color: $surface_hover;
+    border-color: $border_strong;
+}
+#searchActionCard QLabel { background: transparent; border: none; }
+#searchEmptyCard {
+    background-color: $surface_alt;
+    border: 1px dashed $border_strong;
+    border-radius: 8px;
+}
+#searchEmptyCard QLabel { background: transparent; border: none; }
+
+#dangerHint { color: $danger_text; background-color: $danger_soft; border: 1px solid $danger_soft_border; border-radius: 6px; padding: 8px 10px; font-size: ${fs_sm}px; }
 
 /* ============================ 文件树 ============================ */
 QTreeWidget {
@@ -578,15 +796,15 @@ QHeaderView::section {
     border-bottom: 1px solid $border;
     padding: 8px 10px;
     color: $text_muted;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
     text-align: left;
 }
 
 /* ---- 滚动区 ---- */
 #settingsScroll { border: none; background-color: $surface; margin: 0; padding: 0; }
-#settingsScroll > QWidget { background-color: $surface; }
-#settingsScroll > QWidget > QWidget { background-color: $surface; margin: 0; padding: 0; }
+#settingsScroll > QWidget { border: none; background-color: $surface; }
+#settingsScroll > QWidget > QWidget { border: none; background-color: $surface; margin: 0; padding: 0; }
 
 QScrollBar:vertical { border: none; background: transparent; width: 8px; margin: 2px 0; }
 QScrollBar::handle:vertical { background: $scrollbar_handle; min-height: 30px; border-radius: 4px; }
@@ -607,7 +825,7 @@ QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1p
 QCheckBox::indicator:hover { border-color: $primary; }
 QCheckBox::indicator:checked { background: $primary; border-color: $primary; image: url($checkmark_url); }
 QCheckBox::indicator:disabled { background: $surface_alt; border-color: $border; }
-#dangerCheck { color: $danger; font-weight: 600; }
+#dangerCheck { color: $danger; font-weight: $w_medium; }
 
 QRadioButton { outline: none; spacing: 8px; color: $text_body; background: transparent; }
 QRadioButton:focus { outline: none; }
@@ -638,15 +856,15 @@ QRadioButton::indicator:disabled { background: $surface_alt; border-color: $bord
     border-radius: 4px;
     padding: 5px 8px;
     color: $text_muted;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
 }
 #segmentedBtn:hover { color: $text; }
 #segmentedBtn:checked {
     background-color: $primary_soft;
     border-color: $primary_soft_border;
     color: $primary_text;
-    font-weight: 700;
+    font-weight: $w_bold;
 }
 
 QRadioButton#modeRadio {
@@ -655,8 +873,8 @@ QRadioButton#modeRadio {
     border: 1px solid transparent;
     border-radius: 4px;
     padding: 4px 11px;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
     spacing: 0px;
 }
 QRadioButton#modeRadio::indicator { width: 0px; height: 0px; border: none; background: transparent; }
@@ -668,19 +886,19 @@ QRadioButton#modeRadio:checked {
 }
 
 /* ---- 预设栏 & 细进度条 & 底部操作 ---- */
-#presetLabel { color: $text_muted; font-size: 12px; font-weight: 700; }
-#presetSummary { color: $text_muted; font-size: 12px; }
+#presetLabel { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_medium; }
+#presetSummary { color: $text_muted; font-size: ${fs_sm}px; }
 #presetBtn {
     padding: 5px 14px;
     border: 1px solid $border_strong;
     border-radius: 6px;
     background-color: $surface;
     color: $text_body;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
 }
 #presetBtn:hover { background-color: $surface_hover; border-color: $primary_soft_border; color: $text; }
-#presetBtn:checked { background-color: $primary_soft; border-color: $primary_soft_border; color: $primary_text; font-weight: 700; }
+#presetBtn:checked { background-color: $primary_soft; border-color: $primary_soft_border; color: $primary_text; font-weight: $w_bold; }
 #presetBtn:focus { outline: none; }
 #presetBtn:disabled { background-color: $surface_alt; color: $text_faint; border-color: $border; }
 
@@ -703,23 +921,23 @@ QProgressBar#thinProgressBar::chunk {
     border-radius: 6px;
     background-color: $surface;
     color: $text_body;
-    font-weight: 600;
+    font-weight: $w_medium;
 }
 #actionBtn:hover { background-color: $surface_hover; border-color: $primary_soft_border; color: $text; }
 #actionBtn:pressed { background-color: $surface_alt; }
 #actionBtn:disabled { background-color: $surface_alt; color: $text_faint; border-color: $border; }
 
-#footerSummary { color: $text; font-weight: 700; font-size: 12px; }
-#processingHint { color: $primary_text; font-weight: 600; font-size: 12px; min-width: 0px; }
-#footerHint { color: $text_muted; font-size: 12px; min-width: 0px; }
-#footerHint[danger="true"] { color: $danger_text; font-weight: 600; }
+#footerSummary { color: $text; font-weight: $w_medium; font-size: ${fs_sm}px; }
+#processingHint { color: $primary_text; font-weight: $w_medium; font-size: ${fs_sm}px; min-width: 0px; }
+#footerHint { color: $text_muted; font-size: ${fs_sm}px; min-width: 0px; }
+#footerHint[danger="true"] { color: $danger_text; font-weight: $w_medium; }
 
 #startBtn {
     padding: 8px 20px;
     background-color: $primary;
     color: $text_on_primary;
     border-radius: 6px;
-    font-weight: 700;
+    font-weight: $w_bold;
     border: none;
 }
 #startBtn[stopMode="true"] {
@@ -736,29 +954,29 @@ QProgressBar#thinProgressBar::chunk {
 /* ============================ 对话框 ============================ */
 #dialogBg { background-color: $surface; border: 1px solid $border; border-radius: 8px; }
 #dialogTitleBar { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; border-top-left-radius: 7px; border-top-right-radius: 7px; }
-#dialogTitle { font-weight: 700; color: $text; font-size: 13px; border: none; }
-#dialogCloseBtn { background: transparent; border: none; font-size: 14px; color: $text_faint; border-radius: 4px; }
+#dialogTitle { font-weight: $w_bold; color: $text; font-size: ${fs_base}px; border: none; }
+#dialogCloseBtn { background: transparent; border: none; font-size: ${fs_md}px; color: $text_faint; border-radius: 4px; }
 #dialogCloseBtn:hover { background-color: $danger_soft; color: $danger_text; }
 #dialogContent { border: none; background-color: transparent; }
 
-#dialogPrimaryBtn { background-color: $primary; color: $text_on_primary; border-radius: 6px; padding: 7px 16px; font-weight: 700; border: none; }
+#dialogPrimaryBtn { background-color: $primary; color: $text_on_primary; border-radius: 6px; padding: 7px 16px; font-weight: $w_bold; border: none; }
 #dialogPrimaryBtn:hover { background-color: $primary_hover; }
 #dialogPrimaryBtn:pressed { background-color: $primary_pressed; }
 #dialogPrimaryBtn:disabled { background-color: $primary_disabled; color: $surface; }
-#dialogDangerBtn { background-color: $danger; color: $text_on_primary; border-radius: 6px; padding: 7px 16px; font-weight: 700; border: none; }
+#dialogDangerBtn { background-color: $danger; color: $text_on_primary; border-radius: 6px; padding: 7px 16px; font-weight: $w_bold; border: none; }
 #dialogDangerBtn:hover { background-color: $danger_hover; }
 #dialogDangerBtn:pressed { background-color: $danger_pressed; }
-#dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 6px; padding: 6px 14px; font-weight: 600; border: 1px solid $border_strong; }
+#dialogSecondaryBtn { background-color: $surface; color: $text_body; border-radius: 6px; padding: 6px 14px; font-weight: $w_medium; border: 1px solid $border_strong; }
 #dialogSecondaryBtn:hover { background-color: $surface_hover; border-color: $primary_soft_border; color: $text; }
 #dialogSecondaryBtn:pressed { background-color: $surface_alt; }
 #dialogSecondaryBtn:checked { background-color: $primary_soft; border-color: $primary_soft_border; color: $primary_text; }
 #dialogSecondaryBtn:disabled { background-color: $surface_alt; color: $text_faint; border-color: $border; }
-#dialogSectionTitle { color: $text_muted; font-size: 12px; font-weight: 700; border: none; }
+#dialogSectionTitle { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_medium; border: none; }
 
 /* ---- 语义状态横幅（PDF 深度诊断等对话框使用） ---- */
 #statusBadge {
-    font-size: 13px;
-    font-weight: 700;
+    font-size: ${fs_base}px;
+    font-weight: $w_bold;
     padding: 6px 12px;
     border-radius: 6px;
     border: 1px solid $border;
@@ -781,15 +999,15 @@ QTabBar::tab {
     border-radius: 6px;
     padding: 7px 16px;
     margin-right: 8px;
-    font-weight: 600;
-    font-size: 13px;
+    font-weight: $w_medium;
+    font-size: ${fs_base}px;
 }
 QTabBar::tab:hover { background-color: $surface_hover; color: $text; border-color: $border_strong; }
 QTabBar::tab:selected {
     background-color: $primary_soft;
     color: $primary_text;
     border: 1px solid $primary_soft_border;
-    font-weight: 700;
+    font-weight: $w_bold;
 }
 
 /* ---- 输入框 / 下拉选择框 / 数字框 / 多行文本 ---- */
@@ -875,30 +1093,30 @@ QPlainTextEdit, QTextEdit {
 }
 
 /* ---- 对话框内文本 ---- */
-#dialogHeading { color: $text; font-size: 17px; font-weight: 700; border: none; }
-#dialogSubTitle { color: $text; font-size: 13px; font-weight: 700; border: none; }
-#dialogBody { color: $text_body; font-size: 13px; border: none; }
-#dialogMuted { color: $text_muted; font-size: 12px; border: none; }
-#dialogCaption { color: $text_body; font-size: 12px; font-weight: 700; border: none; }
-#dialogCodeBlock { color: $text_body; font-size: 12px; border: 1px solid $border; background-color: $surface_alt; border-radius: 8px; padding: 10px; font-family: Consolas, 'Courier New', monospace; }
-#dialogStatus { color: $text_muted; font-size: 12px; border: none; }
+#dialogHeading { color: $text; font-size: ${fs_xl}px; font-weight: $w_bold; border: none; }
+#dialogSubTitle { color: $text; font-size: ${fs_base}px; font-weight: $w_bold; border: none; }
+#dialogBody { color: $text_body; font-size: ${fs_base}px; border: none; }
+#dialogMuted { color: $text_muted; font-size: ${fs_sm}px; border: none; }
+#dialogCaption { color: $text_body; font-size: ${fs_sm}px; font-weight: $w_medium; border: none; }
+#dialogCodeBlock { color: $text_body; font-size: ${fs_sm}px; border: 1px solid $border; background-color: $surface_alt; border-radius: 8px; padding: 10px; font-family: $font_mono; }
+#dialogStatus { color: $text_muted; font-size: ${fs_sm}px; border: none; }
 #dialogStatus[state="muted"] { color: $text_muted; }
 #dialogStatus[state="info"] { color: $primary_text; }
 #dialogStatus[state="success"] { color: $success_text; }
 #dialogStatus[state="error"] { color: $danger_text; }
-#dialogInfoPanel { color: $text_body; background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; font-size: 12px; }
-#dialogEmptyPanel { color: $text_muted; background-color: $surface_alt; border: 1px dashed $border_strong; border-radius: 8px; padding: 18px; font-size: 12px; }
+#dialogInfoPanel { color: $text_body; background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; font-size: ${fs_sm}px; }
+#dialogEmptyPanel { color: $text_muted; background-color: $surface_alt; border: 1px dashed $border_strong; border-radius: 8px; padding: 18px; font-size: ${fs_sm}px; }
 
 /* ---- 已签名文件提示对话框 ---- */
 #signedWarnCard { background-color: $warning_soft; border: 1px solid $warning; border-radius: 8px; }
 #signedWarnCard QLabel { border: none; background: transparent; }
 #signedWarnIcon { font-size: 22px; border: none; background: transparent; }
-#signedWarnTitle { color: $warning_text; font-size: 14px; font-weight: 700; border: none; }
-#signedWarnDesc { color: $text_body; font-size: 12px; border: none; }
-#signedListCaption { color: $text_muted; font-size: 12px; font-weight: 700; border: none; }
+#signedWarnTitle { color: $warning_text; font-size: ${fs_md}px; font-weight: $w_bold; border: none; }
+#signedWarnDesc { color: $text_body; font-size: ${fs_sm}px; border: none; }
+#signedListCaption { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_medium; border: none; }
 #signedListScroll { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #signedListScroll > QWidget { background: transparent; }
-#signedFileList { color: $text_body; font-size: 12px; background: transparent; border: none; padding: 10px 12px; line-height: 150%; }
+#signedFileList { color: $text_body; font-size: ${fs_sm}px; background: transparent; border: none; padding: 10px 12px; line-height: 150%; }
 
 /* ---- 消息框 ---- */
 #msgIcon { border: none; background: transparent; }
@@ -908,37 +1126,37 @@ QPlainTextEdit, QTextEdit {
 #msgIconBadge[variant="warning"] { background-color: $warning_soft; border-color: $warning; }
 #msgIconBadge[variant="error"] { background-color: $danger_soft; border-color: $danger_soft_border; }
 #msgIconBadge[variant="question"] { background-color: $primary_soft; border-color: $primary_soft_border; }
-#msgText { color: $text_body; font-size: 13px; border: none; background: transparent; }
-#msgTextBlock { color: $text_body; font-size: 12px; border: 1px solid $border; background-color: $surface_alt; border-radius: 8px; padding: 10px; font-family: Consolas, 'Courier New', monospace; }
+#msgText { color: $text_body; font-size: ${fs_base}px; border: none; background: transparent; }
+#msgTextBlock { color: $text_body; font-size: ${fs_sm}px; border: 1px solid $border; background-color: $surface_alt; border-radius: 8px; padding: 10px; font-family: $font_mono; }
 
 /* ---- 数据向导选择按钮 ---- */
-#choiceToggleBtn { color: $text_body; background-color: $surface_alt; border: 1px solid $border_strong; border-radius: 6px; padding: 8px 14px; font-weight: 600; text-align: center; }
+#choiceToggleBtn { color: $text_body; background-color: $surface_alt; border: 1px solid $border_strong; border-radius: 6px; padding: 8px 14px; font-weight: $w_medium; text-align: center; }
 #choiceToggleBtn:hover { background-color: $surface_hover; }
-#choiceToggleBtn:checked { color: $primary_text; background-color: $primary_soft; border-color: $primary_soft_border; }
+#choiceToggleBtn:checked { color: $primary_text; background-color: $primary_soft; border-color: $primary_soft_border; font-weight: $w_bold; }
 
 /* ---- 数据向导目录卡片 / 预览表 ---- */
 #wizardCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #wizardCard QLabel, #wizardCard QCheckBox, #wizardCard QRadioButton { border: none; background: transparent; }
 #compressionCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #compressionCard QLabel { border: none; background: transparent; }
-#compressionCardTitle { font-weight: 700; font-size: 13px; color: $primary_text; border: none; background: transparent; }
-#compressionCardSection { font-weight: 600; font-size: 12px; color: $text; border: none; background: transparent; }
-#compressionCardHint { color: $text_muted; font-size: 12px; border: none; background: transparent; }
+#compressionCardTitle { font-weight: $w_bold; font-size: ${fs_base}px; color: $primary_text; border: none; background: transparent; }
+#compressionCardSection { font-weight: $w_medium; font-size: ${fs_sm}px; color: $text; border: none; background: transparent; }
+#compressionCardHint { color: $text_muted; font-size: ${fs_sm}px; border: none; background: transparent; }
 #compressionCardSep { color: $border; background-color: $border; height: 1px; border: none; }
 #previewTable { background-color: $surface; border: 1px solid $border; border-radius: 8px; gridline-color: $border; color: $text_body; selection-background-color: $primary_soft; selection-color: $primary_text; }
-#previewTable QHeaderView::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; padding: 7px; color: $text_muted; font-weight: 700; }
+#previewTable QHeaderView::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; padding: 7px; color: $text_muted; font-weight: $w_medium; }
 #previewTable QTableCornerButton::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; }
 
 /* ---- 设置对话框 ---- */
 #settingsPathCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #settingsPathCard QLabel { background: transparent; border: none; }
-#settingsPathHint { color: $text_muted; font-size: 12px; border: none; }
+#settingsPathHint { color: $text_muted; font-size: ${fs_sm}px; border: none; }
 #settingsPathEdit { background-color: $surface; border: 1px solid $border_strong; border-radius: 6px; padding: 8px 10px; color: $text_body; selection-background-color: $selection_bg; selection-color: $selection_text; }
 #settingsPathEdit:focus { border-color: $primary; }
-#settingsPathStatus { font-size: 12px; border: none; padding: 0 2px; }
+#settingsPathStatus { font-size: ${fs_sm}px; border: none; padding: 0 2px; }
 #settingsPathStatus[state="empty"] { color: $text_faint; }
 #settingsPathStatus[state="valid"] { color: $primary_text; }
-#settingsPathStatus[state="invalid"] { color: $danger; font-weight: 600; }
+#settingsPathStatus[state="invalid"] { color: $danger; font-weight: $w_medium; }
 #settingsWorkerSpin { background-color: $surface; border: 1px solid $border_strong; border-right: none; border-top-left-radius: 6px; border-bottom-left-radius: 6px; border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 3px 10px; color: $text_body; min-height: 24px; min-width: 78px; }
 #settingsWorkerSpin:focus { border-color: $primary; }
 #settingsWorkerSpin:disabled { background-color: $surface_alt; border-color: $border; color: $text_muted; }
@@ -946,7 +1164,7 @@ QPlainTextEdit, QTextEdit {
 #settingsWorkerSpin::up-arrow, #settingsWorkerSpin::down-arrow { image: none; width: 0px; height: 0px; }
 #settingsSpinStepper { background-color: $surface_alt; border: 1px solid $border_strong; border-left: none; border-top-right-radius: 6px; border-bottom-right-radius: 6px; min-width: 24px; max-width: 24px; }
 #settingsSpinStepper:disabled { border-color: $border; }
-#settingsSpinStepBtn { background: transparent; border: none; color: $text_muted; font-size: 9px; font-weight: 700; padding: 0; min-width: 23px; max-width: 23px; min-height: 15px; max-height: 15px; }
+#settingsSpinStepBtn { background: transparent; border: none; color: $text_muted; font-size: 9px; font-weight: $w_bold; padding: 0; min-width: 23px; max-width: 23px; min-height: 15px; max-height: 15px; }
 #settingsSpinStepBtn:hover { background-color: $surface_hover; color: $text; }
 #settingsSpinStepBtn:pressed { background-color: $primary_soft; color: $primary_text; }
 #settingsSpinStepBtn:disabled { color: $text_faint; background: transparent; }
@@ -954,9 +1172,9 @@ QPlainTextEdit, QTextEdit {
 #settingsSpinStepBtn[direction="down"] { border-bottom-right-radius: 5px; }
 
 /* ---- 主题选择分段按钮 ---- */
-#themeSegBtn { color: $text_body; background-color: $surface; border: 1px solid $border_strong; padding: 7px 14px; font-weight: 600; border-radius: 6px; }
+#themeSegBtn { color: $text_body; background-color: $surface; border: 1px solid $border_strong; padding: 7px 14px; font-weight: $w_medium; border-radius: 6px; }
 #themeSegBtn:hover { background-color: $surface_hover; }
-#themeSegBtn:checked { color: $primary_text; background-color: $primary_soft; border-color: $primary_soft_border; }
+#themeSegBtn:checked { color: $primary_text; background-color: $primary_soft; border-color: $primary_soft_border; font-weight: $w_bold; }
 
 /* ---- 日志对话框 ---- */
 #statCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
@@ -968,21 +1186,21 @@ QPlainTextEdit, QTextEdit {
 #statCard[accent="skip"] { border-left: 3px solid $warning; }
 #statCard[accent="all"] { border-left: 3px solid $primary; }
 #statCard QLabel { border: none; background: transparent; padding: 0; }
-#statCardTitle { color: $text_muted; font-size: 12px; font-weight: 700; }
-#statCardValue { color: $text; font-size: 20px; font-weight: 700; }
+#statCardTitle { color: $text_muted; font-size: ${fs_sm}px; font-weight: $w_medium; }
+#statCardValue { color: $text; font-size: ${fs_2xl}px; font-weight: $w_bold; }
 #logSummaryFrame { background-color: $surface; border: 1px solid $border; border-radius: 8px; }
 #logSummaryTable { background-color: $surface; alternate-background-color: $surface_alt2; color: $text_body; border: none; border-radius: 0; gridline-color: $border; selection-background-color: $primary_soft; selection-color: $primary_text; outline: none; }
 #logSummaryTable::item { padding: 7px; border-bottom: 1px solid $border_subtle; }
 #logSummaryTable::item:selected { background-color: $primary_soft; color: $primary_text; }
-#logSummaryTable QHeaderView::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; padding: 8px; color: $text_muted; font-weight: 700; }
+#logSummaryTable QHeaderView::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; padding: 8px; color: $text_muted; font-weight: $w_medium; }
 #logSummaryTable QTableCornerButton::section { background-color: $surface_alt; border: none; border-bottom: 1px solid $border; }
 #logSplitter::handle:vertical { background-color: transparent; border: none; height: 10px; margin: 2px 0; }
 #logSplitter::handle:vertical:hover { background-color: $primary_soft; border-radius: 4px; }
-#logDetailTextEdit { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 10px; color: $text_body; font-family: Consolas, 'Courier New', monospace; font-size: 12px; selection-background-color: $selection_bg; selection-color: $selection_text; }
+#logDetailTextEdit { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 10px; color: $text_body; font-family: $font_mono; font-size: ${fs_sm}px; selection-background-color: $selection_bg; selection-color: $selection_text; }
 
 /* ---- 右键菜单 ---- */
 QMenu { background-color: $surface; border: 1px solid $border_strong; border-radius: 8px; padding: 4px; }
-QMenu::item { padding: 6px 24px 6px 12px; border-radius: 4px; color: $text_body; font-size: 13px; }
+QMenu::item { padding: 6px 24px 6px 12px; border-radius: 4px; color: $text_body; font-size: ${fs_base}px; }
 QMenu::item:selected { background-color: $primary_soft; color: $primary_text; }
 QMenu::separator { height: 1px; background: $border; margin: 4px 8px; }
 QMenu::item:disabled { color: $text_faint; }
@@ -990,11 +1208,11 @@ QMenu::item:disabled { color: $text_faint; }
 /* ---- 关于对话框 ---- */
 #aboutHeroCard { background-color: $primary_soft; border: 1px solid $primary_soft_border; border-radius: 8px; }
 #aboutInfoCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
-#aboutBrandTitle { font-size: 20px; font-weight: 700; color: $primary_text; border: none; }
-#aboutBadge { background-color: $surface; color: $primary_text; border: 1px solid $primary_soft_border; border-radius: 6px; padding: 4px 10px; font-weight: 600; font-size: 12px; }
-#aboutTitle { color: $text; font-size: 13px; font-weight: 700; border: none; }
-#aboutText { color: $text_body; font-size: 12px; border: none; }
-#aboutIntro { color: $text_body; font-size: 13px; border: none; }
+#aboutBrandTitle { font-size: ${fs_2xl}px; font-weight: $w_bold; color: $primary_text; border: none; }
+#aboutBadge { background-color: $surface; color: $primary_text; border: 1px solid $primary_soft_border; border-radius: 6px; padding: 4px 10px; font-weight: $w_medium; font-size: ${fs_sm}px; }
+#aboutTitle { color: $text; font-size: ${fs_base}px; font-weight: $w_bold; border: none; }
+#aboutText { color: $text_body; font-size: ${fs_sm}px; border: none; }
+#aboutIntro { color: $text_body; font-size: ${fs_base}px; border: none; }
 
 /* ---- 去除水印对话框 ---- */
 #watermarkSplitter::handle:horizontal { background-color: transparent; border: none; width: 10px; margin: 0 2px; }
@@ -1016,21 +1234,114 @@ QMenu::item:disabled { color: $text_faint; }
 #watermarkFilterBar QLineEdit { min-height: 16px; padding: 4px 8px; }
 #watermarkFilterBar QComboBox { min-height: 24px; padding: 2px 24px 2px 8px; }
 #watermarkPreviewPane { background: transparent; border: none; }
-#watermarkPreviewTitle { color: $text; font-size: 12px; font-weight: 700; border: none; background: transparent; }
+#watermarkPreviewTitle { color: $text; font-size: ${fs_sm}px; font-weight: $w_bold; border: none; background: transparent; }
 #watermarkPreviewTitle[accent="after"] { color: $primary_text; }
 #watermarkPreviewScroll { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #watermarkPreviewScroll > QWidget > QWidget { background-color: $surface_alt; }
-#watermarkPreviewCanvas { color: $text_muted; font-size: 12px; background-color: transparent; border: none; padding: 12px; }
-#watermarkNotesPanel { color: $warning_text; background-color: $warning_soft; border: 1px solid $warning; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+#watermarkPreviewCanvas { color: $text_muted; font-size: ${fs_sm}px; background-color: transparent; border: none; padding: 12px; }
+#watermarkNotesPanel { color: $warning_text; background-color: $warning_soft; border: 1px solid $warning; border-radius: 8px; padding: 8px 12px; font-size: ${fs_sm}px; }
 #watermarkConfirmCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
 #watermarkConfirmCard[checked="true"] { background-color: $primary_soft; border-color: $primary_soft_border; }
 #watermarkConfirmCard QCheckBox { background: transparent; border: none; }
+
+/* ---- PDF 加密与解密对话框 ---- */
+QTabWidget#securityTabs { background-color: $surface; border: none; }
+QTabWidget#securityTabs::pane { border: none; background-color: $surface; margin-top: 10px; }
+QTabWidget#securityTabs QTabBar { background-color: $surface; border: none; qproperty-drawBase: 0; outline: none; }
+QTabWidget#securityTabs QTabBar::tab {
+    background: transparent;
+    color: $text_muted;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0px;
+    padding: 8px 16px;
+    margin: 0px 6px 0px 1px;
+    font-weight: $w_medium;
+    font-size: ${fs_base}px;
+    outline: none;
+}
+QTabWidget#securityTabs QTabBar::tab:focus { outline: none; }
+QTabWidget#securityTabs QTabBar::tab:hover {
+    color: $text;
+    background-color: $surface_hover;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+QTabWidget#securityTabs QTabBar::tab:selected {
+    color: $primary_text;
+    border-bottom: 2px solid $primary;
+    font-weight: $w_bold;
+    background: transparent;
+}
+#securitySectionCard {
+    background-color: $surface_alt;
+    border: none;
+    border-radius: 8px;
+}
+#securitySectionCard QLabel,
+#securitySectionCard QCheckBox,
+#securitySectionCard QRadioButton {
+    border: none;
+    background: transparent;
+}
+#securityTableCard {
+    background-color: $surface;
+    border: 1px solid $border;
+    border-radius: 8px;
+}
+#securityTableCard[dragActive="true"] {
+    border: 2px dashed $primary;
+    background-color: $primary_soft;
+}
+#securityTableHeader {
+    background-color: $surface_alt;
+    border: none;
+    border-bottom: 1px solid $border;
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+}
+#securityTableHeader QLabel { background: transparent; border: none; }
+#securityTable {
+    background-color: $surface;
+    alternate-background-color: $surface_alt2;
+    color: $text_body;
+    border: none;
+    border-bottom-left-radius: 7px;
+    border-bottom-right-radius: 7px;
+    selection-background-color: $primary_soft;
+    selection-color: $primary_text;
+    outline: none;
+}
+#securityTable::item { padding: 6px 8px; border-bottom: 1px solid $border_subtle; }
+#securityTable::item:selected { background-color: $primary_soft; color: $primary_text; }
+#securityTable QHeaderView::section {
+    background-color: $surface_alt;
+    border: none;
+    border-bottom: 1px solid $border;
+    padding: 7px 8px;
+    color: $text_muted;
+    font-size: ${fs_sm}px;
+    font-weight: $w_medium;
+    text-align: left;
+}
+#securityTable QTableCornerButton::section {
+    background-color: $surface_alt;
+    border: none;
+    border-bottom: 1px solid $border;
+}
+#securityFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid $border;
+}
 """)
 
 
-def build_app_qss(palette: Palette) -> str:
-    """依据 Palette 渲染整份应用级 QSS。"""
+def build_app_qss(palette: Palette, typography: Typography | None = None) -> str:
+    """依据 Palette 与 Typography 渲染整份应用级 QSS。"""
     tokens = palette.as_dict()
+    typo = typography or active_typography()
+    tokens.update(typo.as_qss_tokens())
     tokens["checkmark_url"] = checkmark_icon_path(palette.text_on_primary)
     tokens["chevron_down_url"] = icons.svg_temp_file_url(
         "chevron_down", palette.text_muted, stroke_width=2.0
@@ -1087,11 +1398,19 @@ class ThemeManager(QObject):
 
     _MODES = ("system", "light", "dark")
 
-    def __init__(self, app: QApplication, mode: str = "system"):
-        super().__init__(app)
+    def __init__(
+        self,
+        app: QApplication,
+        mode: str = "system",
+        font_scale: str = "standard",
+        parent: QObject | None = None,
+    ):
+        super().__init__(parent if parent is not None else app)
         self._app = app
         self._mode = mode if mode in self._MODES else "system"
+        self._font_scale = font_scale if font_scale in FONT_SCALES else "standard"
         self._palette = LIGHT
+        self._typography = resolve_typography(self._font_scale)
         self._applying = False
 
         hints = app.styleHints()
@@ -1103,8 +1422,15 @@ class ThemeManager(QObject):
     def mode(self) -> str:
         return self._mode
 
+    @property
+    def font_scale(self) -> str:
+        return self._font_scale
+
     def current_palette(self) -> Palette:
         return self._palette
+
+    def current_typography(self) -> Typography:
+        return self._typography
 
     def _resolve_palette(self) -> Palette:
         if self._mode == "light":
@@ -1117,7 +1443,7 @@ class ThemeManager(QObject):
 
     # --- 应用 ---
     def apply(self):
-        global _ACTIVE_PALETTE
+        global _ACTIVE_PALETTE, _ACTIVE_TYPOGRAPHY
         self._applying = True
         try:
             # 让 Qt 自身控件 (下拉弹窗、原生绘制) 与选定方案保持一致
@@ -1129,15 +1455,25 @@ class ThemeManager(QObject):
                 self._app.styleHints().setColorScheme(Qt.ColorScheme.Light)
             self._palette = self._resolve_palette()
             _ACTIVE_PALETTE = self._palette
+            self._typography = resolve_typography(self._font_scale)
+            _ACTIVE_TYPOGRAPHY = self._typography
         finally:
             self._applying = False
-        self._app.setStyleSheet(build_app_qss(self._palette))
+        if hasattr(self._app, "setFont"):
+            self._app.setFont(build_app_qfont(self._typography))
+        self._app.setStyleSheet(build_app_qss(self._palette, self._typography))
         self.changed.emit(self._palette)
 
     def set_mode(self, mode: str):
         if mode not in self._MODES:
             return
         self._mode = mode
+        self.apply()
+
+    def set_font_scale(self, scale: str):
+        if scale not in FONT_SCALES:
+            return
+        self._font_scale = scale
         self.apply()
 
     def _on_system_scheme_changed(self, _scheme):

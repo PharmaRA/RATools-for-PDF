@@ -49,7 +49,7 @@ class TreeActionsController(QObject):
         menu.addSeparator()
         action_security = menu.addAction(
             icons.svg_icon("lock", pal.text_body, size=14, disabled_color=pal.text_faint),
-            "安全中心 (加解密)...",
+            "加密与解密...",
         )
         action_security.setEnabled(is_single_selection)
 

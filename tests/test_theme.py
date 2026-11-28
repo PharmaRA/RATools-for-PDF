@@ -1,3 +1,4 @@
+import gc
 import os
 import tempfile
 import unittest
@@ -5,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication
 
 from ratools_pdf.ui import theme
@@ -17,7 +18,10 @@ from ratools_pdf.ui.theme import DARK, active_palette
 class ThemeStartupTests(unittest.TestCase):
     def setUp(self):
         self.app = QApplication.instance() or QApplication([])
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        gc.collect()
         self._previous_app_stylesheet = self.app.styleSheet()
+        self._previous_app_font = self.app.font()
         self.app.setStyleSheet("")
         self._windows = []
 
@@ -25,8 +29,12 @@ class ThemeStartupTests(unittest.TestCase):
         for window in self._windows:
             window.close()
             window.deleteLater()
+        self._windows.clear()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.app.processEvents()
+        gc.collect()
         self.app.setStyleSheet(self._previous_app_stylesheet)
+        self.app.setFont(self._previous_app_font)
 
     def _create_window_with_theme(self, theme_mode):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -141,6 +149,10 @@ class ThemeStartupTests(unittest.TestCase):
     def test_main_window_reapplies_native_title_bar_when_theme_changes(self):
         with patch("ratools_pdf.ui.main_window.apply_windows_title_bar_theme", create=True) as apply_title_bar:
             window = self._create_window_with_theme("dark")
+
+            apply_title_bar.assert_not_called()
+            window.show()
+            self.app.processEvents()
 
             self.assertTrue(any(
                 call.args[0] is window and call.args[1].name == "dark"
@@ -285,6 +297,56 @@ class ThemeStartupTests(unittest.TestCase):
         self.assertTrue(theme.DARK.sidebar.startswith("#"))
         self.assertTrue(theme.LIGHT.accent_bar.startswith("#"))
         self.assertTrue(theme.DARK.accent_bar.startswith("#"))
+
+    def test_typography_uses_microsoft_yahei_ui_and_avoids_overbold_qss(self):
+        typo = theme.resolve_typography(
+            "standard",
+            installed={"Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", "Cascadia Mono"},
+        )
+        self.assertEqual("Microsoft YaHei UI", typo.primary_family)
+        self.assertEqual(13, typo.fs_base)
+        self.assertIn('"Microsoft YaHei UI"', typo.ui_font_css)
+        self.assertIn('"Cascadia Mono"', typo.mono_font_css)
+
+        typo_compact = theme.resolve_typography("compact", installed={"Microsoft YaHei UI"})
+        self.assertEqual(12, typo_compact.fs_base)
+        self.assertEqual(11, typo_compact.fs_sm)
+
+        typo_large = theme.resolve_typography("comfortable", installed={"Microsoft YaHei UI"})
+        self.assertEqual(14, typo_large.fs_base)
+        self.assertEqual(13, typo_large.fs_sm)
+
+        qss = theme.build_app_qss(theme.LIGHT, typo)
+        for selector in (
+            "#moduleSearchInput",
+            "#searchActionCard",
+            "#searchEmptyCard",
+        ):
+            self.assertIn(selector, qss)
+        self.assertNotIn("font-weight: 600", qss)
+        self.assertIn("font-weight: 500", qss)
+
+    def test_font_scale_change_applies_and_persists_across_restart(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("ratools_pdf.ui.main_window.get_app_dir", return_value=tmp_dir):
+                window = MainWindow()
+                self._windows.append(window)
+                window.on_font_scale_changed("comfortable")
+                self.app.processEvents()
+
+                self.assertEqual("comfortable", window.theme_manager.font_scale)
+                self.assertEqual(14, window.theme_manager.current_typography().fs_base)
+                self.assertIn("font-size: 14px", self.app.styleSheet())
+                self.assertEqual("Microsoft YaHei UI", self.app.font().families()[0])
+                self.assertEqual("comfortable", window.settings_dialog.get_font_scale())
+                window.persist_all_settings()
+
+            with patch("ratools_pdf.ui.main_window.get_app_dir", return_value=tmp_dir):
+                reloaded = MainWindow()
+                self._windows.append(reloaded)
+                self.assertEqual("comfortable", reloaded.theme_manager.font_scale)
+                self.assertEqual(14, reloaded.theme_manager.current_typography().fs_base)
+                self.assertEqual("comfortable", reloaded.settings_dialog.get_font_scale())
 
 
 if __name__ == "__main__":

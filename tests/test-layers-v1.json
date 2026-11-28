@@ -7,7 +7,8 @@
       "test_app_paths.py",
       "test_app_version.py",
       "test_extract_release_notes.py",
-      "test_icons.py"
+      "test_icons.py",
+      "test_module_search.py"
     ],
     "integration": [
       "test_audit_evidence.py",
@@ -25,6 +26,7 @@
       "test_image_transparency.py",
       "test_io_busy.py",
       "test_log_view_model.py",
+      "test_module_search_ui.py",
       "test_nuitka_packaging.py",
       "test_output_collisions.py",
       "test_package_structure.py",
@@ -59,6 +61,7 @@
       "test_watermark_dialog.py",
       "test_watermarks.py",
       "test_window_lifecycle.py",
+      "test_window_placement.py",
       "test_worker_lifecycle.py",
       "test_worker_output_safety.py"
     ]
