@@ -562,6 +562,16 @@ QTreeWidget::branch:has-siblings:adjoins-item,
 QTreeWidget::branch:!has-children:!has-siblings:adjoins-item { border-image: none; image: none; }
 QTreeWidget::branch:selected { background-color: $primary_soft; }
 QTreeWidget::branch:selected:hover { background-color: $primary_soft; }
+QTreeWidget::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid $border_strong;
+    background: $surface;
+}
+QTreeWidget::indicator:hover { border-color: $primary; }
+QTreeWidget::indicator:checked { background: $primary; border-color: $primary; image: url($checkmark_url); }
+QTreeWidget::indicator:disabled { background: $surface_alt; border-color: $border; }
 QHeaderView::section {
     background-color: $surface_alt;
     border: none;
@@ -871,7 +881,9 @@ QPlainTextEdit, QTextEdit {
 #dialogMuted { color: $text_muted; font-size: 12px; border: none; }
 #dialogCaption { color: $text_body; font-size: 12px; font-weight: 700; border: none; }
 #dialogCodeBlock { color: $text_body; font-size: 12px; border: 1px solid $border; background-color: $surface_alt; border-radius: 8px; padding: 10px; font-family: Consolas, 'Courier New', monospace; }
-#dialogStatus { font-size: 12px; border: none; }
+#dialogStatus { color: $text_muted; font-size: 12px; border: none; }
+#dialogStatus[state="muted"] { color: $text_muted; }
+#dialogStatus[state="info"] { color: $primary_text; }
 #dialogStatus[state="success"] { color: $success_text; }
 #dialogStatus[state="error"] { color: $danger_text; }
 #dialogInfoPanel { color: $text_body; background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; padding: 7px 10px; font-size: 12px; }
@@ -983,6 +995,29 @@ QMenu::item:disabled { color: $text_faint; }
 #aboutTitle { color: $text; font-size: 13px; font-weight: 700; border: none; }
 #aboutText { color: $text_body; font-size: 12px; border: none; }
 #aboutIntro { color: $text_body; font-size: 13px; border: none; }
+
+/* ---- 去除水印对话框 ---- */
+#watermarkSplitter::handle:horizontal { background-color: transparent; border: none; width: 10px; margin: 0 2px; }
+#watermarkSplitter::handle:horizontal:hover { background-color: $primary_soft; border-radius: 4px; }
+#watermarkPanelCard { background-color: $surface; border: 1px solid $border; border-radius: 8px; }
+#watermarkPanelHeader {
+    background-color: $surface_alt;
+    border: none;
+    border-bottom: 1px solid $border;
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+}
+#watermarkPanelHeader QLabel { background: transparent; border: none; }
+#watermarkPreviewPane { background: transparent; border: none; }
+#watermarkPreviewTitle { color: $text; font-size: 12px; font-weight: 700; border: none; background: transparent; }
+#watermarkPreviewTitle[accent="after"] { color: $primary_text; }
+#watermarkPreviewScroll { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
+#watermarkPreviewScroll > QWidget > QWidget { background-color: $surface_alt; }
+#watermarkPreviewCanvas { color: $text_muted; font-size: 12px; background-color: transparent; border: none; padding: 12px; }
+#watermarkNotesPanel { color: $warning_text; background-color: $warning_soft; border: 1px solid $warning; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+#watermarkConfirmCard { background-color: $surface_alt; border: 1px solid $border; border-radius: 8px; }
+#watermarkConfirmCard[checked="true"] { background-color: $primary_soft; border-color: $primary_soft_border; }
+#watermarkConfirmCard QCheckBox { background: transparent; border: none; }
 """)
 
 

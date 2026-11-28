@@ -650,8 +650,15 @@ class MainWindow(QMainWindow):
             elif mod["title"] == "内容合规与安全性":
                 page_layout.addSpacing(8)
                 page_layout.addWidget(self._create_section_label("选择性去除水印"))
+                watermark_hint = QLabel("对单个 PDF 进行交互式对象分析与前后对比预览，确认后另存为新文件。")
+                watermark_hint.setWordWrap(True)
+                watermark_hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+                watermark_hint.setObjectName("mutedSmall")
+                page_layout.addWidget(watermark_hint)
                 self.btn_remove_watermark = QPushButton("去除水印…")
                 self.btn_remove_watermark.setObjectName("secondaryBtn")
+                self.btn_remove_watermark.setCursor(Qt.PointingHandCursor)
+                self.btn_remove_watermark.setIconSize(QSize(14, 14))
                 self.btn_remove_watermark.setToolTip("选择批注、独立文字、图片或绘图对象，预览后另存为新 PDF。")
                 self.btn_remove_watermark.clicked.connect(self.show_watermark_dialog)
                 page_layout.addWidget(self.btn_remove_watermark)
@@ -1080,6 +1087,7 @@ class MainWindow(QMainWindow):
             ("btn_link_io_wizard", "arrow_up_down"),
             ("btn_detect_annotations", "scan"),
             ("btn_detect_broken_refs", "link"),
+            ("btn_remove_watermark", "eraser"),
             ("btn_open_inspector_studio", "search"),
             ("btn_config_menu", "sliders"),
             ("btn_log", "list_log"),

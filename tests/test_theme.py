@@ -259,12 +259,25 @@ class ThemeStartupTests(unittest.TestCase):
             "#thinProgressBar",
             "#statusBadge",
             "QRadioButton::indicator",
+            "QTreeWidget::indicator",
             "QComboBox::down-arrow",
             "#queueCard",
             "#modeSegContainer",
             "#segmentedContainer",
+            "#watermarkPanelCard",
+            "#watermarkPreviewScroll",
+            "#watermarkConfirmCard",
         ):
             self.assertIn(selector, qss)
+
+        dark_qss = theme.build_app_qss(theme.DARK)
+        for selector in (
+            "QTreeWidget::indicator",
+            "#watermarkPanelCard",
+            "#watermarkPreviewScroll",
+            "#watermarkConfirmCard",
+        ):
+            self.assertIn(selector, dark_qss)
 
         self.assertTrue(theme.LIGHT.sidebar.startswith("#"))
         self.assertTrue(theme.DARK.sidebar.startswith("#"))

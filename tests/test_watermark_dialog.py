@@ -151,3 +151,77 @@ class WatermarkDialogTests(unittest.TestCase):
             window.deleteLater()
             QCoreApplication.sendPostedEvents(window, QEvent.DeferredDelete)
             self.assertFalse(isValid(window))
+
+    def test_dialog_uses_fluent_theme_roles_without_local_stylesheets(self):
+        from PySide6.QtWidgets import QPushButton, QWidget
+
+        for btn in (self.dialog.btn_source, self.dialog.btn_preview,
+                    self.dialog.btn_cancel, self.dialog.btn_close_dialog):
+            self.assertEqual('dialogSecondaryBtn', btn.objectName())
+            self.assertEqual(Qt.PointingHandCursor, btn.cursor().shape())
+        for btn in (self.dialog.btn_analyze, self.dialog.btn_save):
+            self.assertEqual('dialogPrimaryBtn', btn.objectName())
+            self.assertEqual(Qt.PointingHandCursor, btn.cursor().shape())
+
+        self.assertEqual('', self.dialog.styleSheet())
+        for widget in self.dialog.findChildren(QWidget):
+            self.assertEqual('', widget.styleSheet(), widget.objectName())
+        self.assertGreaterEqual(len(self.dialog.findChildren(QPushButton)), 6)
+
+    def test_notes_visibility_summary_and_confirm_card_sync(self):
+        self.assertFalse(self.dialog.lbl_notes.isVisible())
+        self.assertEqual('未分析', self.dialog.lbl_objects_summary.text())
+        self.assertEqual('false', self.dialog.confirm_card.property('checked'))
+
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.assertEqual('共 1 项 · 已选 0 项', self.dialog.lbl_objects_summary.text())
+
+        item = self.dialog.objects.topLevelItem(0)
+        item.setCheckState(0, Qt.Checked)
+        self.wait_idle()
+        self.assertEqual('共 1 项 · 已选 1 项', self.dialog.lbl_objects_summary.text())
+
+        self.dialog.confirm.setChecked(True)
+        self.assertEqual('true', self.dialog.confirm_card.property('checked'))
+
+        self.dialog.txt_pages.setText('1')
+        self.assertEqual('未分析', self.dialog.lbl_objects_summary.text())
+        self.assertFalse(self.dialog.lbl_notes.isVisible())
+        self.assertEqual('false', self.dialog.confirm_card.property('checked'))
+
+    def test_notes_panel_becomes_visible_when_analysis_has_notes(self):
+        with fitz.open() as doc:
+            page = doc.new_page()
+            page.insert_text((30, 80), 'DRAFT')
+            page.add_text_annot((50, 120), 'Note')
+            doc.save(self.source)
+        with patch('ratools_pdf.ui.dialogs.watermark_dialog.watermarks.analyze') as mock_analyze:
+            from ratools_pdf.pdf.watermarks import Analysis
+            mock_analyze.return_value = Analysis(
+                path=str(self.source),
+                source=self.source.read_bytes(),
+                digest='abc',
+                page_count=1,
+                pages=(0,),
+                candidates=(),
+                notes=('部分复杂绘图对象已跳过',),
+            )
+            self.dialog.btn_analyze.click()
+            self.wait_idle()
+        self.assertTrue(self.dialog.lbl_notes.isVisible())
+        self.assertIn('部分复杂绘图对象已跳过', self.dialog.lbl_notes.text())
+
+    def test_preview_pixmap_adapts_to_scroll_viewport_width(self):
+        self.dialog.resize(1040, 680)
+        self.app.processEvents()
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.dialog.objects.topLevelItem(0).setCheckState(0, Qt.Checked)
+        self.wait_idle()
+        before_pixmap = self.dialog.before.pixmap()
+        after_pixmap = self.dialog.after.pixmap()
+        self.assertFalse(before_pixmap.isNull())
+        self.assertFalse(after_pixmap.isNull())
+        self.assertLessEqual(before_pixmap.width(), max(320, self.dialog.before_scroll.viewport().width()))
+        self.assertLessEqual(after_pixmap.width(), max(320, self.dialog.after_scroll.viewport().width()))
