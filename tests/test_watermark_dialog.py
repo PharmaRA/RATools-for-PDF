@@ -241,3 +241,61 @@ class WatermarkDialogTests(unittest.TestCase):
         self.assertIn('BODY TEXT', body_item.text(3))
         self.assertEqual('文字 · 疑似', draft_item.text(2))
         self.assertIn('DRAFT', draft_item.text(3))
+
+    def test_filter_controls_hide_non_matching_items(self):
+        with fitz.open() as doc:
+            p1 = doc.new_page()
+            p1.insert_text((30, 80), 'BODY ONE', fontsize=12)
+            p1.insert_text((30, 140), 'DRAFT', fontsize=24, fill_opacity=0.4)
+            p2 = doc.new_page()
+            p2.insert_text((30, 80), 'BODY TWO', fontsize=12)
+            doc.save(self.source)
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.assertEqual(self.dialog.objects.topLevelItemCount(), 3)
+
+        self.dialog.txt_filter.setText('DRAFT')
+        hidden = [self.dialog.objects.topLevelItem(i).isHidden() for i in range(3)]
+        self.assertEqual(hidden, [True, False, True])
+
+        self.dialog.txt_filter.clear()
+        self.dialog.combo_kind.setCurrentIndex(self.dialog.combo_kind.findData('likely'))
+        hidden = [self.dialog.objects.topLevelItem(i).isHidden() for i in range(3)]
+        self.assertEqual(hidden, [True, False, True])
+
+        self.dialog.combo_kind.setCurrentIndex(0)
+        self.dialog.page_number.setValue(2)
+        self.dialog.cb_current_page_only.setChecked(True)
+        hidden = [self.dialog.objects.topLevelItem(i).isHidden() for i in range(3)]
+        self.assertEqual(hidden, [True, True, False])
+
+    def test_batch_select_similar_across_pages_requires_representative_previews(self):
+        with fitz.open() as doc:
+            for idx in range(4):
+                page = doc.new_page()
+                page.insert_text((30, 80), f'BODY {idx + 1}', fontsize=12)
+                page.insert_text((30, 140), 'CONFIDENTIAL', fontsize=24, fill_opacity=0.4)
+            doc.save(self.source)
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+
+        # 聚焦第 1 页的水印对象并一键勾选同款跨页
+        draft_item = self.dialog.objects.topLevelItem(1)
+        self.dialog.objects.setCurrentItem(draft_item)
+        self.assertTrue(self.dialog.btn_select_similar.isEnabled())
+        self.dialog.btn_select_similar.click()
+        self.wait_idle()
+        self.assertEqual(len(self.dialog.selected_ids()), 4)
+
+        # 此时第 1 页已预览，只需再预览末页（第 4 页）即可启用保存
+        self.dialog.confirm.setChecked(True)
+        self.assertFalse(self.dialog.btn_save.isEnabled())
+        self.dialog.page_number.setValue(4)
+        self.wait_idle()
+        self.assertTrue(self.dialog.btn_save.isEnabled())
+
+        # 清空勾选后恢复未选状态
+        self.dialog.btn_unselect_all.click()
+        self.wait_idle()
+        self.assertEqual(len(self.dialog.selected_ids()), 0)
+        self.assertFalse(self.dialog.btn_save.isEnabled())

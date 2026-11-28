@@ -5,9 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QThread, QTimer
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
-    QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
+    QSpinBox, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ratools_pdf.pdf import watermarks
@@ -48,6 +48,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._viewed_pages = {}
         self._preview_requested = False
         self._preview_pixmaps = {}
+        self._batch_signatures = set()
         self._generation = 0
         self._build()
         self.preview_timer = QTimer(self)
@@ -59,6 +60,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         self.objects.itemChanged.connect(self._selection_changed)
         self.objects.currentItemChanged.connect(self._focus_item)
         self.page_number.valueChanged.connect(self._queue_preview)
+        self.page_number.valueChanged.connect(self._apply_filters)
         if initial_file:
             self.txt_source.setText(initial_file)
 
@@ -145,6 +147,61 @@ class WatermarkDialog(FramelessDraggableDialog):
         left_header_layout.addStretch()
         left_header_layout.addWidget(self.lbl_objects_summary)
         left_layout.addWidget(left_header)
+
+        filter_bar = QFrame()
+        filter_bar.setObjectName('watermarkFilterBar')
+        filter_vbox = QVBoxLayout(filter_bar)
+        filter_vbox.setContentsMargins(10, 8, 10, 8)
+        filter_vbox.setSpacing(6)
+
+        filter_row1 = QHBoxLayout()
+        filter_row1.setContentsMargins(0, 0, 0, 0)
+        filter_row1.setSpacing(6)
+        self.txt_filter = QLineEdit()
+        self.txt_filter.setObjectName('settingsPathEdit')
+        self.txt_filter.setFixedHeight(28)
+        self.txt_filter.setPlaceholderText('筛选关键字…')
+        self.txt_filter.textChanged.connect(self._apply_filters)
+        self.combo_kind = QComboBox()
+        self.combo_kind.setFixedHeight(28)
+        for text, value in (
+            ('全部类型', 'all'),
+            ('仅疑似水印', 'likely'),
+            ('文字', '文字'),
+            ('图片', '图片'),
+            ('绘图／组合对象', '绘图／组合对象'),
+            ('绘图', '绘图'),
+            ('批注', '批注'),
+        ):
+            self.combo_kind.addItem(text, value)
+        self.combo_kind.currentIndexChanged.connect(self._apply_filters)
+        self.cb_current_page_only = QCheckBox('仅当前页')
+        self.cb_current_page_only.setCursor(Qt.PointingHandCursor)
+        self.cb_current_page_only.toggled.connect(self._apply_filters)
+        filter_row1.addWidget(self.txt_filter, 1)
+        filter_row1.addWidget(self.combo_kind)
+        filter_row1.addWidget(self.cb_current_page_only)
+        filter_vbox.addLayout(filter_row1)
+
+        filter_row2 = QHBoxLayout()
+        filter_row2.setContentsMargins(0, 0, 0, 0)
+        filter_row2.setSpacing(6)
+        self.btn_select_similar = QPushButton('勾选同款跨页')
+        self.btn_select_similar.setObjectName('compactSecondaryBtn')
+        self.btn_select_similar.setFixedHeight(26)
+        self.btn_select_similar.setCursor(Qt.PointingHandCursor)
+        self.btn_select_similar.setToolTip('一键勾选与当前聚焦对象相同特征的所有跨页对象')
+        self.btn_select_similar.clicked.connect(self._select_similar)
+        self.btn_unselect_all = QPushButton('清空勾选')
+        self.btn_unselect_all.setObjectName('compactSecondaryBtn')
+        self.btn_unselect_all.setFixedHeight(26)
+        self.btn_unselect_all.setCursor(Qt.PointingHandCursor)
+        self.btn_unselect_all.clicked.connect(self._unselect_all)
+        filter_row2.addWidget(self.btn_select_similar)
+        filter_row2.addWidget(self.btn_unselect_all)
+        filter_row2.addStretch()
+        filter_vbox.addLayout(filter_row2)
+        left_layout.addWidget(filter_bar)
 
         self.objects = QTreeWidget()
         self.objects.setHeaderLabels(['选择', '页码', '类型', '对象'])
@@ -350,6 +407,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._viewed_pages.clear()
         self._preview_requested = False
         self._preview_pixmaps.clear()
+        self._batch_signatures.clear()
         self.objects.clear()
         self.confirm.setChecked(False)
         self.before.setPixmap(QPixmap())
@@ -380,16 +438,109 @@ class WatermarkDialog(FramelessDraggableDialog):
         return {page: tuple(ids) for page, ids in result.items()}
 
     def _pending_pages(self):
-        return [page for page, ids in self._page_selections().items()
-                if self._viewed_pages.get(page) != ids]
+        page_selections = self._page_selections()
+        if not page_selections or self.analysis is None:
+            return []
+        selected = set(self.selected_ids())
+        selected_items = [c for c in self.analysis.candidates if c.id in selected]
+        required_pages = set()
+        for item in selected_items:
+            if not item.signature or item.signature not in self._batch_signatures:
+                required_pages.add(item.page)
+        for sig in self._batch_signatures:
+            sig_pages = sorted({item.page for item in selected_items if item.signature == sig})
+            if len(sig_pages) >= 3:
+                required_pages.update((sig_pages[0], sig_pages[-1]))
+            else:
+                required_pages.update(sig_pages)
+        return [page for page in sorted(required_pages)
+                if self._viewed_pages.get(page) != page_selections.get(page)]
+
+    def _current_similar_signature(self):
+        if self.analysis is None:
+            return ''
+        current = self.objects.currentItem()
+        if current is None:
+            return ''
+        cand = current.data(2, Qt.UserRole)
+        if cand is None or not cand.signature:
+            return ''
+        count = sum(1 for item in self.analysis.candidates if item.signature == cand.signature)
+        return cand.signature if count >= 2 else ''
+
+    def _apply_filters(self, *_args):
+        query = self.txt_filter.text().strip().lower()
+        kind_filter = self.combo_kind.currentData()
+        only_current = self.cb_current_page_only.isChecked()
+        current_page = self.page_number.value() - 1
+        for i in range(self.objects.topLevelItemCount()):
+            item = self.objects.topLevelItem(i)
+            cand = item.data(2, Qt.UserRole)
+            if cand is None:
+                continue
+            visible = True
+            if query:
+                haystack = f'{cand.label} {cand.detail} {cand.kind}'.lower()
+                if query not in haystack:
+                    visible = False
+            if visible and kind_filter == 'likely':
+                visible = bool(cand.watermark_likely)
+            elif visible and kind_filter not in (None, 'all'):
+                visible = cand.kind == kind_filter
+            if visible and only_current:
+                visible = cand.page == current_page
+            item.setHidden(not visible)
+
+    def _select_similar(self):
+        sig = self._current_similar_signature()
+        if not sig or self._busy():
+            return
+        pages = []
+        self.objects.blockSignals(True)
+        for i in range(self.objects.topLevelItemCount()):
+            item = self.objects.topLevelItem(i)
+            cand = item.data(2, Qt.UserRole)
+            if cand is not None and cand.signature == sig:
+                item.setCheckState(0, Qt.Checked)
+                pages.append(cand.page)
+        self.objects.blockSignals(False)
+        self._batch_signatures.add(sig)
+        self.confirm.setChecked(False)
+        self._preview_key = None
+        self._update_objects_summary()
+        unique_pages = sorted(set(pages))
+        if len(unique_pages) >= 3:
+            self._set_status(
+                f'已跨 {len(unique_pages)} 页勾选同类对象，请抽检首尾两页（第 {unique_pages[0] + 1} 页与第 {unique_pages[-1] + 1} 页）并确认。',
+                'info',
+            )
+        self._queue_preview()
+        self._update_actions()
+
+    def _unselect_all(self):
+        if self._busy():
+            return
+        self.objects.blockSignals(True)
+        for i in range(self.objects.topLevelItemCount()):
+            self.objects.topLevelItem(i).setCheckState(0, Qt.Unchecked)
+        self.objects.blockSignals(False)
+        self._batch_signatures.clear()
+        self.confirm.setChecked(False)
+        self._preview_key = None
+        self._update_objects_summary()
+        self._queue_preview()
+        self._update_actions()
 
     def _update_actions(self, *_args):
         busy = self._busy()
         for widget in (self.txt_source, self.txt_pages, self.btn_source, self.btn_analyze,
-                       self.objects, self.page_number, self.confirm, self.btn_close_dialog):
+                       self.objects, self.page_number, self.confirm, self.btn_close_dialog,
+                       self.txt_filter, self.combo_kind, self.cb_current_page_only):
             widget.setEnabled(not busy)
         self.btn_cancel.setEnabled(busy)
         self.btn_preview.setEnabled(not busy and self.analysis is not None)
+        self.btn_select_similar.setEnabled(not busy and bool(self._current_similar_signature()))
+        self.btn_unselect_all.setEnabled(not busy and bool(self.selected_ids()))
         self.btn_save.setEnabled(not busy and self.analysis is not None and
                                  bool(self.selected_ids()) and self.confirm.isChecked() and
                                  not self._pending_pages())
@@ -455,10 +606,14 @@ class WatermarkDialog(FramelessDraggableDialog):
         self.lbl_notes.setToolTip('\n'.join(analysis.notes))
         self.lbl_notes.setVisible(bool(note_text))
         self._update_objects_summary()
+        self._apply_filters()
         self._set_status(f'找到 {len(analysis.candidates)} 个可选对象，均未勾选。勾选后查看右侧变化。', 'muted')
         self._queue_preview()
 
     def _selection_changed(self, item, _column):
+        cand = item.data(2, Qt.UserRole)
+        if cand is not None and cand.signature in self._batch_signatures and item.checkState(0) != Qt.Checked:
+            self._batch_signatures.discard(cand.signature)
         self.confirm.setChecked(False)
         self._preview_key = None
         self._update_objects_summary()
@@ -469,6 +624,7 @@ class WatermarkDialog(FramelessDraggableDialog):
     def _focus_item(self, current, _previous):
         if current is not None:
             self.page_number.setValue(current.data(1, Qt.UserRole) + 1)
+        self._update_actions()
 
     def _queue_preview(self, *_args):
         if self.analysis is not None:

@@ -1008,6 +1008,13 @@ QMenu::item:disabled { color: $text_faint; }
     border-top-right-radius: 7px;
 }
 #watermarkPanelHeader QLabel { background: transparent; border: none; }
+#watermarkFilterBar {
+    background-color: $surface_alt;
+    border: none;
+    border-bottom: 1px solid $border;
+}
+#watermarkFilterBar QLineEdit { min-height: 16px; padding: 4px 8px; }
+#watermarkFilterBar QComboBox { min-height: 24px; padding: 2px 24px 2px 8px; }
 #watermarkPreviewPane { background: transparent; border: none; }
 #watermarkPreviewTitle { color: $text; font-size: 12px; font-weight: 700; border: none; background: transparent; }
 #watermarkPreviewTitle[accent="after"] { color: $primary_text; }

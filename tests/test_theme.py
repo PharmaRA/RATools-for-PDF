@@ -265,6 +265,7 @@ class ThemeStartupTests(unittest.TestCase):
             "#modeSegContainer",
             "#segmentedContainer",
             "#watermarkPanelCard",
+            "#watermarkFilterBar",
             "#watermarkPreviewScroll",
             "#watermarkConfirmCard",
         ):
@@ -274,6 +275,7 @@ class ThemeStartupTests(unittest.TestCase):
         for selector in (
             "QTreeWidget::indicator",
             "#watermarkPanelCard",
+            "#watermarkFilterBar",
             "#watermarkPreviewScroll",
             "#watermarkConfirmCard",
         ):
