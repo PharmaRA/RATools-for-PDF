@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QScrollArea
+from shiboken6 import isValid
 
 from ratools_pdf.ui.main_window import MainWindow
 
@@ -21,9 +22,10 @@ class WindowPlacementTests(unittest.TestCase):
         self.window = MainWindow(settings_path=str(Path(self.temp.name) / "settings.ini"))
 
     def tearDown(self):
-        self.window.close()
-        self.window.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        if isValid(self.window):
+            self.window.close()
+            self.window.deleteLater()
+            QCoreApplication.sendPostedEvents(self.window, QEvent.DeferredDelete)
         self.temp.cleanup()
 
     def show_in_work_area(self, available):
@@ -83,6 +85,29 @@ class WindowPlacementTests(unittest.TestCase):
         self.assertGreater(scroll.horizontalScrollBar().maximum(), 0)
         self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
         self.assertTrue(scroll.widget().isAncestorOf(self.window.btn_start))
+
+    def test_startup_placement_runs_deferred_correction_for_live_window(self):
+        with patch.object(self.window, "_finish_startup_placement",
+                          wraps=self.window._finish_startup_placement) as finish:
+            self.window.show()
+            self.assertEqual(finish.call_count, 1)
+            self.app.processEvents()
+            self.assertEqual(finish.call_count, 2)
+
+    def test_destroyed_window_cancels_pending_startup_placement(self):
+        with patch.object(self.window, "_finish_startup_placement",
+                          wraps=self.window._finish_startup_placement) as finish, \
+                patch("sys.excepthook") as exception_hook:
+            self.window.show()
+            self.assertEqual(finish.call_count, 1)
+            self.window.close()
+            self.window.deleteLater()
+            QCoreApplication.sendPostedEvents(self.window, QEvent.DeferredDelete)
+            self.assertFalse(isValid(self.window))
+            self.app.processEvents()
+            self.app.processEvents()
+            exception_hook.assert_not_called()
+            self.assertEqual(finish.call_count, 1)
 
     def test_reshow_and_theme_change_preserve_user_position(self):
         self.show_in_work_area(QRect(0, 0, 1920, 1040))

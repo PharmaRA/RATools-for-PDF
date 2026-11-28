@@ -92,7 +92,12 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertEqual(command[3], 'status')
             return status.encode('utf-8')
 
-        with patch.object(api.subprocess, 'check_output', side_effect=git_output):
+        # Scope the Git stub to this module; platform.platform() may also spawn ver.
+        git_subprocess = SimpleNamespace(
+            check_output=git_output,
+            CREATE_NO_WINDOW=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        with patch.object(api, 'subprocess', git_subprocess):
             return api.source_provenance(root)
 
     def test_source_provenance_includes_actual_dirty_theme_bytes(self):
@@ -118,6 +123,20 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertNotEqual(report['sources']['ratools_pdf/ui/theme.py'],
                                 clean['sources']['ratools_pdf/ui/theme.py'])
             self.assertIn('ratools_pdf/ui/theme.py', report['dirty_paths'])
+
+    def test_source_provenance_git_fixture_preserves_platform_subprocess(self):
+        api = self.api()
+
+        def platform_probe():
+            # Python 3.11 on Windows may invoke ver while collecting platform data.
+            return subprocess.check_output('ver', shell=True, text=True).strip()
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(subprocess, 'check_output', return_value='Windows test platform\n') as probe, \
+                patch.object(api.platform, 'platform', side_effect=platform_probe):
+            report = self.fixture_provenance(api, Path(directory), '')
+            self.assertEqual(report['platform'], 'Windows test platform')
+            probe.assert_called_once_with('ver', shell=True, text=True)
 
     def test_artifact_verification_detects_changed_bytes_and_extra_files(self):
         api = self.api()

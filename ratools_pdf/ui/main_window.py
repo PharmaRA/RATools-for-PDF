@@ -1075,8 +1075,8 @@ class MainWindow(QMainWindow):
         # 此时原生窗口已创建，避免构造期 winId() 提前固定窗口位置。
         self.apply_native_title_bar_theme()
         self._finish_startup_placement()
-        # Windows 在首次显示时还会更新 DPI/非客户区尺寸，下一轮再校正一次。
-        QTimer.singleShot(0, self._finish_startup_placement)
+        # Windows 首次显示后需再校正；绑定窗口上下文，销毁时取消待执行回调。
+        QTimer.singleShot(0, self, self._finish_startup_placement)
 
     def _finish_startup_placement(self):
         if not self.isVisible() or self.isMinimized() or self.isMaximized() or self.isFullScreen():

@@ -26,7 +26,8 @@
     "items": [
       { "slug": "manual/profiles", "label": "预设与配置管理" },
       { "slug": "manual/data-exchange", "label": "书签与链接数据交换" },
-      { "slug": "manual/security", "label": "安全中心" }
+      { "slug": "manual/security", "label": "安全中心" },
+      { "slug": "manual/watermarks", "label": "去除水印" }
     ]
   },
   {
