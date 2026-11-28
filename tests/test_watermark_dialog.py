@@ -225,3 +225,19 @@ class WatermarkDialogTests(unittest.TestCase):
         self.assertFalse(after_pixmap.isNull())
         self.assertLessEqual(before_pixmap.width(), max(320, self.dialog.before_scroll.viewport().width()))
         self.assertLessEqual(after_pixmap.width(), max(320, self.dialog.after_scroll.viewport().width()))
+
+    def test_objects_tree_shows_readable_labels_and_likely_watermark_badge(self):
+        with fitz.open() as doc:
+            p = doc.new_page()
+            p.insert_text((30, 80), 'BODY TEXT', fontsize=12)
+            p.insert_text((30, 140), 'DRAFT', fontsize=24, fill_opacity=0.4)
+            doc.save(self.source)
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.assertEqual(self.dialog.objects.topLevelItemCount(), 2)
+        body_item = self.dialog.objects.topLevelItem(0)
+        draft_item = self.dialog.objects.topLevelItem(1)
+        self.assertEqual('文字', body_item.text(2))
+        self.assertIn('BODY TEXT', body_item.text(3))
+        self.assertEqual('文字 · 疑似', draft_item.text(2))
+        self.assertIn('DRAFT', draft_item.text(3))

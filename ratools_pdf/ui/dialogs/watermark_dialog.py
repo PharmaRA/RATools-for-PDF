@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
@@ -427,13 +427,19 @@ class WatermarkDialog(FramelessDraggableDialog):
 
     def _analyzed(self, analysis):
         self.analysis = analysis
+        pal = active_palette()
         self.objects.blockSignals(True)
         for candidate in analysis.candidates:
-            item = QTreeWidgetItem(['', str(candidate.page + 1), candidate.kind, candidate.label])
+            kind_text = f'{candidate.kind} · 疑似' if candidate.watermark_likely else candidate.kind
+            item = QTreeWidgetItem(['', str(candidate.page + 1), kind_text, candidate.label])
             item.setData(0, Qt.UserRole, candidate.id)
             item.setData(1, Qt.UserRole, candidate.page)
+            item.setData(2, Qt.UserRole, candidate)
             item.setTextAlignment(1, Qt.AlignCenter)
-            item.setToolTip(3, candidate.label)
+            if candidate.watermark_likely:
+                item.setForeground(2, QColor(pal.primary_text))
+            tip = f'{candidate.label}\n{candidate.detail}' if candidate.detail else candidate.label
+            item.setToolTip(3, tip)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(0, Qt.Unchecked)
             self.objects.addTopLevelItem(item)

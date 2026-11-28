@@ -308,6 +308,30 @@ class WatermarkTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual(len(list(self.root.glob('.ratools-watermark-*'))), 1)
 
+    def test_readable_labels_fingerprints_and_likely_watermark_flags(self):
+        doc = self.document()
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 24, 16), False)
+        pix.clear_with(120)
+        img_xref = doc[0].insert_image(fitz.Rect(20, 20, 80, 60), pixmap=pix)
+        doc[0].insert_text((30, 120), 'BODY PARAGRAPH', fontsize=12)
+        doc[0].insert_text((40, 170), 'CONFIDENTIAL', fontsize=22, fill_opacity=0.35)
+        doc.new_page(width=300, height=220)
+        doc[1].insert_image(fitz.Rect(20, 20, 80, 60), xref=img_xref)
+        doc[1].insert_text((30, 120), 'PAGE TWO BODY', fontsize=12)
+        analysis = self.analyze(doc)
+
+        text_items = [c for c in analysis.candidates if c.kind == '文字']
+        self.assertTrue(any('CONFIDENTIAL' in c.label and c.watermark_likely for c in text_items))
+        body_item = next(c for c in text_items if 'BODY PARAGRAPH' in c.label)
+        self.assertFalse(body_item.watermark_likely)
+        self.assertTrue(body_item.bbox)
+
+        img_items = [c for c in analysis.candidates if c.kind == '图片']
+        self.assertEqual(len(img_items), 2)
+        self.assertEqual(img_items[0].signature, img_items[1].signature)
+        self.assertTrue(all('24×16' in c.label and c.watermark_likely for c in img_items))
+        self.assertTrue(all('跨 2 页重复' in c.detail for c in img_items))
+
 
 if __name__ == '__main__':
     unittest.main()

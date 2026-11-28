@@ -4,8 +4,9 @@ No rectangle redaction, shared resource replacement, or image reconstruction.
 Analysis owns immutable input bytes; preview and export apply the same edits.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
+import math
 import os
 import re
 import uuid
@@ -30,6 +31,10 @@ class Candidate:
     end: int = 0
     replacement: bytes = b''
     annot_xrefs: tuple = ()
+    signature: str = ''
+    detail: str = ''
+    bbox: tuple = ()
+    watermark_likely: bool = False
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ class Analysis:
     pages: tuple
     candidates: tuple
     notes: tuple
+    page_sizes: tuple = ()
 
 
 def parse_pages(expression, page_count):
@@ -83,6 +89,137 @@ def _annotation_refs(doc, page):
 
 _PAINT = {'S', 's', 'f', 'F', 'f*', 'B', 'B*', 'b', 'b*'}
 _KNOWN = set('q Q cm w J j M d ri i gs m l c v y h re W W* n BT ET Tc Tw Tz TL Tf Tr Ts Td TD Tm T* Tj TJ SC SCN sc scn G g RG rg K k CS cs Do BMC BDC EMC MP DP'.split()) | _PAINT | {"'", '"'}
+_WATERMARK_KEYWORDS = (
+    'watermark', 'draft', 'confidential', 'sample', 'copy', 'void', 'internal',
+    '水印', '草稿', '机密', '保密', '绝密', '样稿', '内部', '受控', '副本', '作废', '仅供',
+)
+
+
+def _truncate_text(text, limit=22):
+    cleaned = ' '.join((text or '').split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit] + '…'
+
+
+def _has_watermark_keyword(text):
+    lowered = (text or '').lower()
+    return any(keyword in lowered for keyword in _WATERMARK_KEYWORDS)
+
+
+def _parse_numbers(command):
+    return [float(val) for val in re.findall(r'[-+]?(?:\d*\.\d+|\d+)', command)]
+
+
+def _extract_pdf_literal_text(command):
+    parts = []
+    index = 0
+    while index < len(command):
+        if command[index] == '(':
+            depth = 1
+            index += 1
+            buf = []
+            while index < len(command) and depth:
+                ch = command[index]
+                if ch == '\\' and index + 1 < len(command):
+                    nxt = command[index + 1]
+                    if nxt in 'nrtbf':
+                        buf.append({'n': '\n', 'r': '\r', 't': '\t', 'b': '\b', 'f': '\f'}[nxt])
+                        index += 2
+                    elif nxt in '()\\':
+                        buf.append(nxt)
+                        index += 2
+                    elif nxt in '01234567':
+                        oct_digits = nxt
+                        j = index + 2
+                        while j < len(command) and len(oct_digits) < 3 and command[j] in '01234567':
+                            oct_digits += command[j]
+                            j += 1
+                        buf.append(chr(int(oct_digits, 8)))
+                        index = j
+                    else:
+                        index += 2
+                elif ch == '(':
+                    depth += 1
+                    buf.append(ch)
+                    index += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth:
+                        buf.append(ch)
+                    index += 1
+                else:
+                    buf.append(ch)
+                    index += 1
+            parts.append(''.join(buf))
+        else:
+            index += 1
+    return ''.join(parts)
+
+
+def _extgstate_alphas(doc, page):
+    alphas = {}
+    kind, val = doc.xref_get_key(page.xref, 'Resources/ExtGState')
+    if kind == 'xref':
+        val = doc.xref_object(int(val.split()[0]), compressed=True)
+    elif kind != 'dict':
+        return alphas
+    for name, ref_id in re.findall(r'/([^\s/<>\[\]()]+)\s+(\d+)\s+\d+\s+R', val):
+        try:
+            obj = doc.xref_object(int(ref_id), compressed=True)
+        except Exception:
+            continue
+        ca_fill = re.search(r'/ca\s+([0-9.]+)', obj)
+        ca_stroke = re.search(r'/CA\s+([0-9.]+)', obj)
+        values = [float(m.group(1)) for m in (ca_fill, ca_stroke) if m]
+        if values:
+            alphas[name] = min(values)
+    for name, body in re.findall(r'/([^\s/<>\[\]()]+)\s*<<([^>]*)>>', val):
+        ca_fill = re.search(r'/ca\s+([0-9.]+)', body)
+        ca_stroke = re.search(r'/CA\s+([0-9.]+)', body)
+        values = [float(m.group(1)) for m in (ca_fill, ca_stroke) if m]
+        if values:
+            alphas[name] = min(values)
+    return alphas
+
+
+def _match_text_trace(traces, used, origin_pt, literal_text):
+    best_idx = None
+    best_dist = 18.0
+    for idx, trace in enumerate(traces):
+        if idx in used:
+            continue
+        chars = trace.get('chars') or ()
+        if not chars:
+            continue
+        trace_origin = fitz.Point(chars[0][2])
+        dist = abs(trace_origin - origin_pt)
+        if dist <= best_dist:
+            best_dist = dist
+            best_idx = idx
+    if best_idx is None and literal_text:
+        norm = ''.join(literal_text.split())
+        if norm:
+            for idx, trace in enumerate(traces):
+                if idx in used:
+                    continue
+                trace_text = ''.join(chr(ch[0]) for ch in trace.get('chars') or ())
+                if ''.join(trace_text.split()) == norm:
+                    best_idx = idx
+                    break
+    if best_idx is not None:
+        used.add(best_idx)
+        return traces[best_idx]
+    return None
+
+
+def _round_bbox(rect):
+    return (round(float(rect.x0), 2), round(float(rect.y0), 2),
+            round(float(rect.x1), 2), round(float(rect.y1), 2))
+
+
+def _matrix_angle_deg(matrix):
+    return abs(math.degrees(math.atan2(matrix.b, matrix.a)))
 
 
 def _painting_candidates(doc, page):
@@ -99,27 +236,48 @@ def _painting_candidates(doc, page):
     resources = {}
     for item in page.get_images(full=True):
         if item[-1] == 0:
-            resources[item[7]] = ('图片', item[0])
-    for xref, name, invoker, _bbox in page.get_xobjects():
+            resources[item[7]] = ('图片', item[0], item[2], item[3])
+    for xref, name, invoker, raw_bbox in page.get_xobjects():
         if invoker == 0:
-            resources[name] = ('绘图／组合对象', xref)
+            resources[name] = ('绘图／组合对象', xref, raw_bbox)
+
+    page_matrix = page.transformation_matrix
+    ext_alphas = _extgstate_alphas(doc, page)
+    traces = page.get_texttrace()
+    used_traces = set()
+    image_rects = {}
+    image_used = {}
 
     candidates = []
     stack, marked = [], 0
     render_mode = 0
+    ctm = fitz.Identity
+    alpha = 1.0
+    tm = fitz.Identity
+    tlm = fitz.Identity
+    text_leading = 0.0
     active_text = None
     path_active = False
+    path_points = []
     notes = set()
     for operator, start, end in operations:
         if operator not in _KNOWN:
             raise WatermarkError('包含首版不支持的绘制指令，已跳过该页内容对象。')
         command = text[start:end]
         if operator == 'q':
-            stack.append(render_mode)
+            stack.append((render_mode, fitz.Matrix(ctm), alpha))
         elif operator == 'Q':
             if not stack:
                 raise WatermarkError('图形状态不平衡。')
-            render_mode = stack.pop()
+            render_mode, ctm, alpha = stack.pop()
+        elif operator == 'cm':
+            nums = _parse_numbers(command)
+            if len(nums) >= 6:
+                ctm = fitz.Matrix(*nums[-6:]) * ctm
+        elif operator == 'gs':
+            match = re.search(r'/([^\s/<>\[\]()]+)\s+gs', command)
+            if match and match[1] in ext_alphas:
+                alpha = min(alpha, ext_alphas[match[1]])
         elif operator in ('BMC', 'BDC'):
             marked += 1
         elif operator == 'EMC':
@@ -134,19 +292,79 @@ def _painting_candidates(doc, page):
         elif operator == 'BT':
             if active_text is not None:
                 raise WatermarkError('文字对象嵌套。')
+            tm = fitz.Identity
+            tlm = fitz.Identity
+            text_leading = 0.0
             active_text = []
+        elif operator == 'Tm':
+            nums = _parse_numbers(command)
+            if len(nums) >= 6:
+                tm = fitz.Matrix(*nums[-6:])
+                tlm = fitz.Matrix(tm)
+        elif operator in ('Td', 'TD'):
+            nums = _parse_numbers(command)
+            if len(nums) >= 2:
+                tx, ty = nums[-2], nums[-1]
+                if operator == 'TD':
+                    text_leading = -ty
+                tlm = fitz.Matrix(1, 0, 0, 1, tx, ty) * tlm
+                tm = fitz.Matrix(tlm)
+        elif operator == 'TL':
+            nums = _parse_numbers(command)
+            if nums:
+                text_leading = nums[-1]
+        elif operator == 'T*':
+            tlm = fitz.Matrix(1, 0, 0, 1, 0.0, -text_leading) * tlm
+            tm = fitz.Matrix(tlm)
         elif operator in ('Tj', 'TJ', "'", '"'):
             if active_text is None:
                 raise WatermarkError('文字绘制缺少完整文字对象。')
-            active_text.append((operator, start, end, render_mode))
+            active_text.append((operator, start, end, render_mode, fitz.Matrix(tm), fitz.Matrix(ctm), alpha, command))
         elif operator == 'ET':
             if active_text is None:
                 raise WatermarkError('文字对象不平衡。')
             # Leave text/graphics state instructions intact. With just one show,
             # dropping Tj/TJ cannot shift subsequent text within this BT/ET.
             if len(active_text) == 1 and active_text[0][0] in ('Tj', 'TJ') and active_text[0][3] in (0, 1, 2):
-                _, begin, finish, _ = active_text[0]
-                candidates.append(('文字', '独立文字对象', begin, finish, b''))
+                _, begin, finish, _, show_tm, show_ctm, show_alpha, show_cmd = active_text[0]
+                literal = _extract_pdf_literal_text(show_cmd)
+                origin_pt = fitz.Point(0, 0) * show_tm * show_ctm * page_matrix
+                trace = _match_text_trace(traces, used_traces, origin_pt, literal)
+                snippet = ''
+                bbox = ()
+                likely = False
+                detail_parts = []
+                if trace is not None:
+                    snippet = ''.join(chr(ch[0]) for ch in trace.get('chars') or ()).strip()
+                    bbox = _round_bbox(fitz.Rect(trace['bbox']))
+                    trace_opacity = float(trace.get('opacity', 1.0))
+                    dir_vec = trace.get('dir', (1.0, 0.0))
+                    angle = abs(math.degrees(math.atan2(dir_vec[1], dir_vec[0])))
+                    size_val = round(float(trace.get('size', 0.0)), 1)
+                    if size_val > 0:
+                        detail_parts.append(f'字号 {size_val:g}')
+                    if angle > 2.0 and abs(angle - 90.0) > 2.0 and abs(angle - 180.0) > 2.0:
+                        detail_parts.append(f'旋转 {round(angle)}°')
+                        likely = True
+                    if trace_opacity < 0.95 or show_alpha < 0.95:
+                        detail_parts.append(f'透明度 {round(min(trace_opacity, show_alpha) * 100)}%')
+                        likely = True
+                else:
+                    snippet = literal.strip()
+                    angle = _matrix_angle_deg(show_tm * show_ctm)
+                    if angle > 2.0 and abs(angle - 90.0) > 2.0 and abs(angle - 180.0) > 2.0:
+                        detail_parts.append(f'旋转 {round(angle)}°')
+                        likely = True
+                    if show_alpha < 0.95:
+                        detail_parts.append(f'透明度 {round(show_alpha * 100)}%')
+                        likely = True
+
+                short = _truncate_text(snippet)
+                if _has_watermark_keyword(snippet):
+                    likely = True
+                label = f'文字“{short}”' if short else '独立文字对象'
+                signature = f'text:{" ".join(snippet.split())[:40]}' if snippet else ''
+                candidates.append(('文字', label, begin, finish, b'', signature, ' · '.join(detail_parts), bbox, likely))
             elif active_text:
                 notes.add('部分文字包含多次绘制、隐藏文字或裁剪文字，未列为候选。')
             active_text = None
@@ -156,25 +374,82 @@ def _painting_candidates(doc, page):
             match = re.fullmatch(r'\s*/([^\s/<>\[\]()]+)\s+Do', command)
             if not match or match[1] not in resources:
                 raise WatermarkError('无法可靠定位绘图资源。')
-            kind, xref = resources[match[1]]
+            res_name = match[1]
+            info = resources[res_name]
+            kind, xref = info[0], info[1]
             if kind == '图片':
-                placements = page.get_image_rects(xref)
+                _, _, img_w, img_h = info
+                placements = image_rects.setdefault(xref, page.get_image_rects(xref))
                 if any((rect & page.rect).get_area() >= page.rect.get_area() * .9 for rect in placements):
                     notes.add('覆盖整页的图片未列为候选；无法从扫描图像中分离水印。')
                     continue
-            candidates.append((kind, kind + '对象', start, end, b''))
-        elif operator in ('m', 're'):
-            path_active = True
+                occ = image_used.get(xref, 0)
+                image_used[xref] = occ + 1
+                if occ < len(placements):
+                    bbox = _round_bbox(placements[occ])
+                else:
+                    bbox = _round_bbox(fitz.Rect(0, 0, 1, 1) * ctm * page_matrix)
+                label = f'图片 /{res_name} ({img_w}×{img_h})'
+                detail_parts = [f'{img_w}×{img_h} px']
+                likely = alpha < 0.95
+                if alpha < 0.95:
+                    detail_parts.append(f'透明度 {round(alpha * 100)}%')
+                candidates.append((kind, label, start, end, b'', f'img:{xref}', ' · '.join(detail_parts), bbox, likely))
+            else:
+                _, _, raw_bbox = info
+                form_rect = fitz.Rect(raw_bbox) * ctm * page_matrix
+                bbox = _round_bbox(form_rect) if not form_rect.is_empty else ()
+                label = f'组合对象 /{res_name} ({round(form_rect.width)}×{round(form_rect.height)})'
+                likely = alpha < 0.95 or _has_watermark_keyword(res_name)
+                detail_parts = []
+                if not form_rect.is_empty:
+                    detail_parts.append(f'{round(form_rect.width)}×{round(form_rect.height)} pt')
+                if alpha < 0.95:
+                    detail_parts.append(f'透明度 {round(alpha * 100)}%')
+                try:
+                    form_obj = doc.xref_object(xref, compressed=True)
+                    if '/Watermark' in form_obj or _has_watermark_keyword(form_obj):
+                        likely = True
+                except Exception:
+                    pass
+                candidates.append((kind, label, start, end, b'', f'form:{xref}', ' · '.join(detail_parts), bbox, likely))
+        elif operator in ('m', 're', 'l', 'c', 'v', 'y'):
+            nums = _parse_numbers(command)
+            if operator == 're' and len(nums) >= 4:
+                rx, ry, rw, rh = nums[-4:]
+                path_points.extend([(rx, ry), (rx + rw, ry + rh)])
+                path_active = True
+            elif operator == 'm' and len(nums) >= 2:
+                path_points.append((nums[-2], nums[-1]))
+                path_active = True
+            elif operator in ('l', 'c', 'v', 'y') and len(nums) >= 2:
+                for i in range(0, len(nums) - 1, 2):
+                    path_points.append((nums[i], nums[i + 1]))
         elif operator in _PAINT:
             if active_text is not None:
                 raise WatermarkError('文字和路径混排，首版不支持。')
             if path_active:
                 # n ends the path without painting, preserving graphics state
                 # and any clipping operation that other content depends on.
-                candidates.append(('绘图', '独立路径对象', start, end, b'n'))
+                bbox = ()
+                label = '独立路径对象'
+                signature = ''
+                if path_points:
+                    mapped = [fitz.Point(px, py) * ctm * page_matrix for px, py in path_points]
+                    xs = [p.x for p in mapped]
+                    ys = [p.y for p in mapped]
+                    rect = fitz.Rect(min(xs), min(ys), max(xs), max(ys))
+                    bbox = _round_bbox(rect)
+                    w, h = round(rect.width), round(rect.height)
+                    label = f'绘图路径 ({w}×{h})'
+                    signature = f'path:{round(rect.x0)}:{round(rect.y0)}:{w}:{h}'
+                detail = f'透明度 {round(alpha * 100)}%' if alpha < 0.95 else ''
+                candidates.append(('绘图', label, start, end, b'n', signature, detail, bbox, alpha < 0.95))
             path_active = False
+            path_points = []
         elif operator == 'n':
             path_active = False
+            path_points = []
     if stack or marked or active_text is not None or path_active:
         raise WatermarkError('内容流存在未闭合状态，已跳过该页内容对象。')
     return candidates, sorted(notes)
@@ -192,6 +467,8 @@ def analyze(path, page_expression='', cancel=None):
         if doc.is_repaired:
             raise WatermarkError('PDF 需要修复，首版不处理已修复读取的文件。')
         pages = parse_pages(page_expression, doc.page_count)
+        page_sizes = tuple((float(doc[idx].rect.width), float(doc[idx].rect.height))
+                           for idx in range(doc.page_count))
         for number in pages:
             _check_cancel(cancel)
             page = doc[number]
@@ -203,20 +480,55 @@ def analyze(path, page_expression='', cancel=None):
                     if annot.xref not in refs:
                         continue
                     related = tuple(x for x in (annot.xref, annot.popup_xref) if x in refs)
-                    candidates.append(Candidate(f'{number}:a:{annot.xref}', number, '批注',
-                                                f'{annot.type[1]} 批注', annot_xrefs=related))
+                    subtype = annot.type[1]
+                    info = annot.info or {}
+                    raw_excerpt = (
+                        info.get('content') or info.get('subject') or info.get('title') or info.get('name') or ''
+                    ).strip()
+                    excerpt = _truncate_text(raw_excerpt)
+                    rect = annot.rect
+                    bbox = _round_bbox(rect)
+                    label = f'{subtype} 批注：{excerpt}' if excerpt else f'{subtype} 批注 ({round(rect.width)}×{round(rect.height)})'
+                    key = ''.join(raw_excerpt.split())[:32] if raw_excerpt else f'{round(rect.x0)}:{round(rect.y0)}:{round(rect.width)}:{round(rect.height)}'
+                    likely = annot.type[0] in (13, 25) or _has_watermark_keyword(f'{subtype} {raw_excerpt}')
+                    candidates.append(Candidate(
+                        f'{number}:a:{annot.xref}', number, '批注', label,
+                        annot_xrefs=related,
+                        signature=f'annot:{subtype}:{key}',
+                        detail=raw_excerpt or f'{round(rect.width)}×{round(rect.height)} pt',
+                        bbox=bbox,
+                        watermark_likely=likely,
+                    ))
             except (ValueError, RuntimeError):
                 notes.append(f'第 {number + 1} 页：批注结构无法安全分离，已跳过。')
             try:
                 paints, skipped = _painting_candidates(doc, page)
-                for index, (kind, label, start, end, replacement) in enumerate(paints):
-                    candidates.append(Candidate(f'{number}:c:{index}', number, kind,
-                                                f'{label} {index + 1}', start, end, replacement))
+                for index, (kind, label, start, end, replacement, signature, detail, bbox, likely) in enumerate(paints):
+                    display_label = f'{label} #{index + 1}' if label == '独立文字对象' else label
+                    candidates.append(Candidate(
+                        f'{number}:c:{index}', number, kind, display_label,
+                        start, end, replacement,
+                        signature=signature, detail=detail, bbox=bbox, watermark_likely=likely,
+                    ))
                 notes.extend(f'第 {number + 1} 页：{note}' for note in skipped)
             except (ValueError, RuntimeError):
                 notes.append(f'第 {number + 1} 页：复杂或不支持的内容流，已跳过文字／图片／绘图候选。')
+
+        signature_pages = {}
+        for item in candidates:
+            if item.signature:
+                signature_pages.setdefault(item.signature, set()).add(item.page)
+        enriched = []
+        for item in candidates:
+            pages_hit = signature_pages.get(item.signature, set())
+            if len(pages) >= 2 and len(pages_hit) >= 2:
+                repeat_note = f'跨 {len(pages_hit)} 页重复'
+                detail = f'{item.detail} · {repeat_note}' if item.detail else repeat_note
+                enriched.append(replace(item, detail=detail, watermark_likely=True))
+            else:
+                enriched.append(item)
         return Analysis(str(path), source, hashlib.sha256(source).hexdigest(),
-                        doc.page_count, pages, tuple(candidates), tuple(notes))
+                        doc.page_count, pages, tuple(enriched), tuple(notes), page_sizes)
 
 
 def _selection(analysis, selected):
