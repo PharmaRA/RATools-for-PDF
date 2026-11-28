@@ -337,3 +337,49 @@ class WatermarkDialogTests(unittest.TestCase):
         self.app.processEvents()
         img_focus_1 = self.dialog.before.pixmap().toImage()
         self.assertNotEqual(img_focus_0, img_focus_1)
+
+    def test_open_output_dir_button_after_save_and_empty_candidates_guidance(self):
+        with fitz.open() as doc:
+            doc.new_page()
+            doc.save(self.source)
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.assertIn('未找到可独立移除的对象', self.dialog.lbl_status.text())
+        self.assertFalse(self.dialog.btn_open_output.isVisible())
+
+        with fitz.open() as doc:
+            doc.new_page().insert_text((30, 80), 'DRAFT')
+            doc.save(self.source)
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.dialog.objects.topLevelItem(0).setCheckState(0, Qt.Checked)
+        self.wait_idle()
+        self.dialog.confirm.setChecked(True)
+        with patch('ratools_pdf.ui.dialogs.watermark_dialog.QFileDialog.getSaveFileName',
+                   return_value=(str(self.output), 'PDF')):
+            self.dialog.btn_save.click()
+        self.wait_idle()
+        self.assertTrue(self.dialog.btn_open_output.isVisible())
+        with patch('ratools_pdf.ui.dialogs.watermark_dialog.os.startfile') as startfile:
+            self.dialog.btn_open_output.click()
+        startfile.assert_called_once_with(str(self.output.parent))
+
+    def test_drag_and_drop_pdf_triggers_analysis(self):
+        from PySide6.QtCore import QMimeData, QPointF, QUrl
+        from PySide6.QtGui import QDropEvent
+
+        dropped = Path(self.temp.name) / 'dropped.pdf'
+        with fitz.open() as doc:
+            doc.new_page().insert_text((30, 80), 'DROPPED WATERMARK')
+            doc.save(dropped)
+
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(dropped))])
+        event = QDropEvent(
+            QPointF(20, 20), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        self.dialog.dropEvent(event)
+        self.wait_idle()
+        self.assertEqual(self.dialog.txt_source.text(), str(dropped))
+        self.assertEqual(self.dialog.objects.topLevelItemCount(), 1)
+        self.assertIn('DROPPED WATERMARK', self.dialog.objects.topLevelItem(0).text(3))

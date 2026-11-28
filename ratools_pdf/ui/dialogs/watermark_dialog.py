@@ -1,5 +1,6 @@
 """Interactive, explicit selection of removable PDF objects."""
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer
@@ -53,7 +54,9 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._focused_candidate = None
         self._syncing_scroll = False
         self._batch_signatures = set()
+        self.last_output_path = ''
         self._generation = 0
+        self.setAcceptDrops(True)
         self._build()
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -315,6 +318,17 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._set_status('选择文件与页码后，点击“分析对象”。', 'muted')
         footer.addWidget(self.lbl_status, 1)
 
+        self.btn_open_output = QPushButton('打开所在目录')
+        self.btn_open_output.setObjectName('dialogSecondaryBtn')
+        self.btn_open_output.setFixedHeight(34)
+        self.btn_open_output.setCursor(Qt.PointingHandCursor)
+        self.btn_open_output.setIconSize(QSize(14, 14))
+        self.btn_open_output.setIcon(
+            icons.svg_icon('folder_open', pal.text_body, size=14, disabled_color=pal.text_faint)
+        )
+        self.btn_open_output.setVisible(False)
+        self.btn_open_output.clicked.connect(self._open_output_dir)
+
         self.btn_cancel = QPushButton('取消当前操作')
         self.btn_cancel.setObjectName('dialogSecondaryBtn')
         self.btn_cancel.setFixedHeight(34)
@@ -337,6 +351,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         )
         self.btn_save.clicked.connect(self._save)
 
+        footer.addWidget(self.btn_open_output)
         footer.addWidget(self.btn_cancel)
         footer.addWidget(self.btn_close_dialog)
         footer.addWidget(self.btn_save)
@@ -460,6 +475,38 @@ class WatermarkDialog(FramelessDraggableDialog):
         super().resizeEvent(event)
         self._rescale_previews()
 
+    @staticmethod
+    def _dropped_pdf_path(mime_data):
+        if not mime_data or not mime_data.hasUrls():
+            return ''
+        for url in mime_data.urls():
+            if url.isLocalFile():
+                local = url.toLocalFile()
+                if local.lower().endswith('.pdf') and Path(local).is_file():
+                    return str(Path(local))
+        return ''
+
+    def dragEnterEvent(self, event):
+        if not self._busy() and self._dropped_pdf_path(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if not self._busy() and self._dropped_pdf_path(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        pdf_path = self._dropped_pdf_path(event.mimeData()) if not self._busy() else ''
+        if pdf_path:
+            event.acceptProposedAction()
+            self.txt_source.setText(pdf_path)
+            self._analyze()
+        else:
+            super().dropEvent(event)
+
     def _choose_source(self):
         path, _ = QFileDialog.getOpenFileName(self, '选择 PDF', '', 'PDF 文件 (*.pdf)')
         if path:
@@ -477,6 +524,8 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._before_cache.clear()
         self._focused_candidate = None
         self._batch_signatures.clear()
+        self.last_output_path = ''
+        self.btn_open_output.setVisible(False)
         self.objects.clear()
         self.confirm.setChecked(False)
         self.before.setPixmap(QPixmap())
@@ -609,6 +658,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         self.btn_cancel.setEnabled(busy)
         self.btn_preview.setEnabled(not busy and self.analysis is not None)
         self.btn_fit_mode.setEnabled(not busy)
+        self.btn_open_output.setEnabled(not busy and bool(self.last_output_path))
         self.btn_select_similar.setEnabled(not busy and bool(self._current_similar_signature()))
         self.btn_unselect_all.setEnabled(not busy and bool(self.selected_ids()))
         self.btn_save.setEnabled(not busy and self.analysis is not None and
@@ -677,7 +727,10 @@ class WatermarkDialog(FramelessDraggableDialog):
         self.lbl_notes.setVisible(bool(note_text))
         self._update_objects_summary()
         self._apply_filters()
-        self._set_status(f'找到 {len(analysis.candidates)} 个可选对象，均未勾选。勾选后查看右侧变化。', 'muted')
+        if analysis.candidates:
+            self._set_status(f'找到 {len(analysis.candidates)} 个可选对象，均未勾选。勾选后查看右侧变化。', 'muted')
+        else:
+            self._set_status('未找到可独立移除的对象，请查看上方分析提示。', 'muted')
         self._queue_preview()
 
     def _selection_changed(self, item, _column):
@@ -745,12 +798,15 @@ class WatermarkDialog(FramelessDraggableDialog):
                 )
             self._preview_key = selected
             self._viewed_pages[number] = self._page_selections().get(number, ())
-            pending = self._pending_pages()
-            remaining = (' 请继续预览第 ' + ', '.join(str(page + 1) for page in pending) + ' 页。') if pending else ''
-            self._set_status(
-                f'第 {number + 1} 页预览已更新；共选择 {len(selected)} 个对象。' + remaining,
-                'info' if selected else 'muted',
-            )
+            if not self.analysis.candidates:
+                self._set_status('未找到可独立移除的对象，请查看上方分析提示。', 'muted')
+            else:
+                pending = self._pending_pages()
+                remaining = (' 请继续预览第 ' + ', '.join(str(page + 1) for page in pending) + ' 页。') if pending else ''
+                self._set_status(
+                    f'第 {number + 1} 页预览已更新；共选择 {len(selected)} 个对象。' + remaining,
+                    'info' if selected else 'muted',
+                )
 
         self._start(
             lambda cancel=None: watermarks.preview(
@@ -771,12 +827,25 @@ class WatermarkDialog(FramelessDraggableDialog):
         if not path:
             return
         count = len(self.selected_ids())
+
+        def saved(target):
+            self.last_output_path = target
+            self.btn_open_output.setVisible(True)
+            self._set_status(f'已去除 {count} 个所选对象并另存：' + target, 'success')
+
         self._start(
             watermarks.export,
             (self.analysis, self.selected_ids(), path),
-            lambda target: self._set_status(f'已去除 {count} 个所选对象并另存：' + target, 'success'),
+            saved,
             '正在处理、复检并另存…',
         )
+
+    def _open_output_dir(self):
+        if not self.last_output_path:
+            return
+        folder = Path(self.last_output_path).parent
+        if folder.exists():
+            os.startfile(str(folder))
 
     def _cancel(self):
         if self.worker is not None:
