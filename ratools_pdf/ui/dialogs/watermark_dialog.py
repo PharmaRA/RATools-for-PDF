@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
@@ -48,6 +48,10 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._viewed_pages = {}
         self._preview_requested = False
         self._preview_pixmaps = {}
+        self._preview_page = None
+        self._before_cache = {}
+        self._focused_candidate = None
+        self._syncing_scroll = False
         self._batch_signatures = set()
         self._generation = 0
         self._build()
@@ -253,6 +257,15 @@ class WatermarkDialog(FramelessDraggableDialog):
         )
         self.btn_preview.clicked.connect(self._queue_preview)
         controls.addWidget(self.btn_preview)
+        self.btn_fit_mode = QPushButton('适应整页')
+        self.btn_fit_mode.setObjectName('dialogSecondaryBtn')
+        self.btn_fit_mode.setCheckable(True)
+        self.btn_fit_mode.setChecked(True)
+        self.btn_fit_mode.setFixedHeight(28)
+        self.btn_fit_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_fit_mode.setToolTip('开启时按窗口高度完整展示整页；取消勾选时按容器宽度铺满以查看细节')
+        self.btn_fit_mode.toggled.connect(self._rescale_previews)
+        controls.addWidget(self.btn_fit_mode)
         right_layout.addWidget(right_header)
 
         previews_body = QWidget()
@@ -263,6 +276,7 @@ class WatermarkDialog(FramelessDraggableDialog):
         self.after_scroll, self.after = self._image_panel(
             previews_layout, '去除勾选对象后的页面', accent='after'
         )
+        self._bind_scroll_sync()
         right_layout.addWidget(previews_body, 1)
         self.splitter.addWidget(right_card)
 
@@ -375,11 +389,59 @@ class WatermarkDialog(FramelessDraggableDialog):
         selected = len(self.selected_ids())
         self.lbl_objects_summary.setText(f'共 {total} 项 · 已选 {selected} 项')
 
-    @staticmethod
-    def _apply_preview_pixmap(label, scroll_area, pixmap):
+    def _bind_scroll_sync(self):
+        for bar_a, bar_b in (
+            (self.before_scroll.verticalScrollBar(), self.after_scroll.verticalScrollBar()),
+            (self.before_scroll.horizontalScrollBar(), self.after_scroll.horizontalScrollBar()),
+        ):
+            bar_a.valueChanged.connect(lambda val, target=bar_b: self._sync_scrollbar(target, val))
+            bar_b.valueChanged.connect(lambda val, target=bar_a: self._sync_scrollbar(target, val))
+
+    def _sync_scrollbar(self, target_bar, value):
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        try:
+            if target_bar.value() != value:
+                target_bar.setValue(value)
+        finally:
+            self._syncing_scroll = False
+
+    def _apply_preview_pixmap(self, label, scroll_area, pixmap, highlight_candidate=None, page_number=None):
         viewport_width = scroll_area.viewport().width()
+        viewport_height = scroll_area.viewport().height()
         target_width = max(220, viewport_width - 24) if viewport_width >= 100 else 320
-        label.setPixmap(pixmap.scaledToWidth(target_width, Qt.SmoothTransformation))
+        if self.btn_fit_mode.isChecked():
+            target_height = max(220, viewport_height - 20) if viewport_height >= 100 else 440
+            scaled = pixmap.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            scaled = pixmap.scaledToWidth(target_width, Qt.SmoothTransformation)
+
+        if (highlight_candidate is not None and self.analysis is not None
+                and page_number is not None and highlight_candidate.page == page_number
+                and highlight_candidate.bbox and page_number < len(self.analysis.page_sizes)):
+            page_w, page_h = self.analysis.page_sizes[page_number]
+            if page_w > 0 and page_h > 0:
+                highlighted = QPixmap(scaled)
+                sx = highlighted.width() / page_w
+                sy = highlighted.height() / page_h
+                x0, y0, x1, y1 = highlight_candidate.bbox
+                rx = max(1, int(round(x0 * sx)) - 3)
+                ry = max(1, int(round(y0 * sy)) - 3)
+                rw = max(8, int(round((x1 - x0) * sx)) + 6)
+                rh = max(8, int(round((y1 - y0) * sy)) + 6)
+                pal = active_palette()
+                accent = QColor(pal.danger if highlight_candidate.watermark_likely else pal.primary)
+                fill = QColor(accent)
+                fill.setAlpha(36)
+                painter = QPainter(highlighted)
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.setPen(QPen(accent, 2, Qt.DashLine))
+                painter.setBrush(fill)
+                painter.drawRoundedRect(rx, ry, rw, rh, 4, 4)
+                painter.end()
+                scaled = highlighted
+        label.setPixmap(scaled)
 
     def _rescale_previews(self, *_args):
         for key, label, scroll_area in (
@@ -388,7 +450,11 @@ class WatermarkDialog(FramelessDraggableDialog):
         ):
             pixmap = self._preview_pixmaps.get(key)
             if pixmap is not None and not pixmap.isNull():
-                self._apply_preview_pixmap(label, scroll_area, pixmap)
+                highlight = self._focused_candidate if key == 'before' else None
+                self._apply_preview_pixmap(
+                    label, scroll_area, pixmap,
+                    highlight_candidate=highlight, page_number=self._preview_page,
+                )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -407,6 +473,9 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._viewed_pages.clear()
         self._preview_requested = False
         self._preview_pixmaps.clear()
+        self._preview_page = None
+        self._before_cache.clear()
+        self._focused_candidate = None
         self._batch_signatures.clear()
         self.objects.clear()
         self.confirm.setChecked(False)
@@ -539,6 +608,7 @@ class WatermarkDialog(FramelessDraggableDialog):
             widget.setEnabled(not busy)
         self.btn_cancel.setEnabled(busy)
         self.btn_preview.setEnabled(not busy and self.analysis is not None)
+        self.btn_fit_mode.setEnabled(not busy)
         self.btn_select_similar.setEnabled(not busy and bool(self._current_similar_signature()))
         self.btn_unselect_all.setEnabled(not busy and bool(self.selected_ids()))
         self.btn_save.setEnabled(not busy and self.analysis is not None and
@@ -622,8 +692,15 @@ class WatermarkDialog(FramelessDraggableDialog):
         self._update_actions()
 
     def _focus_item(self, current, _previous):
+        self._focused_candidate = current.data(2, Qt.UserRole) if current is not None else None
         if current is not None:
-            self.page_number.setValue(current.data(1, Qt.UserRole) + 1)
+            target_page = current.data(1, Qt.UserRole) + 1
+            if self.page_number.value() != target_page:
+                self.page_number.setValue(target_page)
+            elif self._preview_page == target_page - 1:
+                self._rescale_previews()
+        elif self._preview_page is not None:
+            self._rescale_previews()
         self._update_actions()
 
     def _queue_preview(self, *_args):
@@ -640,13 +717,18 @@ class WatermarkDialog(FramelessDraggableDialog):
         number = self.page_number.value() - 1
         if number not in self.analysis.pages:
             self._preview_pixmaps.clear()
+            self._preview_page = None
             self.before.setPixmap(QPixmap())
             self.after.setPixmap(QPixmap())
             self.before.setText('该页未包含在处理页码中')
             self.after.setText('请切换至处理范围内的页面')
             return
 
+        cached_before = self._before_cache.get(number)
+
         def rendered(images):
+            self._before_cache[number] = images[0]
+            self._preview_page = number
             for key, label, scroll_area, data in zip(
                 ('before', 'after'),
                 (self.before, self.after),
@@ -656,7 +738,11 @@ class WatermarkDialog(FramelessDraggableDialog):
                 image = QPixmap()
                 image.loadFromData(data, 'PNG')
                 self._preview_pixmaps[key] = image
-                self._apply_preview_pixmap(label, scroll_area, image)
+                highlight = self._focused_candidate if key == 'before' else None
+                self._apply_preview_pixmap(
+                    label, scroll_area, image,
+                    highlight_candidate=highlight, page_number=number,
+                )
             self._preview_key = selected
             self._viewed_pages[number] = self._page_selections().get(number, ())
             pending = self._pending_pages()
@@ -666,7 +752,14 @@ class WatermarkDialog(FramelessDraggableDialog):
                 'info' if selected else 'muted',
             )
 
-        self._start(watermarks.preview, (self.analysis, selected, number), rendered, '正在生成前后预览…')
+        self._start(
+            lambda cancel=None: watermarks.preview(
+                self.analysis, selected, number, cancel=cancel, before_png=cached_before
+            ),
+            (),
+            rendered,
+            '正在生成前后预览…',
+        )
 
     def _save(self):
         if not self.btn_save.isEnabled():

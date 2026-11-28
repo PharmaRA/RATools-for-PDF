@@ -299,3 +299,41 @@ class WatermarkDialogTests(unittest.TestCase):
         self.wait_idle()
         self.assertEqual(len(self.dialog.selected_ids()), 0)
         self.assertFalse(self.dialog.btn_save.isEnabled())
+
+    def test_preview_fit_mode_scroll_sync_cache_and_focus_highlight(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=595, height=842)
+            page.insert_text((60, 120), 'BODY TEXT', fontsize=12)
+            page.insert_text((160, 420), 'DRAFT WATERMARK', fontsize=28, fill_opacity=0.4)
+            doc.save(self.source)
+
+        self.dialog.resize(1040, 680)
+        self.app.processEvents()
+        self.dialog.btn_analyze.click()
+        self.wait_idle()
+        self.assertIn(0, self.dialog._before_cache)
+        self.assertTrue(self.dialog.btn_fit_mode.isChecked())
+
+        # 切换到适应宽度模式，宽度应增大
+        fit_page_w = self.dialog.before.pixmap().width()
+        self.dialog.btn_fit_mode.setChecked(False)
+        self.app.processEvents()
+        fit_width_w = self.dialog.before.pixmap().width()
+        self.assertGreaterEqual(fit_width_w, fit_page_w)
+
+        # 验证同步滚动（垂直滚动条若有可滚动范围应同步）
+        v_before = self.dialog.before_scroll.verticalScrollBar()
+        v_after = self.dialog.after_scroll.verticalScrollBar()
+        if v_before.maximum() > 0:
+            v_before.setValue(min(40, v_before.maximum()))
+            self.app.processEvents()
+            self.assertEqual(v_after.value(), v_before.value())
+
+        # 聚焦不同对象时，原始页高亮框应变化
+        self.dialog.objects.setCurrentItem(self.dialog.objects.topLevelItem(0))
+        self.app.processEvents()
+        img_focus_0 = self.dialog.before.pixmap().toImage()
+        self.dialog.objects.setCurrentItem(self.dialog.objects.topLevelItem(1))
+        self.app.processEvents()
+        img_focus_1 = self.dialog.before.pixmap().toImage()
+        self.assertNotEqual(img_focus_0, img_focus_1)

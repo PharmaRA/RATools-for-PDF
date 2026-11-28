@@ -567,13 +567,13 @@ def _pixmap(page, size=1000):
     return page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), colorspace=fitz.csRGB, alpha=False)
 
 
-def preview(analysis, selected, page_number, cancel=None):
+def preview(analysis, selected, page_number, cancel=None, before_png=None):
     if page_number not in analysis.pages:
         raise WatermarkError('预览页面不在所选页码范围内。')
     candidates = [item for item in _selection(analysis, selected) if item.page == page_number]
     _check_cancel(cancel)
     with fitz.open(stream=analysis.source, filetype='pdf') as doc:
-        before = _pixmap(doc[page_number]).tobytes('png')
+        before = before_png if before_png is not None else _pixmap(doc[page_number]).tobytes('png')
         _apply(doc, candidates, cancel)
         after = _pixmap(doc[page_number]).tobytes('png')
     return before, after

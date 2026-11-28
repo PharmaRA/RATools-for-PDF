@@ -332,6 +332,19 @@ class WatermarkTests(unittest.TestCase):
         self.assertTrue(all('24×16' in c.label and c.watermark_likely for c in img_items))
         self.assertTrue(all('跨 2 页重复' in c.detail for c in img_items))
 
+    def test_preview_reuses_cached_before_png_when_provided(self):
+        doc = self.document()
+        doc[0].insert_text((30, 80), 'DRAFT')
+        analysis = self.analyze(doc)
+        before_first, after_first = wm.preview(analysis, (), 0)
+        sentinel = b'cached-before-bytes'
+        before_cached, after_cached = wm.preview(
+            analysis, [analysis.candidates[0].id], 0, before_png=sentinel
+        )
+        self.assertEqual(before_cached, sentinel)
+        self.assertNotEqual(after_cached, before_first)
+        self.assertNotEqual(after_cached, after_first)
+
 
 if __name__ == '__main__':
     unittest.main()
